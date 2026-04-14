@@ -90,6 +90,7 @@ const loginHandler = async (req, res) => {
 
 app.post('/users/login', loginHandler);
 app.post('/api/login', loginHandler);
+app.post('/api/admin/login', loginHandler);
 
 app.get('/users', async (req, res) => {
   const r = await pool.query('SELECT * FROM users');
@@ -115,6 +116,20 @@ app.put('/users/:id', async (req, res) => {
 
 app.get('/orders', async (req, res) => {
   const r = await pool.query('SELECT * FROM orders ORDER BY created_at DESC');
+  res.json(r.rows);
+});
+app.get('/api/pedidos', async (req, res) => {
+  const r = await pool.query('SELECT o.*, u.name as loja_nome FROM orders o LEFT JOIN users u ON o.loja_user=u.username ORDER BY created_at DESC');
+  res.json(r.rows.map(o => ({...o, cliente_nome: o.nome_cliente, status: o.status || 'pendente', valor: o.valor_total})));
+});
+
+app.get('/api/lojas', async (req, res) => {
+  const r = await pool.query("SELECT id, name as nome, address as endereco, phone as telefone, online as ativo FROM users WHERE role='loja'");
+  res.json(r.rows);
+});
+
+app.get('/api/motoboys', async (req, res) => {
+  const r = await pool.query("SELECT id, name as nome, phone as telefone, vehicle as veiculo, online as disponivel FROM users WHERE role='motoboy'");
   res.json(r.rows);
 });
 
