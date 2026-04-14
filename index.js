@@ -5,7 +5,9 @@ const axios = require('axios');
 require('dotenv').config();
 
 const app = express();
-app.use(cors());
+
+app.use(cors({ origin: '*', methods: ['GET','POST','PUT','DELETE','OPTIONS'], allowedHeaders: ['Content-Type','Authorization'] }));
+app.options('*', cors());
 app.use(express.json());
 
 const pool = new Pool({
@@ -13,7 +15,6 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// Init DB
 async function initDB() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
@@ -72,28 +73,27 @@ async function initDB() {
       max_per_motoboy INT DEFAULT 2
     );
     INSERT INTO settings (id) VALUES (1) ON CONFLICT DO NOTHING;
-    INSERT INTO users (username,password,role,name) 
-    VALUES ('admin','admin123','admin','Administrador') 
-    ON CONFLICT DO NOTHING;
+    INSERT INTO users (username,password,role,name) VALUES ('admin','admin123','admin','Administrador') ON CONFLICT DO NOTHING;
   `);
   console.log('DB initialized');
 }
 
-// ROUTES
 app.get('/health', (req, res) => res.json({ ok: true }));
 
-// Users
+const loginHandler = async (req, res) => {
+  const { username, password } = req.body;
+  const r = await pool.query('SELECT * FROM users WHERE username=$1 AND password=$2', [username, password]);
+  if (r.rows.length === 0) return res.status(401).json({ error: 'Invalido' });
+  if (r.rows[0].blocked) return res.status(403).json({ error: 'Bloqueado' });
+  res.json(r.rows[0]);
+};
+
+app.post('/users/login', loginHandler);
+app.post('/api/login', loginHandler);
+
 app.get('/users', async (req, res) => {
   const r = await pool.query('SELECT * FROM users');
   res.json(r.rows);
-});
-
-app.post('/users/login', async (req, res) => {
-  const { username, password } = req.body;
-  const r = await pool.query('SELECT * FROM users WHERE username=$1 AND password=$2', [username, password]);
-  if (r.rows.length === 0) return res.status(401).json({ error: 'Inválido' });
-  if (r.rows[0].blocked) return res.status(403).json({ error: 'Bloqueado' });
-  res.json(r.rows[0]);
 });
 
 app.post('/users', async (req, res) => {
@@ -113,7 +113,6 @@ app.put('/users/:id', async (req, res) => {
   res.json(r.rows[0]);
 });
 
-// Orders
 app.get('/orders', async (req, res) => {
   const r = await pool.query('SELECT * FROM orders ORDER BY created_at DESC');
   res.json(r.rows);
@@ -122,14 +121,8 @@ app.get('/orders', async (req, res) => {
 app.post('/orders', async (req, res) => {
   const d = req.body;
   const r = await pool.query(
-    `INSERT INTO orders (loja_user,loja_name,plataforma,endereco_coleta,endereco_entrega,
-    bairro_destino,nome_cliente,telefone_cliente,cod_pedido,cobrar_cliente,valor_pedido,
-    valor_total,valor_motoboy,comissao,distancia,previsao,obs,status,pending_until)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'pendente',$18) RETURNING *`,
-    [d.loja_user,d.loja_name,d.plataforma,d.endereco_coleta,d.endereco_entrega,
-    d.bairro_destino,d.nome_cliente,d.telefone_cliente,d.cod_pedido,d.cobrar_cliente,
-    d.valor_pedido,d.valor_total,d.valor_motoboy,d.comissao,d.distancia,d.previsao,
-    d.obs, Date.now() + 15000]
+    `INSERT INTO orders (loja_user,loja_name,plataforma,endereco_coleta,endereco_entrega,bairro_destino,nome_cliente,telefone_cliente,cod_pedido,cobrar_cliente,valor_pedido,valor_total,valor_motoboy,comissao,distancia,previsao,obs,status,pending_until) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'pendente',$18) RETURNING *`,
+    [d.loja_user,d.loja_name,d.plataforma,d.endereco_coleta,d.endereco_entrega,d.bairro_destino,d.nome_cliente,d.telefone_cliente,d.cod_pedido,d.cobrar_cliente,d.valor_pedido,d.valor_total,d.valor_motoboy,d.comissao,d.distancia,d.previsao,d.obs,Date.now()+15000]
   );
   res.json(r.rows[0]);
 });
@@ -142,7 +135,6 @@ app.put('/orders/:id', async (req, res) => {
   res.json(r.rows[0]);
 });
 
-// Settings
 app.get('/settings', async (req, res) => {
   const r = await pool.query('SELECT * FROM settings WHERE id=1');
   res.json(r.rows[0]);
@@ -157,7 +149,6 @@ app.put('/settings', async (req, res) => {
   res.json(r.rows[0]);
 });
 
-// Google Maps distance
 app.post('/distance', async (req, res) => {
   const { origin, destination } = req.body;
   try {
@@ -165,12 +156,12 @@ app.post('/distance', async (req, res) => {
       params: { origins: origin, destinations: destination, key: process.env.GOOGLE_MAPS_KEY, mode: 'driving' }
     });
     const el = r.data.rows[0].elements[0];
-    if (el.status !== 'OK') return res.status(400).json({ error: 'Endereço não encontrado' });
-    res.json({ distance_km: (el.distance.value / 1000).toFixed(1), duration_min: Math.ceil(el.duration.value / 60) });
-  } catch(e) {
-    res.status(500).json({ error: e.message });
-  }
+    if (el.status !== 'OK') return res.status(400).json({ error: 'Endereco nao encontrado' });
+    res.json({ distance_km: (el.distance.value/1000).toFixed(1), duration_min: Math.ceil(el.duration.value/60) });
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+app.post('/webhook', (req, res) => { res.json({ ok: true }); });
+
 const PORT = process.env.PORT || 3000;
-initDB().then(() => app.listen(PORT, () => console.log(`FlashDrop backend rodando na porta ${PORT}`)));
+initDB().then(() => app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`)));
