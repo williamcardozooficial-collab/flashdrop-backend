@@ -199,7 +199,6 @@ app.post('/orders', async (req, res) => {
       `🏪 Loja: ${pedido.loja_name || pedido.loja_user}\n` +
       `👤 Cliente: ${pedido.nome_cliente}\n` +
       `📍 Entrega: ${pedido.endereco_entrega}\n` +
-      `💳 Pagamento: ${pedido.tipo_pagamento || 'dinheiro'}\n` +
       `🛵 Motoboy ganha: R$ ${parseFloat(pedido.valor_motoboy).toFixed(2)}\n` +
       `📏 Distância: ${pedido.distancia} km`;
     // Notificar grupo admin se configurado
