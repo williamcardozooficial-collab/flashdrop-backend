@@ -285,4 +285,59 @@ app.post('/distance', async (req, res) => {
 app.post('/webhook', (req, res) => { res.json({ ok: true }); });
 
 const PORT = process.env.PORT || 3000;
-initDB().then(() => app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`)));
+
+// ── JOB: Verificar motoboys que nao chegaram na loja no prazo ──
+const ARRIVE_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutos
+
+async function checkLateArrivals() {
+  try {
+    // Busca pedidos aceitos onde t_aceito existe, t_na_loja ainda nao foi registrado
+    // e ja passou o tempo limite
+    const cutoff = new Date(Date.now() - ARRIVE_TIMEOUT_MS).toISOString();
+    const r = await pool.query(
+      "SELECT * FROM orders WHERE status='aceito' AND t_aceito IS NOT NULL AND t_na_loja IS NULL AND t_aceito < $1",
+      [cutoff]
+    );
+
+    for (const order of r.rows) {
+      console.log(`[JOB] Pedido #${order.id}: motoboy ${order.motoboy_name} nao chegou na loja. Resetando para pendente.`);
+
+      // Reset pedido para pendente, limpa motoboy
+      await pool.query(
+        "UPDATE orders SET status='pendente', motoboy_id=NULL, motoboy_name=NULL, t_aceito=NULL, pending_until=$1 WHERE id=$2",
+        [Date.now() + 15000, order.id]
+      );
+
+      // Notifica grupo e motoboys online
+      if (bot) {
+        const groupId = process.env.TELEGRAM_GROUP_ID;
+        const msgRepost = `⚠️ *Pedido #${order.id} disponível novamente!*\n\n` +
+          `🏪 Loja: ${order.loja_name || order.loja_user}\n` +
+          `🛵 Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}\n` +
+          `📏 Distância: ${order.distancia} km\n\n` +
+          `⏰ Motoboy anterior não chegou no prazo.`;
+
+        if (groupId) {
+          bot.sendMessage(groupId, msgRepost, {parse_mode: 'Markdown'}).catch(() => {});
+        }
+
+        // Notifica motoboys online
+        const motoboys = await pool.query(
+          "SELECT telegram_id FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL"
+        );
+        motoboys.rows.forEach(mb => {
+          bot.sendMessage(mb.telegram_id, msgRepost, {parse_mode: 'Markdown'}).catch(() => {});
+        });
+      }
+    }
+  } catch(e) {
+    console.error('[JOB] Erro ao verificar chegadas:', e.message);
+  }
+}
+
+initDB().then(() => {
+  app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
+  // Roda o job a cada 60 segundos
+  setInterval(checkLateArrivals, 60 * 1000);
+  console.log('[JOB] Verificador de chegada iniciado (60s)');
+});
