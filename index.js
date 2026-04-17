@@ -110,7 +110,7 @@ async function initDB() {
   try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked_until BIGINT DEFAULT 0"); } catch(e) {}
   try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS cpf VARCHAR(14)"); } catch(e) {}
   try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS approved BOOLEAN DEFAULT false"); } catch(e) {}
-  try { await pool.query("UPDATE users SET approved=true WHERE role='admin' OR role='loja'"); } catch(e) {}
+  try { await pool.query("UPDATE users SET approved=true WHERE (approved IS NULL OR approved=false) AND created_at < '2026-04-17 20:00:00'"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS observacao_entrega TEXT"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS telefone_loja VARCHAR(30)"); } catch(e) {}
     try { await pool.query("ALTER TABLE orders ALTER COLUMN motoboy_id TYPE INTEGER USING motoboy_id::INTEGER"); } catch(e) {}
