@@ -195,8 +195,15 @@ app.post('/orders', async (req, res) => {
       "SELECT telegram_id, name FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL"
     );
     const pedido = r.rows[0];
+    // Resolver nome da loja
+    let lojaNome = pedido.loja_name;
+    if (!lojaNome && pedido.loja_user) {
+      const lojaRes = await pool.query("SELECT name FROM users WHERE username=$1", [pedido.loja_user]);
+      if (lojaRes.rows.length > 0) lojaNome = lojaRes.rows[0].name;
+    }
+    lojaNome = lojaNome || pedido.loja_user;
     const msgPedido = `🆕 *Novo Pedido #${pedido.id}*\n\n` +
-      `🏪 Loja: ${pedido.loja_name || pedido.loja_user}\n` +
+      `🏪 Loja: ${lojaNome}\n` +
       `🛵 Motoboy ganha: R$ ${parseFloat(pedido.valor_motoboy).toFixed(2)}\n` +
       `📏 Distância: ${pedido.distancia} km`;
     // Notificar grupo admin se configurado
@@ -311,8 +318,15 @@ async function checkLateArrivals() {
       // Notifica grupo e motoboys online
       if (bot) {
         const groupId = process.env.TELEGRAM_GROUP_ID;
-        const msgRepost = `⚠️ *Pedido #${order.id} disponível novamente!*\n\n` +
-          `🏪 Loja: ${order.loja_name || order.loja_user}\n` +
+        // Resolver nome da loja para repost
+      let lojaRepostNome = order.loja_name;
+      if (!lojaRepostNome && order.loja_user) {
+        const lrRes = await pool.query("SELECT name FROM users WHERE username=$1", [order.loja_user]);
+        if (lrRes.rows.length > 0) lojaRepostNome = lrRes.rows[0].name;
+      }
+      lojaRepostNome = lojaRepostNome || order.loja_user;
+      const msgRepost = `⚠️ *Pedido #${order.id} disponível novamente!*\n\n` +
+          `🏪 Loja: ${lojaRepostNome}\n` +
           `🛵 Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}\n` +
           `📏 Distância: ${order.distancia} km\n\n` +
           `⏰ Motoboy anterior não chegou no prazo.`;
