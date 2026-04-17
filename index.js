@@ -234,14 +234,17 @@ app.put('/orders/:id', async (req, res) => {
           }
           const sets = Object.keys(fields).map((k,i) => `${k}=$${i+2}`).join(',');
           const vals = Object.values(fields);
+          // Busca motoboy_id ANTES do update para uso na penalidade
+          const prevOrderRes = await pool.query('SELECT motoboy_id FROM orders WHERE id=$1', [req.params.id]);
+          const prevMotoboyId = prevOrderRes.rows.length > 0 ? prevOrderRes.rows[0].motoboy_id : null;
           const r = await pool.query(`UPDATE orders SET ${sets} WHERE id=$1 RETURNING *`, [req.params.id, ...vals]);
           const order = r.rows[0];
 
       // Cancelamento pelo motoboy: status volta a pendente e motoboy_id some
-      if (fields.status === 'pendente' && fields.motoboy_id === null && order.motoboy_id) {
+      if (fields.status === 'pendente' && fields.motoboy_id === null && prevMotoboyId) {
         const BLOCK_MS = 10 * 60 * 1000; // 10 minutos
         const blockedUntil = Date.now() + BLOCK_MS;
-        await pool.query('UPDATE users SET blocked_until=$1 WHERE id=$2', [blockedUntil, order.motoboy_id]);
+        await pool.query('UPDATE users SET blocked_until=$1 WHERE id=$2', [blockedUntil, prevMotoboyId]);
       }
 
       if (fields.status === 'entregue' && order.motoboy_id) {
