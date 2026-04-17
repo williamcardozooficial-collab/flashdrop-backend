@@ -239,8 +239,20 @@ app.put('/orders/:id', async (req, res) => {
 
 app.delete('/orders/:id', async (req, res) => {
     try {
-          await pool.query('DELETE FROM orders WHERE id=$1', [req.params.id]);
-          res.json({ ok: true });
+        // Busca o pedido antes de deletar para verificar estorno
+        const orderRes = await pool.query('SELECT * FROM orders WHERE id=$1', [req.params.id]);
+        if (orderRes.rows.length > 0) {
+            const order = orderRes.rows[0];
+            // Se pedido nao foi entregue e tem loja, devolve o valor_total no credito da loja
+            if (order.status !== 'entregue' && order.loja_user) {
+                const valorTotal = parseFloat(order.valor_total) || 0;
+                if (valorTotal > 0) {
+                    await pool.query("UPDATE users SET credit = credit + $1 WHERE username=$2", [valorTotal, order.loja_user]);
+                }
+            }
+        }
+        await pool.query('DELETE FROM orders WHERE id=$1', [req.params.id]);
+        res.json({ ok: true });
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
