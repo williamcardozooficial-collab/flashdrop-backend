@@ -108,6 +108,11 @@ async function initDB() {
                                                                                                                                                                                                                                                                                                                                                   `);
     try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS tipo_pagamento VARCHAR(20) DEFAULT 'dinheiro'"); } catch(e) {}
   try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked_until BIGINT DEFAULT 0"); } catch(e) {}
+  try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS cpf VARCHAR(14)"); } catch(e) {}
+  try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS approved BOOLEAN DEFAULT false"); } catch(e) {}
+  try { await pool.query("UPDATE users SET approved=true WHERE role='admin' OR role='loja'"); } catch(e) {}
+  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS observacao_entrega TEXT"); } catch(e) {}
+  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS telefone_loja VARCHAR(30)"); } catch(e) {}
     try { await pool.query("ALTER TABLE orders ALTER COLUMN motoboy_id TYPE INTEGER USING motoboy_id::INTEGER"); } catch(e) {}
     console.log('DB initialized');
 }
@@ -117,8 +122,9 @@ app.get('/health', (req, res) => res.json({ ok: true }));
 const loginHandler = async (req, res) => {
     const { username, password } = req.body;
     const r = await pool.query('SELECT * FROM users WHERE username=$1 AND password=$2', [username, password]);
-    if (r.rows.length === 0) return res.status(401).json({ error: 'Invalido' });
-    if (r.rows[0].blocked) return res.status(403).json({ error: 'Bloqueado' });
+    if (r.rows.length === 0) return res.status(401).json({ error: 'Usuário ou senha inválidos.' });
+    if (r.rows[0].blocked) return res.status(403).json({ error: 'Conta bloqueada.' });
+    if (r.rows[0].approved === false) return res.status(403).json({ error: 'Cadastro aguardando aprovação do administrador.' });
     res.json(r.rows[0]);
 };
 app.post('/users/login', loginHandler);
@@ -130,6 +136,18 @@ app.get('/users', async (req, res) => {
     res.json(r.rows);
 });
 
+
+
+/* Admin busca usuários pendentes */
+app.get('/users/pending', async (req, res) => {
+    try {
+        const r = await pool.query("SELECT id,username,role,name,address,phone,vehicle,cpf,approved,created_at FROM users WHERE approved=false ORDER BY created_at ASC");
+        res.json(r.rows);
+    } catch(e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 app.get('/users/:id', async (req, res) => {
     try {
           const r = await pool.query('SELECT * FROM users WHERE id=$1', [req.params.id]);
@@ -139,12 +157,71 @@ app.get('/users/:id', async (req, res) => {
 });
 
 app.post('/users', async (req, res) => {
-    const { username, password, role, name, address, phone, vehicle } = req.body;
-    const r = await pool.query(
-          'INSERT INTO users (username,password,role,name,address,phone,vehicle) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *',
-          [username, password, role, name, address, phone, vehicle]
+    try {
+        const { username, password, role, name, address, phone, vehicle, cpf } = req.body;
+        // Validar duplicata de telefone
+        if (phone) {
+            const dupPhone = await pool.query('SELECT id FROM users WHERE phone=$1', [phone]);
+            if (dupPhone.rows.length > 0) return res.status(400).json({ error: 'Telefone já cadastrado.' });
+        }
+        // Validar duplicata de CPF (somente motoboy)
+        if (cpf && role === 'motoboy') {
+            const dupCpf = await pool.query('SELECT id FROM users WHERE cpf=$1', [cpf]);
+            if (dupCpf.rows.length > 0) return res.status(400).json({ error: 'CPF já cadastrado.' });
+        }
+        // Admin cria usuário já aprovado
+        const approved = true;
+        const r = await pool.query(
+            'INSERT INTO users (username,password,role,name,address,phone,vehicle,cpf,approved) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
+            [username, password, role, name, address, phone, vehicle, cpf || null, approved]
         );
-    res.json(r.rows[0]);
+        res.json(r.rows[0]);
+    } catch(e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/* Registro público — fica pendente até admin aprovar */
+app.post('/register', async (req, res) => {
+    try {
+        const { username, password, role, name, address, phone, vehicle, cpf } = req.body;
+        // Validar formato CPF: 000.000.000-00
+        if (role === 'motoboy') {
+            if (!cpf) return res.status(400).json({ error: 'CPF obrigatório para motoboy.' });
+            if (!/^\d{3}\.\d{3}\.\d{3}-\d{2}$/.test(cpf)) return res.status(400).json({ error: 'CPF inválido. Use o formato 000.000.000-00' });
+        }
+        // Validar formato telefone: (00) 0 0000-0000
+        if (!phone) return res.status(400).json({ error: 'Telefone obrigatório.' });
+        if (!/^\(\d{2}\) \d \d{4}-\d{4}$/.test(phone)) return res.status(400).json({ error: 'Telefone inválido. Use o formato (00) 0 0000-0000' });
+        // Validar duplicata de username
+        const dupUser = await pool.query('SELECT id FROM users WHERE username=$1', [username]);
+        if (dupUser.rows.length > 0) return res.status(400).json({ error: 'Nome de usuário já existe.' });
+        // Validar duplicata de telefone
+        const dupPhone = await pool.query('SELECT id FROM users WHERE phone=$1', [phone]);
+        if (dupPhone.rows.length > 0) return res.status(400).json({ error: 'Telefone já cadastrado.' });
+        // Validar duplicata de CPF
+        if (cpf) {
+            const dupCpf = await pool.query('SELECT id FROM users WHERE cpf=$1', [cpf]);
+            if (dupCpf.rows.length > 0) return res.status(400).json({ error: 'CPF já cadastrado.' });
+        }
+        const r = await pool.query(
+            'INSERT INTO users (username,password,role,name,address,phone,vehicle,cpf,approved) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,false) RETURNING id,username,role,name,approved',
+            [username, password, role || 'motoboy', name, address, phone, vehicle, cpf || null]
+        );
+        res.json({ ok: true, user: r.rows[0] });
+    } catch(e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+/* Admin aprova cadastro */
+app.post('/users/:id/approve', async (req, res) => {
+    try {
+        const r = await pool.query('UPDATE users SET approved=true WHERE id=$1 RETURNING id,username,name,approved', [req.params.id]);
+        res.json(r.rows[0]);
+    } catch(e) {
+        res.status(500).json({ error: e.message });
+    }
 });
 
 app.put('/users/:id', async (req, res) => {
@@ -184,10 +261,16 @@ app.get('/api/motoboys', async (req, res) => {
 
 app.post('/orders', async (req, res) => {
     const d = req.body;
+    // Busca telefone da loja
+    let telefone_loja = null;
+    try {
+      const lojaRes = await pool.query('SELECT phone FROM users WHERE username=$1', [d.loja_user]);
+      if (lojaRes.rows.length > 0) telefone_loja = lojaRes.rows[0].phone;
+    } catch(e) {}
     const r = await pool.query(
-          `INSERT INTO orders (loja_user,loja_name,plataforma,endereco_coleta,endereco_entrega,bairro_destino,nome_cliente,telefone_cliente,cod_pedido,cobrar_cliente,tipo_pagamento,valor_pedido,valor_total,valor_motoboy,comissao,distancia,previsao,obs,status,pending_until)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'pendente',$19) RETURNING *`,
-          [d.loja_user,d.loja_name,d.plataforma,d.endereco_coleta,d.endereco_entrega,d.bairro_destino,d.nome_cliente,d.telefone_cliente,d.cod_pedido,d.cobrar_cliente||'nao',d.tipo_pagamento||'dinheiro',d.valor_pedido||0,d.valor_total,d.valor_motoboy,d.comissao,d.distancia,d.previsao,d.obs,Date.now()+15000]
+          `INSERT INTO orders (loja_user,loja_name,plataforma,endereco_coleta,endereco_entrega,bairro_destino,nome_cliente,telefone_cliente,cod_pedido,cobrar_cliente,tipo_pagamento,valor_pedido,valor_total,valor_motoboy,comissao,distancia,previsao,obs,status,pending_until,telefone_loja)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'pendente',$19,$20) RETURNING *`,
+          [d.loja_user,d.loja_name,d.plataforma,d.endereco_coleta,d.endereco_entrega,d.bairro_destino,d.nome_cliente,d.telefone_cliente,d.cod_pedido,d.cobrar_cliente||'nao',d.tipo_pagamento||'dinheiro',d.valor_pedido||0,d.valor_total,d.valor_motoboy,d.comissao,d.distancia,d.previsao,d.obs,Date.now()+15000,telefone_loja]
         );
       
   // Notificar motoboys online e grupo
