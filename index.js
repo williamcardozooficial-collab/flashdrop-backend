@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
 const axios = require('axios');
+const TelegramBot = require('node-telegram-bot-api');
 require('dotenv').config();
 
 const app = express();
@@ -10,6 +11,36 @@ app.options('*', cors());
 app.use(express.json());
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+
+// Telegram Bot
+const bot = process.env.TELEGRAM_BOT_TOKEN 
+  ? new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, {polling: true})
+  : null;
+
+// Bot Commands
+if (bot) {
+  bot.onText(/\/registrar (.+)/, async (msg, match) => {
+    const telegram_id = msg.from.id;
+    const username = match[1];
+    try {
+      await pool.query('UPDATE users SET telegram_id=$1 WHERE username=$2', [telegram_id, username]);
+      bot.sendMessage(telegram_id, '✅ Registrado! Você receberá notificações de novos pedidos.');
+    } catch(e) {
+      bot.sendMessage(telegram_id, '❌ Erro ao registrar. Verifique seu username.');
+    }
+  });
+
+  bot.on('location', async (msg) => {
+    const telegram_id = msg.from.id;
+    const {latitude, longitude} = msg.location;
+    try {
+      await pool.query(
+        'UPDATE users SET lat=$1, lng=$2, last_location_update=NOW() WHERE telegram_id=$3',
+        [latitude, longitude, telegram_id]
+      );
+    } catch(e) {}
+  });
+}
 
 async function initDB() {
     await pool.query(`
@@ -27,6 +58,9 @@ async function initDB() {
                                                                           online BOOLEAN DEFAULT false,
                                                                                 blocked BOOLEAN DEFAULT false,
                                                                                       telegram_id BIGINT,
+                                                                                                          lat DECIMAL,
+                    lng DECIMAL,
+                    last_location_update TIMESTAMP,
                                                                                             created_at TIMESTAMP DEFAULT NOW()
                                                                                                 );
                                                                                                     CREATE TABLE IF NOT EXISTS orders (
@@ -154,6 +188,25 @@ app.post('/orders', async (req, res) => {
                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'pendente',$19) RETURNING *`,
           [d.loja_user,d.loja_name,d.plataforma,d.endereco_coleta,d.endereco_entrega,d.bairro_destino,d.nome_cliente,d.telefone_cliente,d.cod_pedido,d.cobrar_cliente||'nao',d.tipo_pagamento||'dinheiro',d.valor_pedido||0,d.valor_total,d.valor_motoboy,d.comissao,d.distancia,d.previsao,d.obs,Date.now()+15000]
         );
+      
+  // Notificar motoboys online
+  if (bot) {
+    const motoboys = await pool.query(
+      "SELECT telegram_id, name FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL"
+    );
+    const pedido = r.rows[0];
+    motoboys.rows.forEach(mb => {
+      bot.sendMessage(mb.telegram_id, 
+        `🆕 *Novo Pedido Disponível!*\n\n` +
+        `📦 Pedido #${pedido.id}\n` +
+        `📍 ${pedido.endereco_entrega}\n` +
+        `💰 Você ganha: R$ ${parseFloat(pedido.valor_motoboy).toFixed(2)}\n` +
+        `📏 Distância: ${pedido.distancia} km`,
+        {parse_mode: 'Markdown'}
+      );
+    });
+  }
+
     res.json(r.rows[0]);
 });
 
