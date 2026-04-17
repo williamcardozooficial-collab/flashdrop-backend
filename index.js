@@ -189,21 +189,27 @@ app.post('/orders', async (req, res) => {
           [d.loja_user,d.loja_name,d.plataforma,d.endereco_coleta,d.endereco_entrega,d.bairro_destino,d.nome_cliente,d.telefone_cliente,d.cod_pedido,d.cobrar_cliente||'nao',d.tipo_pagamento||'dinheiro',d.valor_pedido||0,d.valor_total,d.valor_motoboy,d.comissao,d.distancia,d.previsao,d.obs,Date.now()+15000]
         );
       
-  // Notificar motoboys online
+  // Notificar motoboys online e grupo
   if (bot) {
     const motoboys = await pool.query(
       "SELECT telegram_id, name FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL"
     );
     const pedido = r.rows[0];
+    const msgPedido = `🆕 *Novo Pedido #${pedido.id}*\n\n` +
+      `🏪 Loja: ${pedido.loja_name || pedido.loja_user}\n` +
+      `👤 Cliente: ${pedido.nome_cliente}\n` +
+      `📍 Entrega: ${pedido.endereco_entrega}\n` +
+      `💰 Total: R$ ${parseFloat(pedido.valor_total).toFixed(2)}\n` +
+      `🛵 Motoboy ganha: R$ ${parseFloat(pedido.valor_motoboy).toFixed(2)}\n` +
+      `📏 Distância: ${pedido.distancia} km`;
+    // Notificar grupo admin se configurado
+    const groupId = process.env.TELEGRAM_GROUP_ID;
+    if (groupId) {
+      bot.sendMessage(groupId, msgPedido, {parse_mode: 'Markdown'}).catch(() => {});
+    }
+    // Notificar motoboys online individualmente
     motoboys.rows.forEach(mb => {
-      bot.sendMessage(mb.telegram_id, 
-        `🆕 *Novo Pedido Disponível!*\n\n` +
-        `📦 Pedido #${pedido.id}\n` +
-        `📍 ${pedido.endereco_entrega}\n` +
-        `💰 Você ganha: R$ ${parseFloat(pedido.valor_motoboy).toFixed(2)}\n` +
-        `📏 Distância: ${pedido.distancia} km`,
-        {parse_mode: 'Markdown'}
-      );
+      bot.sendMessage(mb.telegram_id, msgPedido, {parse_mode: 'Markdown'}).catch(() => {});
     });
   }
 
