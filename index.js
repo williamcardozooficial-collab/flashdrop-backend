@@ -107,6 +107,7 @@ async function initDB() {
                                                                                                                                                                                                                                                                                                                                                 INSERT INTO users (username,password,role,name) VALUES ('admin','admin123','admin','Administrador') ON CONFLICT DO NOTHING;
                                                                                                                                                                                                                                                                                                                                                   `);
     try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS tipo_pagamento VARCHAR(20) DEFAULT 'dinheiro'"); } catch(e) {}
+  try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked_until BIGINT DEFAULT 0"); } catch(e) {}
     try { await pool.query("ALTER TABLE orders ALTER COLUMN motoboy_id TYPE INTEGER USING motoboy_id::INTEGER"); } catch(e) {}
     console.log('DB initialized');
 }
@@ -222,11 +223,26 @@ app.post('/orders', async (req, res) => {
 
 app.put('/orders/:id', async (req, res) => {
     try {
+          // Se motoboy esta tentando aceitar, verificar bloqueio
           const fields = req.body;
+          if (fields.status === 'aceito' && fields.motoboy_id) {
+              const mbRes = await pool.query('SELECT blocked_until FROM users WHERE id=$1', [fields.motoboy_id]);
+              if (mbRes.rows.length > 0 && mbRes.rows[0].blocked_until && mbRes.rows[0].blocked_until > Date.now()) {
+                  const remaining = Math.ceil((mbRes.rows[0].blocked_until - Date.now()) / 60000);
+                  return res.status(403).json({ error: 'Voce esta bloqueado por cancelamento. Aguarde ' + remaining + ' minuto(s).' });
+              }
+          }
           const sets = Object.keys(fields).map((k,i) => `${k}=$${i+2}`).join(',');
           const vals = Object.values(fields);
           const r = await pool.query(`UPDATE orders SET ${sets} WHERE id=$1 RETURNING *`, [req.params.id, ...vals]);
           const order = r.rows[0];
+
+      // Cancelamento pelo motoboy: status volta a pendente e motoboy_id some
+      if (fields.status === 'pendente' && fields.motoboy_id === null && order.motoboy_id) {
+        const BLOCK_MS = 10 * 60 * 1000; // 10 minutos
+        const blockedUntil = Date.now() + BLOCK_MS;
+        await pool.query('UPDATE users SET blocked_until=$1 WHERE id=$2', [blockedUntil, order.motoboy_id]);
+      }
 
       if (fields.status === 'entregue' && order.motoboy_id) {
               const valorMotoboy = parseFloat(order.valor_motoboy) || 0;
@@ -261,6 +277,16 @@ app.delete('/orders/:id', async (req, res) => {
         await pool.query('DELETE FROM orders WHERE id=$1', [req.params.id]);
         res.json({ ok: true });
     } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Remover bloqueio do motoboy (admin ou loja)
+app.post('/users/:id/unblock-penalty', async (req, res) => {
+    try {
+        await pool.query('UPDATE users SET blocked_until=0 WHERE id=$1', [req.params.id]);
+        res.json({ ok: true });
+    } catch(e) {
+        res.status(500).json({ error: e.message });
+    }
 });
 
 app.get('/settings', async (req, res) => {
