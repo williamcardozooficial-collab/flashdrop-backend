@@ -115,6 +115,17 @@ async function initDB() {
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS telefone_loja VARCHAR(30)"); } catch(e) {}
     try { await pool.query("ALTER TABLE orders ALTER COLUMN motoboy_id TYPE INTEGER USING motoboy_id::INTEGER"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS t_retornado TIMESTAMP"); } catch(e) {}
+  try { await pool.query(`CREATE TABLE IF NOT EXISTS withdrawals (
+    id SERIAL PRIMARY KEY,
+    motoboy_id INTEGER NOT NULL,
+    motoboy_name VARCHAR(100),
+    valor DECIMAL NOT NULL,
+    pix_key TEXT NOT NULL,
+    status VARCHAR(20) DEFAULT 'pendente',
+    obs TEXT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+  )`); } catch(e) {}
     console.log('DB initialized');
 }
 
@@ -363,6 +374,57 @@ app.put('/orders/:id', async (req, res) => {
     }
     res.json(order);
     } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── SAQUES (WITHDRAWALS) ── */
+app.get('/withdrawals', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM withdrawals ORDER BY created_at DESC');
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/withdrawals/motoboy/:id', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM withdrawals WHERE motoboy_id=$1 ORDER BY created_at DESC', [req.params.id]);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/withdrawals', async (req, res) => {
+  try {
+    const { motoboy_id, motoboy_name, valor, pix_key } = req.body;
+    if (!motoboy_id || !valor || !pix_key) return res.status(400).json({ error: 'Dados incompletos.' });
+    if (parseFloat(valor) <= 0) return res.status(400).json({ error: 'Valor inválido.' });
+    // Verifica saldo
+    const mb = await pool.query('SELECT balance FROM users WHERE id=$1', [motoboy_id]);
+    if (mb.rows.length === 0) return res.status(404).json({ error: 'Motoboy não encontrado.' });
+    if (parseFloat(mb.rows[0].balance) < parseFloat(valor)) return res.status(400).json({ error: 'Saldo insuficiente para o saque solicitado.' });
+    const r = await pool.query(
+      'INSERT INTO withdrawals (motoboy_id, motoboy_name, valor, pix_key) VALUES ($1,$2,$3,$4) RETURNING *',
+      [motoboy_id, motoboy_name, valor, pix_key]
+    );
+    res.json(r.rows[0]);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/withdrawals/:id', async (req, res) => {
+  try {
+    const { status, obs } = req.body;
+    // Busca o saque
+    const wr = await pool.query('SELECT * FROM withdrawals WHERE id=$1', [req.params.id]);
+    if (wr.rows.length === 0) return res.status(404).json({ error: 'Saque não encontrado.' });
+    const w = wr.rows[0];
+    if (w.status !== 'pendente') return res.status(400).json({ error: 'Este saque já foi processado.' });
+    // Atualiza status
+    await pool.query('UPDATE withdrawals SET status=$1, obs=$2, updated_at=NOW() WHERE id=$3', [status, obs || null, req.params.id]);
+    // Se aprovado: debita saldo do motoboy
+    if (status === 'aprovado') {
+      await pool.query('UPDATE users SET balance = balance - $1 WHERE id=$2', [w.valor, w.motoboy_id]);
+    }
+    const updated = await pool.query('SELECT * FROM withdrawals WHERE id=$1', [req.params.id]);
+    res.json(updated.rows[0]);
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 app.delete('/orders/:id', async (req, res) => {
