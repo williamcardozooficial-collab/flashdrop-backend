@@ -484,7 +484,7 @@ app.post('/distance', async (req, res) => {
   try {
     const { origin, destination } = req.body;
     if (!origin || !destination) return res.status(400).json({ error: 'Origin e destination obrigatorios' });
-    const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+    const apiKey = process.env.GOOGLE_MAPS_KEY;
     if (!apiKey) {
       // Fallback: calcular distancia estimada por geocoding simples
       return res.status(500).json({ error: 'API key nao configurada' });
