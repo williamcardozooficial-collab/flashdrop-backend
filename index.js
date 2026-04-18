@@ -470,16 +470,15 @@ app.get('/settings', async (req, res) => {
 });
 
 app.put('/settings', async (req, res) => {
-    const { min_fee, price_per_km, arrancada, commission, max_per_motoboy, launch_delay_minutes } = req.body;
-      [min_fee, price_per_km, arrancada, commission, max_per_motoboy, delayVal]
-    const r = await pool.query(
-    const delayVal = launch_delay_minutes != null ? parseInt(launch_delay_minutes) : 60;
-      'UPDATE settings SET min_fee=$1,price_per_km=$2,arrancada=$3,commission=$4,max_per_motoboy=$5,launch_delay_minutes=$6 WHERE id=1 RETURNING *',
-      [min_fee, price_per_km, arrancada, commission, max_per_motoboy, delayVal]
-          if (el.status !== 'OK') return res.status(400).json({ error: 'Endereco nao encontrado' });
-          res.json({ distance_km: (el.distance.value/1000).toFixed(1), duration_min: Math.ceil(el.duration.value/60) });
-    } catch(e) { res.status(500).json({ error: e.message }); }
+  const { min_fee, price_per_km, arrancada, commission, max_per_motoboy, launch_delay_minutes } = req.body;
+  const delayVal = (launch_delay_minutes != null) ? parseInt(launch_delay_minutes) : 60;
+  const r = await pool.query(
+    'UPDATE settings SET min_fee=$1,price_per_km=$2,arrancada=$3,commission=$4,max_per_motoboy=$5,launch_delay_minutes=$6 WHERE id=1 RETURNING *',
+    [min_fee, price_per_km, arrancada, commission, max_per_motoboy, delayVal]
+  );
+  res.json(r.rows[0]);
 });
+
 
 app.post('/webhook', (req, res) => { res.json({ ok: true }); });
 
