@@ -129,6 +129,29 @@ async function initDB() {
   )`); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS launch_delay_minutes INT DEFAULT 60"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS launch_at BIGINT DEFAULT 0"); } catch(e) {}
+  try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_id VARCHAR(20)"); } catch(e) {}
+  try {
+    // Auto-generate custom_id for existing users who don't have one
+    const existingUsers = await pool.query("SELECT id, role FROM users WHERE custom_id IS NULL OR custom_id = ''");
+    for (const u of existingUsers.rows) {
+      let prefix, digits, pad;
+      if (u.role === 'motoboy') { prefix = 'M'; digits = 4; pad = '0'; }
+      else if (u.role === 'loja') { prefix = 'L'; digits = 6; pad = '0'; }
+      else continue;
+      const countRes = await pool.query("SELECT COUNT(*) FROM users WHERE role=$1 AND custom_id IS NOT NULL", [u.role]);
+      const count = parseInt(countRes.rows[0].count) + 1;
+      const newId = prefix + String(count).padStart(digits, pad);
+      await pool.query("UPDATE users SET custom_id=$1 WHERE id=$2", [newId, u.id]);
+    }
+  } catch(e) { console.log('custom_id migration:', e.message); }
+  try { await pool.query(`CREATE TABLE IF NOT EXISTS notices (
+    id SERIAL PRIMARY KEY,
+    title VARCHAR(200) NOT NULL,
+    body TEXT NOT NULL,
+    target VARCHAR(20) DEFAULT 'all',
+    created_by VARCHAR(50) DEFAULT 'admin',
+    created_at TIMESTAMP DEFAULT NOW()
+  )`); } catch(e) {}
     console.log('DB initialized');
 }
 
@@ -190,6 +213,17 @@ app.post('/users', async (req, res) => {
             'INSERT INTO users (username,password,role,name,address,phone,vehicle,cpf,approved) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
             [username, password, role, name, address, phone, vehicle, cpf || null, approved]
         );
+        // Auto-generate custom_id
+        let prefix2, digits2;
+        if (role === 'motoboy') { prefix2 = 'M'; digits2 = 4; }
+        else if (role === 'loja') { prefix2 = 'L'; digits2 = 6; }
+        if (prefix2) {
+          const cntRes = await pool.query("SELECT COUNT(*) FROM users WHERE role=$1 AND custom_id IS NOT NULL", [role]);
+          const cnt = parseInt(cntRes.rows[0].count) + 1;
+          const newCid = prefix2 + String(cnt).padStart(digits2, '0');
+          await pool.query("UPDATE users SET custom_id=$1 WHERE id=$2", [newCid, r.rows[0].id]);
+          r.rows[0].custom_id = newCid;
+        }
         res.json(r.rows[0]);
     } catch(e) {
         res.status(500).json({ error: e.message });
@@ -223,6 +257,18 @@ app.post('/register', async (req, res) => {
             'INSERT INTO users (username,password,role,name,address,phone,vehicle,cpf,approved) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,false) RETURNING id,username,role,name,approved',
             [username, password, role || 'motoboy', name, address, phone, vehicle, cpf || null]
         );
+        // Auto-generate custom_id for registered user
+        const regRole = role || 'motoboy';
+        let rpfx, rdigs;
+        if (regRole === 'motoboy') { rpfx = 'M'; rdigs = 4; }
+        else if (regRole === 'loja') { rpfx = 'L'; rdigs = 6; }
+        if (rpfx) {
+          const rcnt = await pool.query("SELECT COUNT(*) FROM users WHERE role=$1 AND custom_id IS NOT NULL", [regRole]);
+          const rn = parseInt(rcnt.rows[0].count) + 1;
+          const rcid = rpfx + String(rn).padStart(rdigs, '0');
+          await pool.query("UPDATE users SET custom_id=$1 WHERE id=$2", [rcid, r.rows[0].id]);
+          r.rows[0].custom_id = rcid;
+        }
         res.json({ ok: true, user: r.rows[0] });
     } catch(e) {
         res.status(500).json({ error: e.message });
@@ -503,6 +549,46 @@ app.post('/distance', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+/* ── AVISOS (NOTICES) ── */
+app.get('/notices', async (req, res) => {
+  try {
+    const target = req.query.target;
+    let r;
+    if (target) {
+      r = await pool.query("SELECT * FROM notices WHERE target='all' OR target=$1 ORDER BY created_at DESC", [target]);
+    } else {
+      r = await pool.query("SELECT * FROM notices ORDER BY created_at DESC");
+    }
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/notices', async (req, res) => {
+  try {
+    const { title, body, target, created_by } = req.body;
+    if (!title || !body) return res.status(400).json({ error: 'Título e texto obrigatórios.' });
+    const r = await pool.query(
+      "INSERT INTO notices (title, body, target, created_by) VALUES ($1,$2,$3,$4) RETURNING *",
+      [title, body, target || 'all', created_by || 'admin']
+    );
+    res.json(r.rows[0]);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/notices/:id', async (req, res) => {
+  try {
+    await pool.query("DELETE FROM notices WHERE id=$1", [req.params.id]);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── BUSCA POR CUSTOM_ID ── */
+app.get('/users/by-custom-id/:cid', async (req, res) => {
+  try {
+    const r = await pool.query("SELECT * FROM users WHERE UPPER(custom_id)=UPPER($1)", [req.params.cid]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Usuário não encontrado.' });
+    res.json(r.rows[0]);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/webhook', (req, res) => { res.json({ ok: true }); });
 
 const PORT = process.env.PORT || 3000;
