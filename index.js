@@ -114,6 +114,7 @@ async function initDB() {
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS observacao_entrega TEXT"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS telefone_loja VARCHAR(30)"); } catch(e) {}
     try { await pool.query("ALTER TABLE orders ALTER COLUMN motoboy_id TYPE INTEGER USING motoboy_id::INTEGER"); } catch(e) {}
+  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS t_retornado TIMESTAMP"); } catch(e) {}
     console.log('DB initialized');
 }
 
@@ -342,7 +343,11 @@ app.put('/orders/:id', async (req, res) => {
                         }
               }
       }
-          res.json(order);
+          // Ao retornar (maquina): registrar t_retornado automaticamente
+    if (fields.status === 'retornado') {
+      await pool.query("UPDATE orders SET t_retornado=NOW() WHERE id=$1", [req.params.id]);
+    }
+    res.json(order);
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
