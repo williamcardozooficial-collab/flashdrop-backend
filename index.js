@@ -480,6 +480,29 @@ app.put('/settings', async (req, res) => {
 });
 
 
+app.post('/distance', async (req, res) => {
+  try {
+    const { origin, destination } = req.body;
+    if (!origin || !destination) return res.status(400).json({ error: 'Origin e destination obrigatorios' });
+    const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+    if (!apiKey) {
+      // Fallback: calcular distancia estimada por geocoding simples
+      return res.status(500).json({ error: 'API key nao configurada' });
+    }
+    const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${encodeURIComponent(origin)}&destinations=${encodeURIComponent(destination)}&mode=driving&key=${apiKey}`;
+    const resp = await axios.get(url);
+    const data = resp.data;
+    if (data.status !== 'OK' || !data.rows[0] || data.rows[0].elements[0].status !== 'OK') {
+      return res.status(400).json({ error: 'Endereco nao encontrado ou rota invalida' });
+    }
+    const elem = data.rows[0].elements[0];
+    const distance_km = parseFloat((elem.distance.value / 1000).toFixed(2));
+    const duration_min = Math.ceil(elem.duration.value / 60);
+    res.json({ distance_km, duration_min });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 app.post('/webhook', (req, res) => { res.json({ ok: true }); });
 
 const PORT = process.env.PORT || 3000;
