@@ -332,17 +332,34 @@ app.put('/orders/:id', async (req, res) => {
       }
 
       if (fields.status === 'entregue' && order.motoboy_id) {
-              const valorMotoboy = parseFloat(order.valor_motoboy) || 0;
-              if (valorMotoboy > 0) {
-                        await pool.query('UPDATE users SET balance = balance + $1 WHERE id=$2', [valorMotoboy, order.motoboy_id]);
-              }
-              if (order.cobrar_cliente === 'sim' && order.tipo_pagamento === 'dinheiro') {
-                        const valorPedido = parseFloat(order.valor_pedido) || 0;
-                        if (valorPedido > 0) {
-                                    await pool.query("UPDATE users SET credit = credit + $1 WHERE username=$2", [valorPedido, order.loja_user]);
-                        }
-              }
+      const valorMotoboy = parseFloat(order.valor_motoboy) || 0;
+      const valorPedido  = parseFloat(order.valor_pedido)  || 0;
+      const comissao     = parseFloat(order.comissao)      || 0;
+      const isDinheiro   = order.tipo_pagamento === 'dinheiro';
+
+      if (isDinheiro) {
+        // Motoboy recebeu dinheiro da loja: credita ganho líquido (valor_motoboy - comissao) e debita valor_pedido
+        const ganhoLiquido = valorMotoboy - comissao;
+        // Credita ganho (se positivo)
+        if (ganhoLiquido > 0) {
+          await pool.query('UPDATE users SET balance = balance + $1 WHERE id=$2', [ganhoLiquido, order.motoboy_id]);
+        }
+        // Debita o valor_pedido que o motoboy cobrou do cliente e ficou em mãos
+        if (valorPedido > 0) {
+          await pool.query('UPDATE users SET balance = balance - $1 WHERE id=$2', [valorPedido, order.motoboy_id]);
+        }
+        // Loja recebe valor_pedido de volta (motoboy vai repassar)
+        if (valorPedido > 0) {
+          await pool.query("UPDATE users SET credit = credit + $1 WHERE username=$2", [valorPedido, order.loja_user]);
+        }
+      } else {
+        // PIX ou Maquina: motoboy recebe valor_motoboy inteiro
+        if (valorMotoboy > 0) {
+          await pool.query('UPDATE users SET balance = balance + $1 WHERE id=$2', [valorMotoboy, order.motoboy_id]);
+        }
+        // Loja já teve crédito descontado no POST /orders (via frontend)
       }
+    }
           // Ao retornar (maquina): registrar t_retornado automaticamente
     if (fields.status === 'retornado') {
       await pool.query("UPDATE orders SET t_retornado=NOW() WHERE id=$1", [req.params.id]);
