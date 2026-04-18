@@ -340,9 +340,10 @@ app.put('/orders/:id', async (req, res) => {
       if (isDinheiro) {
         // Pedido dinheiro: motoboy cobrou do cliente (valor_pedido + valor_total)
         // O ganho da corrida já está embutido nos R$ que recebeu do cliente
-        // Só debita valor_pedido pois motoboy ficou com dinheiro da loja
-        if (valorPedido > 0) {
-          await pool.query('UPDATE users SET balance = balance - $1 WHERE id=$2', [valorPedido, order.motoboy_id]);
+        // Debita valor_pedido (ficou com dinheiro da loja) + comissao (taxa da plataforma)
+        const debitoDinheiro = valorPedido + comissao;
+        if (debitoDinheiro > 0) {
+          await pool.query('UPDATE users SET balance = balance - $1 WHERE id=$2', [debitoDinheiro, order.motoboy_id]);
         }
         // Loja recebe valor_pedido de volta (motoboy vai repassar)
         if (valorPedido > 0) {
