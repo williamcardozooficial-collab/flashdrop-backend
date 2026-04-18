@@ -338,13 +338,12 @@ app.put('/orders/:id', async (req, res) => {
       const isDinheiro   = order.tipo_pagamento === 'dinheiro';
 
       if (isDinheiro) {
-        // Motoboy recebeu dinheiro da loja: credita ganho líquido (valor_motoboy - comissao) e debita valor_pedido
-        const ganhoLiquido = valorMotoboy - comissao;
-        // Credita ganho (se positivo)
-        if (ganhoLiquido > 0) {
-          await pool.query('UPDATE users SET balance = balance + $1 WHERE id=$2', [ganhoLiquido, order.motoboy_id]);
+        // valor_motoboy já é líquido (comissão já descontada pelo frontend ao criar pedido)
+        // Credita ganho da corrida (sem somar nada mais)
+        if (valorMotoboy > 0) {
+          await pool.query('UPDATE users SET balance = balance + $1 WHERE id=$2', [valorMotoboy, order.motoboy_id]);
         }
-        // Debita o valor_pedido que o motoboy cobrou do cliente e ficou em mãos
+        // Debita valor_pedido: motoboy cobrou do cliente e ficou com dinheiro da loja
         if (valorPedido > 0) {
           await pool.query('UPDATE users SET balance = balance - $1 WHERE id=$2', [valorPedido, order.motoboy_id]);
         }
