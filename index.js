@@ -1,4 +1,3 @@
-    const delayVal = launch_delay_minutes != null ? parseInt(launch_delay_minutes) : 60;
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -474,6 +473,7 @@ app.put('/settings', async (req, res) => {
     const { min_fee, price_per_km, arrancada, commission, max_per_motoboy, launch_delay_minutes } = req.body;
       [min_fee, price_per_km, arrancada, commission, max_per_motoboy, delayVal]
     const r = await pool.query(
+    const delayVal = launch_delay_minutes != null ? parseInt(launch_delay_minutes) : 60;
       'UPDATE settings SET min_fee=$1,price_per_km=$2,arrancada=$3,commission=$4,max_per_motoboy=$5,launch_delay_minutes=$6 WHERE id=1 RETURNING *',
       [min_fee, price_per_km, arrancada, commission, max_per_motoboy, delayVal]
           if (el.status !== 'OK') return res.status(400).json({ error: 'Endereco nao encontrado' });
