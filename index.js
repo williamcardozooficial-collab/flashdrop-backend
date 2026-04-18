@@ -101,7 +101,8 @@ async function initDB() {
                                                                                                                                                                                                                                                                                                                   price_per_km DECIMAL DEFAULT 2.50,
                                                                                                                                                                                                                                                                                                                         arrancada DECIMAL DEFAULT 5.00,
                                                                                                                                                                                                                                                                                                                               commission DECIMAL DEFAULT 2.00,
-                                                                                                                                                                                                                                                                                                                                    max_per_motoboy INT DEFAULT 2
+                                                                                                                                                                                                                                                                                                                                    max_per_motoboy INT DEFAULT 2,
+  launch_delay_minutes INT DEFAULT 60
                                                                                                                                                                                                                                                                                                                                         );
                                                                                                                                                                                                                                                                                                                                             INSERT INTO settings (id) VALUES (1) ON CONFLICT DO NOTHING;
                                                                                                                                                                                                                                                                                                                                                 INSERT INTO users (username,password,role,name) VALUES ('admin','admin123','admin','Administrador') ON CONFLICT DO NOTHING;
@@ -126,6 +127,8 @@ async function initDB() {
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
   )`); } catch(e) {}
+  try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS launch_delay_minutes INT DEFAULT 60"); } catch(e) {}
+  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS launch_at BIGINT DEFAULT 0"); } catch(e) {}
     console.log('DB initialized');
 }
 
@@ -280,9 +283,9 @@ app.post('/orders', async (req, res) => {
       if (lojaRes.rows.length > 0) telefone_loja = lojaRes.rows[0].phone;
     } catch(e) {}
     const r = await pool.query(
-          `INSERT INTO orders (loja_user,loja_name,plataforma,endereco_coleta,endereco_entrega,bairro_destino,nome_cliente,telefone_cliente,cod_pedido,cobrar_cliente,tipo_pagamento,valor_pedido,valor_total,valor_motoboy,comissao,distancia,previsao,obs,status,pending_until,telefone_loja)
-               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'pendente',$19,$20) RETURNING *`,
-          [d.loja_user,d.loja_name,d.plataforma,d.endereco_coleta,d.endereco_entrega,d.bairro_destino,d.nome_cliente,d.telefone_cliente,d.cod_pedido,d.cobrar_cliente||'nao',d.tipo_pagamento||'dinheiro',d.valor_pedido||0,d.valor_total,d.valor_motoboy,d.comissao,d.distancia,d.previsao,d.obs,Date.now()+15000,telefone_loja]
+          `INSERT INTO orders (loja_user,loja_name,plataforma,endereco_coleta,endereco_entrega,bairro_destino,nome_cliente,telefone_cliente,cod_pedido,cobrar_cliente,tipo_pagamento,valor_pedido,valor_total,valor_motoboy,comissao,distancia,previsao,obs,status,pending_until,telefone_loja,launch_at)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'em_preparo',$19,$20,$21) RETURNING *`,
+          [d.loja_user,d.loja_name,d.plataforma,d.endereco_coleta,d.endereco_entrega,d.bairro_destino,d.nome_cliente,d.telefone_cliente,d.cod_pedido,d.cobrar_cliente||'nao',d.tipo_pagamento||'dinheiro',d.valor_pedido||0,d.valor_total,d.valor_motoboy,d.comissao,d.distancia,d.previsao,d.obs,Date.now()+15000,telefone_loja,d.launch_at||0]
         );
       
   // Notificar motoboys online e grupo
@@ -298,10 +301,15 @@ app.post('/orders', async (req, res) => {
       if (lojaRes.rows.length > 0) lojaNome = lojaRes.rows[0].name;
     }
     lojaNome = lojaNome || pedido.loja_user;
-    const msgPedido = `🆕 *Novo Pedido #${pedido.id}*\n\n` +
-      `🏪 Loja: ${lojaNome}\n` +
-      `🛵 Motoboy ganha: R$ ${parseFloat(pedido.valor_motoboy).toFixed(2)}\n` +
-      `📏 Distância: ${pedido.distancia} km`;
+    const delayMin = pedido.launch_at > Date.now() ? Math.round((pedido.launch_at - Date.now()) / 60000) : 0;
+    const pagLabel = ({dinheiro:'💵 Dinheiro',maquina:'💳 Máquina',pix:'📱 PIX'}[pedido.tipo_pagamento] || pedido.tipo_pagamento || '—');
+    const msgPedido = `🆕 *Novo Pedido #${pedido.id} — Em Preparo*\n\n` +
+        `🏪 Loja: ${lojaNome}\n` +
+        `💳 Pagamento: ${pagLabel}\n` +
+        `🛵 Motoboy ganha: R$ ${parseFloat(pedido.valor_motoboy).toFixed(2)}\n` +
+        `📏 Distância: ${pedido.distancia} km\n\n` +
+        `⏳ Pedido em preparo. Será lançado ao sistema em ~${delayMin} minuto(s).\n` +
+        `👀 Fique de olho!`
     // Notificar grupo admin se configurado
     const groupId = process.env.TELEGRAM_GROUP_ID;
     if (groupId) {
@@ -462,21 +470,10 @@ app.get('/settings', async (req, res) => {
 });
 
 app.put('/settings', async (req, res) => {
-    const { min_fee, price_per_km, arrancada, commission, max_per_motoboy } = req.body;
+    const { min_fee, price_per_km, arrancada, commission, max_per_motoboy, launch_delay_minutes } = req.body;
     const r = await pool.query(
-          'UPDATE settings SET min_fee=$1,price_per_km=$2,arrancada=$3,commission=$4,max_per_motoboy=$5 WHERE id=1 RETURNING *',
-          [min_fee, price_per_km, arrancada, commission, max_per_motoboy]
-        );
-    res.json(r.rows[0]);
-});
-
-app.post('/distance', async (req, res) => {
-    const { origin, destination } = req.body;
-    try {
-          const r = await axios.get('https://maps.googleapis.com/maps/api/distancematrix/json', {
-                  params: { origins: origin, destinations: destination, key: process.env.GOOGLE_MAPS_KEY, mode: 'driving' }
-          });
-          const el = r.data.rows[0].elements[0];
+      'UPDATE settings SET min_fee=$1,price_per_km=$2,arrancada=$3,commission=$4,max_per_motoboy=$5,launch_delay_minutes=$6 WHERE id=1 RETURNING *',
+      [min_fee, price_per_km, arrancada, commission, max_per_motoboy, launch_delay_minutes !== undefined ? launch_delay_minutes : 60]
           if (el.status !== 'OK') return res.status(400).json({ error: 'Endereco nao encontrado' });
           res.json({ distance_km: (el.distance.value/1000).toFixed(1), duration_min: Math.ceil(el.duration.value/60) });
     } catch(e) { res.status(500).json({ error: e.message }); }
@@ -542,9 +539,73 @@ async function checkLateArrivals() {
   }
 }
 
+/* ── LANÇAMENTO IMEDIATO (loja chama motoboy antes do timer) ── */
+app.post('/orders/:id/launch', async (req, res) => {
+  try {
+    const r = await pool.query("UPDATE orders SET status='pendente', launch_at=0, pending_until=$1 WHERE id=$2 AND status='em_preparo' RETURNING *", [Date.now()+15000, req.params.id]);
+    if (r.rows.length === 0) return res.status(404).json({ error: 'Pedido não encontrado ou já lançado.' });
+    const pedido = r.rows[0];
+    // Notificar motoboys
+    if (bot) {
+      let lojaNome = pedido.loja_name;
+      if (!lojaNome && pedido.loja_user) {
+        const lr = await pool.query("SELECT name FROM users WHERE username=$1", [pedido.loja_user]);
+        if (lr.rows.length > 0) lojaNome = lr.rows[0].name;
+      }
+      lojaNome = lojaNome || pedido.loja_user;
+      const pagLabel = ({dinheiro:'💵 Dinheiro',maquina:'💳 Máquina',pix:'📱 PIX'}[pedido.tipo_pagamento] || pedido.tipo_pagamento || '—');
+      const msgLancado = `🚀 *Pedido #${pedido.id} DISPONÍVEL AGORA!*\n\n` +
+        `🏪 Loja: ${lojaNome}\n` +
+        `💳 Pagamento: ${pagLabel}\n` +
+        `🛵 Motoboy ganha: R$ ${parseFloat(pedido.valor_motoboy).toFixed(2)}\n` +
+        `📏 Distância: ${pedido.distancia} km\n\n` +
+        `✅ Pedido pronto! Aceite agora.`;
+      const groupId = process.env.TELEGRAM_GROUP_ID;
+      if (groupId) bot.sendMessage(groupId, msgLancado, {parse_mode: 'Markdown'}).catch(() => {});
+      const motoboys = await pool.query("SELECT telegram_id FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL");
+      motoboys.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgLancado, {parse_mode: 'Markdown'}).catch(() => {}));
+    }
+    res.json(r.rows[0]);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+/* ── JOB: Lançar pedidos em preparo cujo timer expirou ── */
+async function checkAndLaunchOrders() {
+  try {
+    const now = Date.now();
+    const r = await pool.query("SELECT * FROM orders WHERE status='em_preparo' AND launch_at > 0 AND launch_at <= $1", [now]);
+    for (const pedido of r.rows) {
+      await pool.query("UPDATE orders SET status='pendente', pending_until=$1 WHERE id=$2", [now + 15000, pedido.id]);
+      // Notificar
+      if (bot) {
+        let lojaNome = pedido.loja_name;
+        if (!lojaNome && pedido.loja_user) {
+          const lr = await pool.query("SELECT name FROM users WHERE username=$1", [pedido.loja_user]);
+          if (lr.rows.length > 0) lojaNome = lr.rows[0].name;
+        }
+        lojaNome = lojaNome || pedido.loja_user;
+        const pagLabel = ({dinheiro:'💵 Dinheiro',maquina:'💳 Máquina',pix:'📱 PIX'}[pedido.tipo_pagamento] || pedido.tipo_pagamento || '—');
+        const msgAuto = `🚀 *Pedido #${pedido.id} DISPONÍVEL — Lançamento Automático!*\n\n` +
+          `🏪 Loja: ${lojaNome}\n` +
+          `💳 Pagamento: ${pagLabel}\n` +
+          `🛵 Motoboy ganha: R$ ${parseFloat(pedido.valor_motoboy).toFixed(2)}\n` +
+          `📏 Distância: ${pedido.distancia} km\n\n` +
+          `⏰ Timer expirou — pedido agora no sistema!`;
+        const groupId = process.env.TELEGRAM_GROUP_ID;
+        if (groupId) bot.sendMessage(groupId, msgAuto, {parse_mode: 'Markdown'}).catch(() => {});
+        const motoboys = await pool.query("SELECT telegram_id FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL");
+        motoboys.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgAuto, {parse_mode: 'Markdown'}).catch(() => {}));
+      }
+      console.log(`[JOB] Pedido #${pedido.id} lançado automaticamente.`);
+    }
+  } catch(e) { console.error('[JOB] Erro ao lançar pedidos:', e.message); }
+}
+
 initDB().then(() => {
   app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
   // Roda o job a cada 60 segundos
   setInterval(checkLateArrivals, 60 * 1000);
+  setInterval(checkAndLaunchOrders, 30 * 1000);
   console.log('[JOB] Verificador de chegada iniciado (60s)');
+  console.log('[JOB] Lançador automático de pedidos iniciado (30s)');
 });
