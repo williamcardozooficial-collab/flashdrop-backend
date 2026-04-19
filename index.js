@@ -347,14 +347,13 @@ app.post('/orders', async (req, res) => {
       if (lojaRes.rows.length > 0) lojaNome = lojaRes.rows[0].name;
     }
     lojaNome = lojaNome || pedido.loja_user;
-    const delayMin = pedido.launch_at > Date.now() ? Math.round((pedido.launch_at - Date.now()) / 60000) : 0;
-    const pagLabel = ({dinheiro:'💵 Dinheiro',maquina:'💳 Máquina',pix:'📱 PIX'}[pedido.tipo_pagamento] || pedido.tipo_pagamento || '—');
+        const pagLabel = ({dinheiro:'💵 Dinheiro',maquina:'💳 Máquina',pix:'📱 PIX'}[pedido.tipo_pagamento] || pedido.tipo_pagamento || '—');
     const msgPedido = `🆕 *Novo Pedido #${pedido.id} — Em Preparo*\n\n` +
         `🏪 Loja: ${lojaNome}\n` +
         `💳 Pagamento: ${pagLabel}\n` +
         `🛵 Motoboy ganha: R$ ${parseFloat(pedido.valor_motoboy).toFixed(2)}\n` +
         `📏 Distância: ${pedido.distancia} km\n\n` +
-        `⏳ Pedido em preparo. Será lançado ao sistema em ~${delayMin} minuto(s).\n` +
+              `⏳ Pedido em preparo. Será lançado ao sistema em breve.\n` +
         `👀 Fique de olho!`
     // Notificar grupo admin se configurado
     const groupId = process.env.TELEGRAM_GROUP_ID;
