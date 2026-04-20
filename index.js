@@ -1,3 +1,4 @@
+const jwt = require('jsonwebtoken');
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -163,7 +164,7 @@ const loginHandler = async (req, res) => {
     if (r.rows.length === 0) return res.status(401).json({ error: 'Usuário ou senha inválidos.' });
     if (r.rows[0].blocked) return res.status(403).json({ error: 'Conta bloqueada.' });
     if (r.rows[0].approved === false) return res.status(403).json({ error: 'Cadastro aguardando aprovação do administrador.' });
-    res.json(r.rows[0]);
+    const user = r.rows[0]; const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, process.env.JWT_SECRET || 'flashdrop_secret_2024', { expiresIn: '90d' }); res.json({ ...user, token });
 };
 app.post('/users/login', loginHandler);
 app.post('/api/login', loginHandler);
