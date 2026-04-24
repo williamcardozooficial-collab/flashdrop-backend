@@ -478,17 +478,17 @@ app.put('/orders/:id', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-/* ── SAQUES (WITHDRAWALS) ── */
+/* ââ SAQUES (WITHDRAWALS) ââ */
 app.get('/withdrawals', async (req, res) => {
   try {
-    const r = await pool.query('SELECT * FROM withdrawals ORDER BY created_at DESC');
+    const r = await pool.query("SELECT * FROM withdrawals WHERE created_at >= NOW() - INTERVAL '7 days' ORDER BY created_at DESC");
     res.json(r.rows);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/withdrawals/motoboy/:id', async (req, res) => {
   try {
-    const r = await pool.query('SELECT * FROM withdrawals WHERE motoboy_id=$1 ORDER BY created_at DESC', [req.params.id]);
+    const r = await pool.query("SELECT * FROM withdrawals WHERE motoboy_id=$1 AND created_at >= NOW() - INTERVAL '7 days' ORDER BY created_at DESC", [req.params.id]);
     res.json(r.rows);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -525,7 +525,7 @@ app.put('/withdrawals/:id', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-/* ── DELETE PEDIDO: corrigido para nao dar estorno em pedidos a dinheiro ── */
+/* ââ DELETE PEDIDO: corrigido para nao dar estorno em pedidos a dinheiro ââ */
 app.delete('/orders/:id', async (req, res) => {
   try {
     const orderRes = await pool.query('SELECT * FROM orders WHERE id=$1', [req.params.id]);
@@ -559,7 +559,7 @@ app.get('/settings', async (req, res) => {
   res.json(r.rows[0]);
 });
 
-/* ── AJUSTES DA PLATAFORMA (inclui credit_limit) ── */
+/* ââ AJUSTES DA PLATAFORMA (inclui credit_limit) ââ */
 app.put('/settings', async (req, res) => {
   const { min_fee, price_per_km, arrancada, commission, max_per_motoboy, launch_delay_minutes, credit_limit } = req.body;
   const delayVal = (launch_delay_minutes != null) ? parseInt(launch_delay_minutes) : 60;
@@ -590,7 +590,7 @@ app.post('/distance', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-/* ── AVISOS (NOTICES) ── */
+/* ââ AVISOS (NOTICES) ââ */
 app.get('/notices', async (req, res) => {
   try {
     const target = req.query.target;
