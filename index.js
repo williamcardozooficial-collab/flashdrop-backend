@@ -415,24 +415,23 @@ app.put('/orders/:id', async (req, res) => {
           const isDinheiro = order.tipo_pagamento === 'dinheiro';
 
           if (isDinheiro) {
-            // Nova logica: credit_limit=0 = bloqueado por padrao; credit_limit>0 = valida saldo
-            const settingsRes = await pool.query('SELECT credit_limit FROM settings WHERE id=1');
-            const platformLimit = parseFloat(settingsRes.rows[0]?.credit_limit || 20.00);
-            const effectiveLimit = mb.custom_credit_limit !== null ? parseFloat(mb.custom_credit_limit) : platformLimit;
+            // Logica: custom_credit_limit define o limite individual do motoboy
+            // null ou 0 = bloqueado por padrao (admin precisa definir um valor > 0 para liberar)
+            const individualLimit = mb.custom_credit_limit !== null ? parseFloat(mb.custom_credit_limit) : 0;
             const balance = parseFloat(mb.balance || 0);
 
-            if (effectiveLimit <= 0) {
-              // Sem limite definido: motoboy nao pode aceitar corridas em dinheiro
+            if (individualLimit <= 0) {
+              // Limite nao definido ou zerado: motoboy bloqueado para corridas em dinheiro
               return res.status(403).json({
                 error: 'Voce nao possui limite de credito definido para corridas em dinheiro. Solicite ao administrador para configurar seu limite.',
                 credit_blocked: true
               });
             }
 
-            if (balance <= -effectiveLimit) {
-              // Saldo negativo ultrapassou o limite
+            if (balance <= -individualLimit) {
+              // Saldo negativo ultrapassou o limite individual
               return res.status(403).json({
-                error: 'Voce atingiu o limite de credito da plataforma. Regularize seu saldo com o suporte para voltar a aceitar corridas em dinheiro.',
+                error: 'Voce atingiu o limite de credito. Regularize seu saldo com o suporte para voltar a aceitar corridas em dinheiro.',
                 credit_blocked: true
               });
             }
