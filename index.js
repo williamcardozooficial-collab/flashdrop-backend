@@ -117,6 +117,48 @@ async function initDB() {
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS complemento_entrega TEXT"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS obs_coleta TEXT"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS obs_entrega_loja TEXT"); } catch(e) {}
+
+  // ── MÓDULO DE INDICAÇÃO ─────────────────────────────────────────────
+  try { await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code VARCHAR(20) UNIQUE`); } catch(e) {}
+  try { await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by INTEGER`); } catch(e) {}
+  try { await pool.query(`CREATE TABLE IF NOT EXISTS referral_settings (
+    id INTEGER PRIMARY KEY DEFAULT 1,
+    ativo BOOLEAN DEFAULT true,
+    comissao_por_pedido_loja DECIMAL DEFAULT 0.50,
+    bonus_motoboy_meta DECIMAL DEFAULT 150.00,
+    meta_pedidos_motoboy INTEGER DEFAULT 100,
+    prazo_meta_dias INTEGER DEFAULT 30,
+    validade_indicacao_loja_dias INTEGER DEFAULT 90,
+    updated_at TIMESTAMP DEFAULT NOW()
+  )`); } catch(e) {}
+  try { await pool.query(`INSERT INTO referral_settings (id) VALUES (1) ON CONFLICT DO NOTHING`); } catch(e) {}
+  try { await pool.query(`CREATE TABLE IF NOT EXISTS referrals (
+    id SERIAL PRIMARY KEY,
+    referrer_id INTEGER NOT NULL,
+    referrer_name VARCHAR(100),
+    referred_id INTEGER NOT NULL,
+    referred_name VARCHAR(100),
+    referred_role VARCHAR(20),
+    status_ref VARCHAR(20) DEFAULT 'ativo',
+    bonus_pago BOOLEAN DEFAULT false,
+    bonus_valor DECIMAL DEFAULT 0,
+    meta_pedidos INTEGER DEFAULT 0,
+    total_pedidos_validos INTEGER DEFAULT 0,
+    total_ganho DECIMAL DEFAULT 0,
+    data_inicio TIMESTAMP DEFAULT NOW(),
+    data_fim TIMESTAMP,
+    data_conclusao TIMESTAMP,
+    created_at TIMESTAMP DEFAULT NOW()
+  )`); } catch(e) {}
+  try { await pool.query(`CREATE TABLE IF NOT EXISTS referral_earnings (
+    id SERIAL PRIMARY KEY,
+    referrer_id INTEGER NOT NULL,
+    referred_id INTEGER,
+    order_id INTEGER,
+    valor DECIMAL DEFAULT 0,
+    tipo VARCHAR(40),
+    created_at TIMESTAMP DEFAULT NOW()
+  )`); } catch(e) {}
   try {
     await pool.query(`CREATE TABLE IF NOT EXISTS withdrawals (
       id SERIAL PRIMARY KEY,
@@ -474,6 +516,74 @@ app.put('/orders/:id', async (req, res) => {
       }
     }
 
+      // ── COMISSÃO DE INDICAÇÃO POR PEDIDO ────────────────────────────
+      try {
+        const refCfg = await pool.query('SELECT * FROM referral_settings WHERE id=1');
+        const refSettings = refCfg.rows[0];
+        if (refSettings && refSettings.ativo && fields.status === 'entregue') {
+          const ordRow = await pool.query('SELECT * FROM orders WHERE id=$1', [orderId]);
+          const ord = ordRow.rows[0];
+          if (ord) {
+            const now = new Date();
+            // 1) Comissão por indicação de LOJA
+            const lojaUser = await pool.query('SELECT * FROM users WHERE username=$1', [ord.loja_user]);
+            if (lojaUser.rows.length > 0) {
+              const loja = lojaUser.rows[0];
+              const lojaRef = await pool.query(
+                `SELECT r.*, rs.comissao_por_pedido_loja FROM referrals r
+                 JOIN referral_settings rs ON rs.id=1
+                 WHERE r.referred_id=$1 AND r.referred_role='loja'
+                   AND r.status_ref='ativo'
+                   AND (r.data_fim IS NULL OR r.data_fim > NOW())`, [loja.id]);
+              if (lojaRef.rows.length > 0) {
+                const ref = lojaRef.rows[0];
+                const comLoja = parseFloat(ref.comissao_por_pedido_loja || 0);
+                if (comLoja > 0) {
+                  await pool.query('UPDATE users SET balance = balance + $1 WHERE id=$2', [comLoja, ref.referrer_id]);
+                  await pool.query(
+                    `INSERT INTO referral_earnings (referrer_id, referred_id, order_id, valor, tipo)
+                     VALUES ($1,$2,$3,$4,'comissao_pedido_loja')`,
+                    [ref.referrer_id, loja.id, orderId, comLoja]);
+                  await pool.query(
+                    `UPDATE referrals SET total_pedidos_validos = total_pedidos_validos + 1,
+                       total_ganho = total_ganho + $1 WHERE id=$2`, [comLoja, ref.id]);
+                }
+              }
+            }
+            // 2) Verificar meta de indicação de MOTOBOY
+            if (ord.motoboy_id) {
+              const mbRef = await pool.query(
+                `SELECT r.* FROM referrals r WHERE r.referred_id=$1
+                 AND r.referred_role='motoboy' AND r.status_ref='ativo' AND r.bonus_pago=false`, [ord.motoboy_id]);
+              if (mbRef.rows.length > 0) {
+                const ref = mbRef.rows[0];
+                const prazoOk = !ref.data_fim || new Date(ref.data_fim) > now;
+                if (prazoOk) {
+                  await pool.query(`UPDATE referrals SET total_pedidos_validos = total_pedidos_validos + 1 WHERE id=$1`, [ref.id]);
+                  const updated = await pool.query('SELECT * FROM referrals WHERE id=$1', [ref.id]);
+                  const upd = updated.rows[0];
+                  if (upd && upd.total_pedidos_validos >= upd.meta_pedidos && upd.meta_pedidos > 0) {
+                    const bonus = parseFloat(upd.bonus_valor || 0);
+                    if (bonus > 0) {
+                      await pool.query('UPDATE users SET balance = balance + $1 WHERE id=$2', [bonus, upd.referrer_id]);
+                      await pool.query(
+                        `INSERT INTO referral_earnings (referrer_id, referred_id, order_id, valor, tipo)
+                         VALUES ($1,$2,$3,$4,'bonus_meta_motoboy')`,
+                        [upd.referrer_id, ord.motoboy_id, orderId, bonus]);
+                      await pool.query(
+                        `UPDATE referrals SET bonus_pago=true, total_ganho=$1,
+                           data_conclusao=NOW(), status_ref='concluido' WHERE id=$2`, [bonus, upd.id]);
+                    }
+                  }
+                } else {
+                  await pool.query(`UPDATE referrals SET status_ref='expirado' WHERE id=$1`, [ref.id]);
+                }
+              }
+            }
+          }
+        }
+      } catch(eRef) { console.error('Referral commission error:', eRef.message); }
+
     if (fields.status === 'retornado') {
       await pool.query("UPDATE orders SET t_retornado=NOW() WHERE id=$1", [req.params.id]);
     }
@@ -692,6 +802,161 @@ app.post('/orders/:id/launch', async (req, res) => {
     }
     res.json(r.rows[0]);
   } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════
+// MÓDULO DE INDICAÇÃO
+// ══════════════════════════════════════════════════════════════════
+
+// GET /referral-settings
+app.get('/referral-settings', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM referral_settings WHERE id=1');
+    res.json(r.rows[0] || {});
+  } catch(e) { res.status(500).json({error: e.message}); }
+});
+
+// PUT /referral-settings — admin atualiza regras
+app.put('/referral-settings', async (req, res) => {
+  try {
+    const { ativo, comissao_por_pedido_loja, bonus_motoboy_meta, meta_pedidos_motoboy, prazo_meta_dias, validade_indicacao_loja_dias } = req.body;
+    await pool.query(`UPDATE referral_settings SET
+      ativo=$1, comissao_por_pedido_loja=$2, bonus_motoboy_meta=$3,
+      meta_pedidos_motoboy=$4, prazo_meta_dias=$5, validade_indicacao_loja_dias=$6,
+      updated_at=NOW() WHERE id=1`,
+      [ativo, comissao_por_pedido_loja, bonus_motoboy_meta, meta_pedidos_motoboy, prazo_meta_dias, validade_indicacao_loja_dias]);
+    res.json({ok: true});
+  } catch(e) { res.status(500).json({error: e.message}); }
+});
+
+// GET /referrals — admin: todos os registros
+app.get('/referrals', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM referrals ORDER BY created_at DESC');
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({error: e.message}); }
+});
+
+// GET /referrals/summary — ranking de indicadores
+app.get('/referrals/summary', async (req, res) => {
+  try {
+    const r = await pool.query(`
+      SELECT r.referrer_id, r.referrer_name,
+        COUNT(r.id) AS total_indicados,
+        COALESCE(SUM(r.total_ganho),0) AS total_ganhos,
+        SUM(CASE WHEN r.bonus_pago THEN 1 ELSE 0 END) AS bonus_pagos,
+        SUM(CASE WHEN r.status_ref='ativo' THEN 1 ELSE 0 END) AS indicacoes_ativas
+      FROM referrals r
+      GROUP BY r.referrer_id, r.referrer_name
+      ORDER BY total_ganhos DESC`);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({error: e.message}); }
+});
+
+// GET /referrals/user/:userId — indicados e ganhos de um usuário
+app.get('/referrals/user/:userId', async (req, res) => {
+  try {
+    const id = req.params.userId;
+    const referred = await pool.query('SELECT * FROM referrals WHERE referrer_id=$1 ORDER BY created_at DESC', [id]);
+    const earnings = await pool.query('SELECT * FROM referral_earnings WHERE referrer_id=$1 ORDER BY created_at DESC LIMIT 100', [id]);
+    const total = await pool.query('SELECT COALESCE(SUM(valor),0) AS total FROM referral_earnings WHERE referrer_id=$1', [id]);
+    res.json({ referred: referred.rows, earnings: earnings.rows, total_ganhos: parseFloat(total.rows[0].total) });
+  } catch(e) { res.status(500).json({error: e.message}); }
+});
+
+// GET /referral-code/:userId — gera/retorna código único
+app.get('/referral-code/:userId', async (req, res) => {
+  try {
+    const id = req.params.userId;
+    const user = await pool.query('SELECT referral_code, name FROM users WHERE id=$1', [id]);
+    if (user.rows.length === 0) return res.status(404).json({error: 'Usuário não encontrado'});
+    let code = user.rows[0].referral_code;
+    if (!code) {
+      const base = (user.rows[0].name || 'USER').replace(/[^A-Za-z0-9]/g,'').substring(0,4).toUpperCase();
+      code = base + String(id).padStart(4,'0');
+      await pool.query('UPDATE users SET referral_code=$1 WHERE id=$2', [code, id]);
+    }
+    res.json({code});
+  } catch(e) { res.status(500).json({error: e.message}); }
+});
+
+// POST /referrals/apply — vincula indicação ao cadastrar
+app.post('/referrals/apply', async (req, res) => {
+  try {
+    const { referred_id, referral_code } = req.body;
+    if (!referred_id || !referral_code) return res.status(400).json({error: 'Dados incompletos'});
+    const refUser = await pool.query('SELECT * FROM users WHERE referral_code=$1', [referral_code.trim().toUpperCase()]);
+    if (refUser.rows.length === 0) return res.status(404).json({error: 'Código inválido'});
+    const referrer = refUser.rows[0];
+    const newUser = await pool.query('SELECT * FROM users WHERE id=$1', [referred_id]);
+    if (newUser.rows.length === 0) return res.status(404).json({error: 'Usuário não encontrado'});
+    const referred = newUser.rows[0];
+    const existing = await pool.query('SELECT id FROM referrals WHERE referred_id=$1', [referred_id]);
+    if (existing.rows.length > 0) return res.status(409).json({error: 'Usuário já foi indicado'});
+    const cfg = await pool.query('SELECT * FROM referral_settings WHERE id=1');
+    const settings = cfg.rows[0] || {};
+    if (!settings.ativo) return res.json({ok: true, msg: 'Programa inativo'});
+    let dataFim = null;
+    let metaPedidos = 0;
+    let bonusValor = 0;
+    if (referred.role === 'loja') {
+      const dias = parseInt(settings.validade_indicacao_loja_dias || 90);
+      dataFim = new Date(Date.now() + dias * 86400000);
+    } else if (referred.role === 'motoboy') {
+      const dias = parseInt(settings.prazo_meta_dias || 30);
+      dataFim = new Date(Date.now() + dias * 86400000);
+      metaPedidos = parseInt(settings.meta_pedidos_motoboy || 100);
+      bonusValor = parseFloat(settings.bonus_motoboy_meta || 150);
+    }
+    await pool.query(`INSERT INTO referrals
+      (referrer_id, referrer_name, referred_id, referred_name, referred_role, data_fim, meta_pedidos, bonus_valor)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [referrer.id, referrer.name, referred.id, referred.name, referred.role, dataFim, metaPedidos, bonusValor]);
+    res.json({ok: true, data_fim: dataFim, meta: metaPedidos, bonus: bonusValor});
+  } catch(e) { res.status(500).json({error: e.message}); }
+});
+
+// PUT /referrals/:id — admin edita uma indicação
+app.put('/referrals/:id', async (req, res) => {
+  try {
+    const { referrer_id, data_fim, meta_pedidos, bonus_valor, status_ref } = req.body;
+    const flds = [];
+    const vals = [];
+    let i = 1;
+    if (referrer_id !== undefined) { flds.push('referrer_id=$' + i++); vals.push(referrer_id); }
+    if (data_fim !== undefined) { flds.push('data_fim=$' + i++); vals.push(data_fim || null); }
+    if (meta_pedidos !== undefined) { flds.push('meta_pedidos=$' + i++); vals.push(meta_pedidos); }
+    if (bonus_valor !== undefined) { flds.push('bonus_valor=$' + i++); vals.push(bonus_valor); }
+    if (status_ref !== undefined) { flds.push('status_ref=$' + i++); vals.push(status_ref); }
+    if (flds.length === 0) return res.status(400).json({error: 'Nenhum campo'});
+    vals.push(req.params.id);
+    await pool.query('UPDATE referrals SET ' + flds.join(',') + ' WHERE id=$' + i, vals);
+    res.json({ok: true});
+  } catch(e) { res.status(500).json({error: e.message}); }
+});
+
+// DELETE /referrals/:id — admin remove indicação
+app.delete('/referrals/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM referrals WHERE id=$1', [req.params.id]);
+    res.json({ok: true});
+  } catch(e) { res.status(500).json({error: e.message}); }
+});
+
+// POST /referrals/cleanup — limpa registros finalizados há mais de 20 dias
+app.post('/referrals/cleanup', async (req, res) => {
+  try {
+    const result = await pool.query(`DELETE FROM referrals
+      WHERE status_ref IN ('concluido','expirado','cancelado')
+        AND COALESCE(data_conclusao, data_fim) < NOW() - INTERVAL '20 days'
+        AND bonus_pago = true
+      RETURNING id`);
+    const earnResult = await pool.query(`DELETE FROM referral_earnings
+      WHERE created_at < NOW() - INTERVAL '110 days'
+        AND referrer_id NOT IN (SELECT referrer_id FROM referrals WHERE status_ref='ativo')
+      RETURNING id`);
+    res.json({refs_deletados: result.rows.length, earnings_deletados: earnResult.rows.length});
+  } catch(e) { res.status(500).json({error: e.message}); }
 });
 
 async function checkAndLaunchOrders() {
