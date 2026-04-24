@@ -415,34 +415,26 @@ app.put('/orders/:id', async (req, res) => {
           const isDinheiro = order.tipo_pagamento === 'dinheiro';
 
           if (isDinheiro) {
-            const creditMode = parseInt(mb.credit_mode || 0);
+            // Nova logica: credit_limit=0 = bloqueado por padrao; credit_limit>0 = valida saldo
+            const settingsRes = await pool.query('SELECT credit_limit FROM settings WHERE id=1');
+            const platformLimit = parseFloat(settingsRes.rows[0]?.credit_limit || 20.00);
+            const effectiveLimit = mb.custom_credit_limit !== null ? parseFloat(mb.custom_credit_limit) : platformLimit;
+            const balance = parseFloat(mb.balance || 0);
 
-            if (creditMode !== 0) {
-              const settingsRes = await pool.query('SELECT credit_limit FROM settings WHERE id=1');
-              const platformLimit = parseFloat(settingsRes.rows[0]?.credit_limit || 20.00);
-              const effectiveLimit = mb.custom_credit_limit !== null ? parseFloat(mb.custom_credit_limit) : platformLimit;
-              const balance = parseFloat(mb.balance || 0);
+            if (effectiveLimit <= 0) {
+              // Sem limite definido: motoboy nao pode aceitar corridas em dinheiro
+              return res.status(403).json({
+                error: 'Voce nao possui limite de credito definido para corridas em dinheiro. Solicite ao administrador para configurar seu limite.',
+                credit_blocked: true
+              });
+            }
 
-              if (creditMode === 1) {
-                // Modo 1: bloquear se ja atingiu o limite
-                if (balance <= -effectiveLimit) {
-                  return res.status(403).json({
-                    error: 'Voce atingiu o limite de credito da plataforma. Regularize seu saldo com o suporte para voltar a aceitar corridas em dinheiro.',
-                    credit_blocked: true
-                  });
-                }
-              } else if (creditMode === 2) {
-                // Modo 2: nao pode aceitar se o saldo atual + debito desta corrida ultrapassaria o limite
-                // Debito = valor_pedido (dinheiro da loja) + comissao
-                const debito = (parseFloat(order.valor_pedido || 0)) + (parseFloat(order.comissao || 0));
-                const novoSaldo = balance - debito;
-                if (novoSaldo < -effectiveLimit) {
-                  return res.status(403).json({
-                    error: 'Aceitar esta corrida ultrapassaria seu limite de credito. Regularize seu saldo com o suporte para voltar a aceitar corridas em dinheiro.',
-                    credit_blocked: true
-                  });
-                }
-              }
+            if (balance <= -effectiveLimit) {
+              // Saldo negativo ultrapassou o limite
+              return res.status(403).json({
+                error: 'Voce atingiu o limite de credito da plataforma. Regularize seu saldo com o suporte para voltar a aceitar corridas em dinheiro.',
+                credit_blocked: true
+              });
             }
           }
         }
