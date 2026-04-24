@@ -407,7 +407,7 @@ app.get('/users/:id/credit-check', async (req, res) => {
         balance,
         individual_limit: individualLimit,
         blocked: true,
-        message: 'Voce nao possui limite de credito definido. Solicite ao administrador para configurar seu limite.'
+        message: 'Voce nao possui saldo suficiente para pegar este pedido. Procure manter saldo na plataforma para poder aceitar pedidos em dinheiro.'
       });
     }
 
@@ -417,7 +417,7 @@ app.get('/users/:id/credit-check', async (req, res) => {
       balance,
       individual_limit: individualLimit,
       blocked,
-      message: blocked ? 'Voce atingiu o limite de credito. Regularize seu saldo com o suporte para voltar a aceitar corridas em dinheiro.' : null
+      message: blocked ? 'Voce nao possui saldo suficiente para pegar este pedido. Procure manter saldo na plataforma para poder aceitar pedidos em dinheiro.' : null
     });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -484,7 +484,7 @@ app.put('/orders/:id', async (req, res) => {
             if (individualLimit <= 0) {
               // Limite nao definido ou zerado: motoboy bloqueado para corridas em dinheiro
               return res.status(403).json({
-                error: 'Voce nao possui limite de credito definido para corridas em dinheiro. Solicite ao administrador para configurar seu limite.',
+                error: 'Voce nao possui saldo suficiente para pegar este pedido. Procure manter saldo na plataforma para poder aceitar pedidos em dinheiro.',
                 credit_blocked: true
               });
             }
@@ -492,7 +492,7 @@ app.put('/orders/:id', async (req, res) => {
             if (balance <= -individualLimit) {
               // Saldo negativo ultrapassou o limite individual
               return res.status(403).json({
-                error: 'Voce atingiu o limite de credito. Regularize seu saldo com o suporte para voltar a aceitar corridas em dinheiro.',
+                error: 'Voce nao possui saldo suficiente para pegar este pedido. Procure manter saldo na plataforma para poder aceitar pedidos em dinheiro.',
                 credit_blocked: true
               });
             }
