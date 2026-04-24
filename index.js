@@ -281,7 +281,7 @@ app.post('/users', async (req, res) => {
 
 app.post('/register', async (req, res) => {
   try {
-    const { username, password, role, name, address, phone, vehicle, cpf } = req.body;
+    const { username, password, role, name, address, phone, vehicle, cpf, referral_code } = req.body;
     if (role === 'motoboy') {
       if (!cpf) return res.status(400).json({ error: 'CPF obrigatorio para motoboy.' });
       if (!/^\d{3}\.\d{3}\.\d{3}-\d{2}$/.test(cpf)) return res.status(400).json({ error: 'CPF invalido. Use o formato 000.000.000-00' });
@@ -310,6 +310,32 @@ app.post('/register', async (req, res) => {
       const rcid = rpfx + String(rn).padStart(rdigs, '0');
       await pool.query("UPDATE users SET custom_id=$1 WHERE id=$2", [rcid, r.rows[0].id]);
       r.rows[0].custom_id = rcid;
+    }
+        // Processar referral_code se fornecido
+    if (referral_code && referral_code.trim()) {
+      try {
+        const refUser = await pool.query('SELECT * FROM users WHERE referral_code=$1', [referral_code.trim().toUpperCase()]);
+        if (refUser.rows.length > 0) {
+          const referrer = refUser.rows[0];
+          const newUserId = r.rows[0].id;
+          const newUserRole = role || 'motoboy';
+          const refSettings = await pool.query('SELECT * FROM referral_settings WHERE id=1');
+          const sets = refSettings.rows[0];
+          if (sets && sets.ativo) {
+            let refType = 'motoboy';
+            let metaPed = sets.meta_pedidos_motoboy || 100;
+            let prazoD = sets.prazo_meta_dias || 30;
+            let bonusVal = sets.bonus_motoboy_meta || 150;
+            let dataFim = new Date();
+            dataFim.setDate(dataFim.getDate() + prazoD);
+            await pool.query(
+              'INSERT INTO referrals (referrer_id, referrer_name, referred_id, referred_name, referred_role, status_ref, meta_pedidos, bonus_valor, data_inicio, data_fim) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW(),$9)',
+              [referrer.id, referrer.name, newUserId, r.rows[0].name, newUserRole, 'ativo', metaPed, bonusVal, dataFim.toISOString()]
+            );
+            await pool.query('UPDATE users SET referred_by=$1 WHERE id=$2', [referrer.id, newUserId]);
+          }
+        }
+      } catch(refErr) { console.log('Referral link error:', refErr.message); }
     }
     res.json({ ok: true, user: r.rows[0] });
   } catch(e) { res.status(500).json({ error: e.message }); }
