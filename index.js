@@ -325,39 +325,28 @@ app.get('/users/:id/credit-check', async (req, res) => {
     const balance = parseFloat(mb.balance || 0);
     const creditMode = parseInt(mb.credit_mode || 0);
 
-    // Modo 0: sem limite - sempre pode aceitar
-    if (creditMode === 0) {
-      return res.json({ can_accept_cash: true, credit_mode: 0, balance, effective_limit: effectiveLimit });
-    }
+    // Nova logica: custom_credit_limit define se motoboy pode pegar corridas em dinheiro
+    // null ou 0 = bloqueado por padrao; > 0 = pode aceitar ate o limite
+    const individualLimit = mb.custom_credit_limit !== null ? parseFloat(mb.custom_credit_limit) : 0;
 
-    // Modo 1: bloquear ao atingir limite (balance <= -limit)
-    if (creditMode === 1) {
-      const blocked = balance <= -effectiveLimit;
+    if (individualLimit <= 0) {
       return res.json({
-        can_accept_cash: !blocked,
-        credit_mode: 1,
+        can_accept_cash: false,
         balance,
-        effective_limit: effectiveLimit,
-        blocked,
-        message: blocked ? 'Seu saldo atingiu o limite de credito. Regularize seu saldo com o suporte para voltar a aceitar corridas em dinheiro.' : null
+        individual_limit: individualLimit,
+        blocked: true,
+        message: 'Voce nao possui limite de credito definido. Solicite ao administrador para configurar seu limite.'
       });
     }
 
-    // Modo 2: nao pode ultrapassar o limite somando o valor do pedido (verificado no momento do aceite)
-    // Neste endpoint apenas retorna o status atual
-    if (creditMode === 2) {
-      const blocked = balance <= -effectiveLimit;
-      return res.json({
-        can_accept_cash: !blocked,
-        credit_mode: 2,
-        balance,
-        effective_limit: effectiveLimit,
-        blocked,
-        message: blocked ? 'Seu saldo atingiu o limite de credito. Regularize seu saldo com o suporte para voltar a aceitar corridas em dinheiro.' : null
-      });
-    }
-
-    res.json({ can_accept_cash: true, credit_mode: creditMode, balance, effective_limit: effectiveLimit });
+    const blocked = balance <= -individualLimit;
+    res.json({
+      can_accept_cash: !blocked,
+      balance,
+      individual_limit: individualLimit,
+      blocked,
+      message: blocked ? 'Voce atingiu o limite de credito. Regularize seu saldo com o suporte para voltar a aceitar corridas em dinheiro.' : null
+    });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
