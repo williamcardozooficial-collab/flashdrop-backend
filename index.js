@@ -945,7 +945,7 @@ app.post('/referrals/apply', async (req, res) => {
 // PUT /referrals/:id — admin edita uma indicação
 app.put('/referrals/:id', async (req, res) => {
   try {
-    const { referrer_id, data_fim, meta_pedidos, bonus_valor, status_ref } = req.body;
+    const { referrer_id, data_fim, meta_pedidos, bonus_valor, status_ref, bonus_pago, total_pedidos_validos } = req.body;
     const flds = [];
     const vals = [];
     let i = 1;
@@ -954,6 +954,8 @@ app.put('/referrals/:id', async (req, res) => {
     if (meta_pedidos !== undefined) { flds.push('meta_pedidos=$' + i++); vals.push(meta_pedidos); }
     if (bonus_valor !== undefined) { flds.push('bonus_valor=$' + i++); vals.push(bonus_valor); }
     if (status_ref !== undefined) { flds.push('status_ref=$' + i++); vals.push(status_ref); }
+    if (bonus_pago !== undefined) { flds.push('bonus_pago=$' + i++); vals.push(bonus_pago); }
+    if (total_pedidos_validos !== undefined) { flds.push('total_pedidos_validos=$' + i++); vals.push(total_pedidos_validos); }
     if (flds.length === 0) return res.status(400).json({error: 'Nenhum campo'});
     vals.push(req.params.id);
     await pool.query('UPDATE referrals SET ' + flds.join(',') + ' WHERE id=$' + i, vals);
