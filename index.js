@@ -113,6 +113,10 @@ async function initDB() {
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS telefone_loja VARCHAR(30)"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ALTER COLUMN motoboy_id TYPE INTEGER USING motoboy_id::INTEGER"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS t_retornado TIMESTAMP"); } catch(e) {}
+  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS complemento_coleta TEXT"); } catch(e) {}
+  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS complemento_entrega TEXT"); } catch(e) {}
+  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS obs_coleta TEXT"); } catch(e) {}
+  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS obs_entrega_loja TEXT"); } catch(e) {}
   try {
     await pool.query(`CREATE TABLE IF NOT EXISTS withdrawals (
       id SERIAL PRIMARY KEY,
@@ -358,9 +362,9 @@ app.post('/orders', async (req, res) => {
     if (lojaRes.rows.length > 0) telefone_loja = lojaRes.rows[0].phone;
   } catch(e) {}
   const r = await pool.query(
-    `INSERT INTO orders (loja_user,loja_name,plataforma,endereco_coleta,endereco_entrega,bairro_destino,nome_cliente,telefone_cliente,cod_pedido,cobrar_cliente,tipo_pagamento,valor_pedido,valor_total,valor_motoboy,comissao,distancia,previsao,obs,status,pending_until,telefone_loja,launch_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'em_preparo',$19,$20,$21) RETURNING *`,
-    [d.loja_user,d.loja_name,d.plataforma,d.endereco_coleta,d.endereco_entrega,d.bairro_destino,d.nome_cliente,d.telefone_cliente,d.cod_pedido,d.cobrar_cliente||'nao',d.tipo_pagamento||'dinheiro',d.valor_pedido||0,d.valor_total,d.valor_motoboy,d.comissao,d.distancia,d.previsao,d.obs,Date.now()+15000,telefone_loja,d.launch_at||0]
+    `INSERT INTO orders (loja_user,loja_name,plataforma,endereco_coleta,endereco_entrega,bairro_destino,nome_cliente,telefone_cliente,cod_pedido,cobrar_cliente,tipo_pagamento,valor_pedido,valor_total,valor_motoboy,comissao,distancia,previsao,obs,status,pending_until,telefone_loja,launch_at,complemento_coleta,complemento_entrega,obs_coleta,obs_entrega_loja)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'em_preparo',$19,$20,$21,$22,$23,$24,$25) RETURNING *`,
+    [d.loja_user,d.loja_name,d.plataforma,d.endereco_coleta,d.endereco_entrega,d.bairro_destino,d.nome_cliente,d.telefone_cliente,d.cod_pedido,d.cobrar_cliente||'nao',d.tipo_pagamento||'dinheiro',d.valor_pedido||0,d.valor_total,d.valor_motoboy,d.comissao,d.distancia,d.previsao,d.obs,Date.now()+15000,telefone_loja,d.launch_at||0,d.complemento_coleta||null,d.complemento_entrega||null,d.obs_coleta||null,d.obs_entrega_loja||null]
   );
   if (bot) {
     const motoboys = await pool.query("SELECT telegram_id, name FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL");
@@ -478,7 +482,7 @@ app.put('/orders/:id', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-/* ââ SAQUES (WITHDRAWALS) ââ */
+/* Ã¢ÂÂÃ¢ÂÂ SAQUES (WITHDRAWALS) Ã¢ÂÂÃ¢ÂÂ */
 app.get('/withdrawals', async (req, res) => {
   try {
     const r = await pool.query("SELECT * FROM withdrawals WHERE created_at >= NOW() - INTERVAL '7 days' ORDER BY created_at DESC");
@@ -525,7 +529,7 @@ app.put('/withdrawals/:id', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-/* ââ DELETE PEDIDO: corrigido para nao dar estorno em pedidos a dinheiro ââ */
+/* Ã¢ÂÂÃ¢ÂÂ DELETE PEDIDO: corrigido para nao dar estorno em pedidos a dinheiro Ã¢ÂÂÃ¢ÂÂ */
 app.delete('/orders/:id', async (req, res) => {
   try {
     const orderRes = await pool.query('SELECT * FROM orders WHERE id=$1', [req.params.id]);
@@ -559,7 +563,7 @@ app.get('/settings', async (req, res) => {
   res.json(r.rows[0]);
 });
 
-/* ââ AJUSTES DA PLATAFORMA (inclui credit_limit) ââ */
+/* Ã¢ÂÂÃ¢ÂÂ AJUSTES DA PLATAFORMA (inclui credit_limit) Ã¢ÂÂÃ¢ÂÂ */
 app.put('/settings', async (req, res) => {
   const { min_fee, price_per_km, arrancada, commission, max_per_motoboy, launch_delay_minutes, credit_limit } = req.body;
   const delayVal = (launch_delay_minutes != null) ? parseInt(launch_delay_minutes) : 60;
@@ -590,7 +594,7 @@ app.post('/distance', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-/* ââ AVISOS (NOTICES) ââ */
+/* Ã¢ÂÂÃ¢ÂÂ AVISOS (NOTICES) Ã¢ÂÂÃ¢ÂÂ */
 app.get('/notices', async (req, res) => {
   try {
     const target = req.query.target;
