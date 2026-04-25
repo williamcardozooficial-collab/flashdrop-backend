@@ -13,6 +13,30 @@ app.use(express.json());
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
 
+// SANITIZACAO DE INPUT - protecao XSS e SQL Injection
+function sanitize(val) {
+  if (val === null || val === undefined) return val;
+  if (typeof val !== 'string') return val;
+  return val
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;')
+    .replace(/\/\//g, '')
+    .replace(/--/g, '')
+    .replace(/\/\*/g, '')
+    .replace(/\*\//g, '')
+    .replace(/;\s*(DROP|ALTER|CREATE|DELETE|UPDATE|INSERT|EXEC|EXECUTE|UNION|SELECT)/gi, '')
+    .trim();
+}
+function san(obj, ...fields) {
+  const out = { ...obj };
+  fields.forEach(f => { if (out[f] !== undefined && out[f] !== null) out[f] = sanitize(String(out[f])); });
+  return out;
+}
+// FIM SANITIZACAO
+
 // Telegram Bot
 const bot = process.env.TELEGRAM_BOT_TOKEN ? new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, {polling: true}) : null;
 
@@ -301,6 +325,8 @@ app.get('/users/:id', async (req, res) => {
 app.post('/users', async (req, res) => {
   try {
     const { username, password, role, name, address, phone, vehicle, cpf, telegram_id, custom_credit_limit, custom_id } = req.body;
+    const _u = san({ username, name, address, vehicle }, 'username', 'name', 'address', 'vehicle');
+    const { username: s_user, name: s_name, address: s_addr, vehicle: s_veh } = _u;
     if (phone) {
       const dupPhone = await pool.query('SELECT id FROM users WHERE phone=$1', [phone]);
       if (dupPhone.rows.length > 0) return res.status(400).json({ error: 'Telefone ja cadastrado.' });
@@ -312,7 +338,7 @@ app.post('/users', async (req, res) => {
     const approved = true;
     const r = await pool.query(
       'INSERT INTO users (username,password,role,name,address,phone,vehicle,cpf,approved,telegram_id,custom_credit_limit) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *',
-      [username, password, role, name, address, phone, vehicle, cpf || null, approved, telegram_id || null, custom_credit_limit || null]
+      [s_user, password, role, s_name, s_addr, phone, s_veh, cpf || null, approved, telegram_id || null, custom_credit_limit || null]
     );
     let prefix2, digits2;
     if (role === 'motoboy') { prefix2 = 'M'; digits2 = 4; }
@@ -334,6 +360,8 @@ app.post('/users', async (req, res) => {
 app.post('/register', async (req, res) => {
   try {
     const { username, password, role, name, address, phone, vehicle, cpf, referral_code } = req.body;
+    const _r = san({ username, name, address, vehicle }, 'username', 'name', 'address', 'vehicle');
+    const { username: r_user, name: r_name, address: r_addr, vehicle: r_veh } = _r;
     if (role === 'motoboy') {
       if (!cpf) return res.status(400).json({ error: 'CPF obrigatorio para motoboy.' });
       if (!/^\d{3}\.\d{3}\.\d{3}-\d{2}$/.test(cpf)) return res.status(400).json({ error: 'CPF invalido. Use o formato 000.000.000-00' });
@@ -350,7 +378,7 @@ app.post('/register', async (req, res) => {
     }
     const r = await pool.query(
       'INSERT INTO users (username,password,role,name,address,phone,vehicle,cpf,approved) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,false) RETURNING id,username,role,name,approved',
-      [username, password, role || 'motoboy', name, address, phone, vehicle, cpf || null]
+      [r_user, password, role || 'motoboy', r_name, r_addr, phone, r_veh, cpf || null]
     );
     const regRole = role || 'motoboy';
     let rpfx, rdigs;
@@ -476,6 +504,11 @@ app.get('/users/:id/credit-check', async (req, res) => {
 
 app.post('/orders', async (req, res) => {
   const d = req.body;
+  d.nome_cliente = sanitize(d.nome_cliente);
+  d.endereco_entrega = sanitize(d.endereco_entrega);
+  d.obs = sanitize(d.obs);
+  d.loja_name = sanitize(d.loja_name);
+  d.complemento_entrega = sanitize(d.complemento_entrega);
   let telefone_loja = null;
   try {
     const lojaRes = await pool.query('SELECT phone FROM users WHERE username=$1', [d.loja_user]);
