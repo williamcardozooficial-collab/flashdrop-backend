@@ -210,6 +210,28 @@ async function initDB() {
     )`);
   } catch(e) {}
 
+  // ── CAIXA DA PLATAFORMA ──────────────────────────────────────
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS platform_wallet (
+      id INTEGER PRIMARY KEY DEFAULT 1,
+      balance DECIMAL DEFAULT 0,
+      total_ganho DECIMAL DEFAULT 0,
+      total_sacado DECIMAL DEFAULT 0,
+      updated_at TIMESTAMP DEFAULT NOW()
+    )`);
+    await pool.query(`INSERT INTO platform_wallet (id) VALUES (1) ON CONFLICT DO NOTHING`);
+  } catch(e) {}
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS platform_events (
+      id SERIAL PRIMARY KEY,
+      tipo VARCHAR(40) NOT NULL,
+      valor DECIMAL NOT NULL,
+      descricao TEXT,
+      order_id INTEGER,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`);
+  } catch(e) {}
+
   console.log('DB initialized');
 }
 
@@ -543,6 +565,21 @@ app.put('/orders/:id', async (req, res) => {
           await pool.query('UPDATE users SET balance = balance + $1 WHERE id=$2', [valorMotoboy, order.motoboy_id]);
         }
       }
+
+      // ── CAIXA DA PLATAFORMA: creditar comissão ──────────────────────
+      if (comissao > 0) {
+        try {
+          await pool.query(
+            `UPDATE platform_wallet SET balance = balance + $1, total_ganho = total_ganho + $1, updated_at=NOW() WHERE id=1`,
+            [comissao]
+          );
+          await pool.query(
+            `INSERT INTO platform_events (tipo, valor, descricao, order_id) VALUES ('comissao', $1, $2, $3)`,
+            [comissao, 'Comissão pedido #' + req.params.id + ' (' + (order.loja_name || order.loja_user) + ')', req.params.id]
+          );
+        } catch(ePw) { console.error('Platform wallet error:', ePw.message); }
+      }
+      // ────────────────────────────────────────────────────────────────
     }
 
       // ── COMISSÃO DE INDICAÇÃO POR PEDIDO (automático) ────────────────
@@ -720,6 +757,50 @@ app.put('/settings', async (req, res) => {
   );
   res.json(r.rows[0]);
 });
+
+// ── CAIXA DA PLATAFORMA ────────────────────────────────────────────
+
+app.get('/platform/wallet', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM platform_wallet WHERE id=1');
+    res.json(r.rows[0] || { balance: 0, total_ganho: 0, total_sacado: 0 });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/platform/events', async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT * FROM platform_events WHERE created_at >= NOW() - INTERVAL '48 hours' ORDER BY created_at DESC LIMIT 200`
+    );
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/platform/withdraw', async (req, res) => {
+  try {
+    const { valor, motivo } = req.body;
+    if (!valor || parseFloat(valor) <= 0) return res.status(400).json({ error: 'Valor invalido.' });
+    if (!motivo || !motivo.trim()) return res.status(400).json({ error: 'Informe o motivo do saque.' });
+    const walletRes = await pool.query('SELECT * FROM platform_wallet WHERE id=1');
+    const wallet = walletRes.rows[0];
+    if (!wallet || parseFloat(wallet.balance) < parseFloat(valor)) {
+      return res.status(400).json({ error: 'Saldo insuficiente na caixa.' });
+    }
+    const v = parseFloat(valor);
+    await pool.query(
+      `UPDATE platform_wallet SET balance = balance - $1, total_sacado = total_sacado + $1, updated_at=NOW() WHERE id=1`,
+      [v]
+    );
+    await pool.query(
+      `INSERT INTO platform_events (tipo, valor, descricao) VALUES ('saque', $1, $2)`,
+      [v, 'Saque: ' + motivo.trim()]
+    );
+    const updated = await pool.query('SELECT * FROM platform_wallet WHERE id=1');
+    res.json({ ok: true, wallet: updated.rows[0] });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ────────────────────────────────────────────────────────────────────
 
 app.post('/distance', async (req, res) => {
   try {
