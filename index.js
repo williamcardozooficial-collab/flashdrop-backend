@@ -39,6 +39,7 @@ function san(obj, ...fields) {
 
 // Telegram Bot
 const bot = process.env.TELEGRAM_BOT_TOKEN ? new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, {polling: true}) : null;
+const ADMIN_ID = 738230199;
 
 // Bot Commands
 if (bot) {
@@ -112,7 +113,8 @@ async function initDB() {
       t_coletado TIMESTAMP,
       t_no_cliente TIMESTAMP,
       t_entregue TIMESTAMP,
-      created_at TIMESTAMP DEFAULT NOW()
+      created_at TIMESTAMP DEFAULT NOW(),
+      notified_admin BOOLEAN DEFAULT false
     );
     CREATE TABLE IF NOT EXISTS settings (
       id SERIAL PRIMARY KEY,
@@ -199,6 +201,7 @@ async function initDB() {
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS launch_delay_minutes INT DEFAULT 60"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS launch_at BIGINT DEFAULT 0"); } catch(e) {}
   try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_id VARCHAR(20)"); } catch(e) {}
+  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS notified_admin BOOLEAN DEFAULT false"); } catch(e) {}
 
   // === CREDIT LIMIT MIGRATIONS ===
   // credit_mode: 0=sem limite, 1=bloquear ao atingir limite, 2=nao pode ultrapassar somando valor do pedido
@@ -417,6 +420,7 @@ app.post('/register', async (req, res) => {
         }
       } catch(refErr) { console.log('Referral link error:', refErr.message); }
     }
+    if (bot) bot.sendMessage(ADMIN_ID, '\uD83D\uDCCB Novo Cadastro Pendente!\n\nNome: ' + r.rows[0].name + '\nUsuario: ' + r.rows[0].username + '\nFuncao: ' + r.rows[0].role + '\n\nAcesse o painel admin para aprovar.').catch(function(){});
     res.json({ ok: true, user: r.rows[0] });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -797,6 +801,7 @@ app.post('/withdrawals', async (req, res) => {
       'INSERT INTO withdrawals (motoboy_id, motoboy_name, valor, pix_key) VALUES ($1,$2,$3,$4) RETURNING *',
       [motoboy_id, motoboy_name, valor, pix_key]
     );
+    if (bot) bot.sendMessage(ADMIN_ID, '\uD83D\uDCB8 Novo Pedido de Saque!\n\nMotoboy: ' + r.rows[0].motoboy_name + '\nValor: R$ ' + parseFloat(r.rows[0].valor).toFixed(2) + '\nChave PIX: ' + r.rows[0].pix_key + '\n\nAcesse o painel admin para processar.').catch(function(){});
     res.json(r.rows[0]);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -1310,9 +1315,21 @@ async function checkAndLaunchOrders() {
   } catch(e) { console.error('[JOB] Erro ao lancar pedidos:', e.message); }
 }
 
+async function checkPendingOrdersAlert() {
+  try {
+    const rp = await pool.query("SELECT id, loja_name, cod_pedido FROM orders WHERE status='pendente' AND created_at < NOW() - INTERVAL '10 minutes' AND notified_admin IS NOT TRUE");
+    for (const ord of rp.rows) {
+      if (bot) await bot.sendMessage(ADMIN_ID, '\u23F0 Pedido Pendente +10min!\n\nPedido #' + ord.id + '\nLoja: ' + (ord.loja_name || '-') + '\nCodigo: ' + (ord.cod_pedido || '-') + '\n\nAcesse o painel admin.').catch(function(){});
+      await pool.query('UPDATE orders SET notified_admin=true WHERE id=$1', [ord.id]);
+    }
+  } catch(e) { console.error('[JOB] checkPendingOrders:', e.message); }
+}
+
 initDB().then(() => {
   app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
   setInterval(checkLateArrivals, 60 * 1000);
+  setInterval(checkPendingOrdersAlert, 5 * 60 * 1000);
+  console.log('[JOB] Verificador de pedidos pendentes iniciado (5min)');
   setInterval(checkAndLaunchOrders, 30 * 1000);
   console.log('[JOB] Verificador de chegada iniciado (60s)');
   console.log('[JOB] Lancador automatico de pedidos iniciado (30s)');
