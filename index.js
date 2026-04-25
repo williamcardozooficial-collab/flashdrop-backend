@@ -727,6 +727,29 @@ app.post('/distance', async (req, res) => {
     if (!origin || !destination) return res.status(400).json({ error: 'Origin e destination obrigatorios' });
     const apiKey = process.env.GOOGLE_MAPS_KEY;
     if (!apiKey) return res.status(500).json({ error: 'API key nao configurada' });
+
+    // ── VALIDAR ENDEREÇO DE DESTINO VIA GEOCODING ──────────────────────
+    // Garante que o endereço tem rua e número, não apenas bairro/cidade
+    const geoUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(destination)}&key=${apiKey}`;
+    const geoResp = await axios.get(geoUrl);
+    const geoData = geoResp.data;
+    if (geoData.status === 'OK' && geoData.results.length > 0) {
+      const result = geoData.results[0];
+      const locType = result.geometry.location_type;
+      // GEOMETRIC_CENTER = apenas bairro/cidade/região (impreciso)
+      // APPROXIMATE = área aproximada
+      // ROOFTOP e RANGE_INTERPOLATED = endereço com número (aceitar)
+      if (locType === 'GEOMETRIC_CENTER' || locType === 'APPROXIMATE') {
+        const hasStreetNumber = result.address_components.some(c => c.types.includes('street_number'));
+        if (!hasStreetNumber) {
+          return res.status(400).json({
+            error: 'Endereco impreciso. Informe a rua e o numero (ex: Rua das Flores, 123). Apenas bairro ou cidade nao e aceito.'
+          });
+        }
+      }
+    }
+    // ───────────────────────────────────────────────────────────────────
+
     const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${encodeURIComponent(origin)}&destinations=${encodeURIComponent(destination)}&mode=driving&key=${apiKey}`;
     const resp = await axios.get(url);
     const data = resp.data;
