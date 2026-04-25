@@ -545,16 +545,16 @@ app.put('/orders/:id', async (req, res) => {
       }
     }
 
-      // ── COMISSÃO DE INDICAÇÃO POR PEDIDO ────────────────────────────
+      // ── COMISSÃO DE INDICAÇÃO POR PEDIDO (automático) ────────────────
       try {
         const refCfg = await pool.query('SELECT * FROM referral_settings WHERE id=1');
         const refSettings = refCfg.rows[0];
         if (refSettings && refSettings.ativo && fields.status === 'entregue') {
-          const ordRow = await pool.query('SELECT * FROM orders WHERE id=$1', [orderId]);
-          const ord = ordRow.rows[0];
-          if (ord) {
-            const now = new Date();
-            // 1) Comissão por indicação de LOJA
+          const ord = order; // já disponível do UPDATE acima
+          const now = new Date();
+
+          // 1) Comissão por indicação de LOJA (por pedido entregue)
+          if (ord.loja_user) {
             const lojaUser = await pool.query('SELECT * FROM users WHERE username=$1', [ord.loja_user]);
             if (lojaUser.rows.length > 0) {
               const loja = lojaUser.rows[0];
@@ -572,46 +572,53 @@ app.put('/orders/:id', async (req, res) => {
                   await pool.query(
                     `INSERT INTO referral_earnings (referrer_id, referred_id, order_id, valor, tipo)
                      VALUES ($1,$2,$3,$4,'comissao_pedido_loja')`,
-                    [ref.referrer_id, loja.id, orderId, comLoja]);
+                    [ref.referrer_id, loja.id, req.params.id, comLoja]);
                   await pool.query(
                     `UPDATE referrals SET total_pedidos_validos = total_pedidos_validos + 1,
                        total_ganho = total_ganho + $1 WHERE id=$2`, [comLoja, ref.id]);
-                }
-              }
-            }
-            // 2) Verificar meta de indicação de MOTOBOY
-            if (ord.motoboy_id) {
-              const mbRef = await pool.query(
-                `SELECT r.* FROM referrals r WHERE r.referred_id=$1
-                 AND r.referred_role='motoboy' AND r.status_ref='ativo' AND r.bonus_pago=false`, [ord.motoboy_id]);
-              if (mbRef.rows.length > 0) {
-                const ref = mbRef.rows[0];
-                const prazoOk = !ref.data_fim || new Date(ref.data_fim) > now;
-                if (prazoOk) {
-                  await pool.query(`UPDATE referrals SET total_pedidos_validos = total_pedidos_validos + 1 WHERE id=$1`, [ref.id]);
-                  const updated = await pool.query('SELECT * FROM referrals WHERE id=$1', [ref.id]);
-                  const upd = updated.rows[0];
-                  if (upd && upd.total_pedidos_validos >= upd.meta_pedidos && upd.meta_pedidos > 0) {
-                    const bonus = parseFloat(upd.bonus_valor || 0);
-                    if (bonus > 0) {
-                      await pool.query('UPDATE users SET balance = balance + $1 WHERE id=$2', [bonus, upd.referrer_id]);
-                      await pool.query(
-                        `INSERT INTO referral_earnings (referrer_id, referred_id, order_id, valor, tipo)
-                         VALUES ($1,$2,$3,$4,'bonus_meta_motoboy')`,
-                        [upd.referrer_id, ord.motoboy_id, orderId, bonus]);
-                      await pool.query(
-                        `UPDATE referrals SET bonus_pago=true, total_ganho=$1,
-                           data_conclusao=NOW(), status_ref='concluido' WHERE id=$2`, [bonus, upd.id]);
-                    }
-                  }
-                } else {
-                  await pool.query(`UPDATE referrals SET status_ref='expirado' WHERE id=$1`, [ref.id]);
+                  console.log('[REFERRAL] Comissao loja paga: R$' + comLoja + ' ao indicador id=' + ref.referrer_id);
                 }
               }
             }
           }
+
+          // 2) Contabilizar pedido do MOTOBOY e pagar bônus se atingiu meta
+          if (ord.motoboy_id) {
+            const mbRef = await pool.query(
+              `SELECT r.* FROM referrals r WHERE r.referred_id=$1
+               AND r.referred_role='motoboy' AND r.status_ref='ativo' AND r.bonus_pago=false`, [ord.motoboy_id]);
+            if (mbRef.rows.length > 0) {
+              const ref = mbRef.rows[0];
+              const prazoOk = !ref.data_fim || new Date(ref.data_fim) > now;
+              if (prazoOk) {
+                await pool.query(`UPDATE referrals SET total_pedidos_validos = total_pedidos_validos + 1 WHERE id=$1`, [ref.id]);
+                const updated = await pool.query('SELECT * FROM referrals WHERE id=$1', [ref.id]);
+                const upd = updated.rows[0];
+                console.log('[REFERRAL] Motoboy pedido contabilizado: ' + upd.total_pedidos_validos + '/' + upd.meta_pedidos);
+                // Se atingiu a meta — pagar bônus automaticamente
+                if (upd && upd.total_pedidos_validos >= upd.meta_pedidos && upd.meta_pedidos > 0) {
+                  const bonus = parseFloat(upd.bonus_valor || 0);
+                  if (bonus > 0) {
+                    await pool.query('UPDATE users SET balance = balance + $1 WHERE id=$2', [bonus, upd.referrer_id]);
+                    await pool.query(
+                      `INSERT INTO referral_earnings (referrer_id, referred_id, order_id, valor, tipo)
+                       VALUES ($1,$2,$3,$4,'bonus_meta_motoboy')`,
+                      [upd.referrer_id, ord.motoboy_id, req.params.id, bonus]);
+                    await pool.query(
+                      `UPDATE referrals SET bonus_pago=true, total_ganho=$1,
+                         data_conclusao=NOW(), status_ref='concluido' WHERE id=$2`, [bonus, upd.id]);
+                    console.log('[REFERRAL] Bonus meta motoboy pago: R$' + bonus + ' ao indicador id=' + upd.referrer_id);
+                  }
+                }
+              } else {
+                // Prazo expirado — marcar como expirado
+                await pool.query(`UPDATE referrals SET status_ref='expirado' WHERE id=$1`, [ref.id]);
+                console.log('[REFERRAL] Indicacao motoboy expirada id=' + ref.id);
+              }
+            }
+          }
         }
-      } catch(eRef) { console.error('Referral commission error:', eRef.message); }
+      } catch(eRef) { console.error('[REFERRAL] Erro na comissao de indicacao:', eRef.message); }
 
     if (fields.status === 'retornado') {
       await pool.query("UPDATE orders SET t_retornado=NOW() WHERE id=$1", [req.params.id]);
