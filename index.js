@@ -232,6 +232,33 @@ async function initDB() {
     )`);
   } catch(e) {}
 
+  // ── PROMOÇÕES DOS MOTOBOYS ────────────────────────────────────────
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS promotions (
+      id SERIAL PRIMARY KEY,
+      nome VARCHAR(200) NOT NULL,
+      meta_entregas INTEGER NOT NULL DEFAULT 25,
+      valor_bonus DECIMAL NOT NULL DEFAULT 30,
+      tipo VARCHAR(20) NOT NULL DEFAULT 'dia',
+      repetir BOOLEAN NOT NULL DEFAULT false,
+      ativa BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`);
+  } catch(e) {}
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS promotion_progress (
+      id SERIAL PRIMARY KEY,
+      promotion_id INTEGER REFERENCES promotions(id) ON DELETE CASCADE,
+      motoboy_id INTEGER NOT NULL,
+      contagem INTEGER NOT NULL DEFAULT 0,
+      data_ref DATE NOT NULL DEFAULT CURRENT_DATE,
+      pago BOOLEAN NOT NULL DEFAULT false,
+      pago_at TIMESTAMP,
+      UNIQUE(promotion_id, motoboy_id, data_ref)
+    )`);
+  } catch(e) {}
+  // ──────────────────────────────────────────────────────────────────
+
   console.log('DB initialized');
 }
 
@@ -579,6 +606,51 @@ app.put('/orders/:id', async (req, res) => {
           );
         } catch(ePw) { console.error('Platform wallet error:', ePw.message); }
       }
+
+      // ── PROMOÇÕES: contabilizar entrega do motoboy ──────────────────
+      try {
+        if (ord.motoboy_id) {
+          const todayPromos = await pool.query(
+            `SELECT * FROM promotions WHERE ativa=true AND tipo='dia'`
+          );
+          for (const promo of todayPromos.rows) {
+            const today = new Date().toISOString().slice(0,10);
+            await pool.query(
+              `INSERT INTO promotion_progress (promotion_id, motoboy_id, contagem, data_ref)
+               VALUES ($1, $2, 1, $3)
+               ON CONFLICT (promotion_id, motoboy_id, data_ref)
+               DO UPDATE SET contagem = promotion_progress.contagem + 1`,
+              [promo.id, ord.motoboy_id, today]
+            );
+            const prog = await pool.query(
+              `SELECT * FROM promotion_progress WHERE promotion_id=$1 AND motoboy_id=$2 AND data_ref=$3`,
+              [promo.id, ord.motoboy_id, today]
+            );
+            const p = prog.rows[0];
+            if (p && p.contagem >= promo.meta_entregas && !p.pago) {
+              const bonus = parseFloat(promo.valor_bonus);
+              await pool.query(
+                `UPDATE promotion_progress SET pago=true, pago_at=NOW() WHERE id=$1`,
+                [p.id]
+              );
+              await pool.query(
+                `UPDATE users SET balance = COALESCE(balance,0) + $1 WHERE id=$2`,
+                [bonus, ord.motoboy_id]
+              );
+              await pool.query(
+                `UPDATE platform_wallet SET balance = balance - $1, total_sacado = total_sacado + $1, updated_at=NOW() WHERE id=1`,
+                [bonus]
+              );
+              await pool.query(
+                `INSERT INTO platform_events (tipo, valor, descricao, order_id) VALUES ('promocao', $1, $2, $3)`,
+                [bonus, 'Bonus promocao ' + promo.nome + ' - motoboy id ' + ord.motoboy_id, req.params.id]
+              );
+              console.log('[PROMO] Bonus R$' + bonus + ' pago ao motoboy id=' + ord.motoboy_id);
+            }
+          }
+        }
+      } catch(ePromo) { console.error('[PROMO] Erro promocao:', ePromo.message); }
+      // ────────────────────────────────────────────────────────────────
       // ────────────────────────────────────────────────────────────────
     }
 
@@ -801,6 +873,85 @@ app.post('/platform/withdraw', async (req, res) => {
 });
 
 // ────────────────────────────────────────────────────────────────────
+
+
+/* PROMOCOES */
+app.get('/promotions', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM promotions ORDER BY id DESC');
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/promotions', async (req, res) => {
+  try {
+    const { nome, meta_entregas, valor_bonus, tipo, repetir, ativa } = req.body;
+    const r = await pool.query(
+      'INSERT INTO promotions (nome, meta_entregas, valor_bonus, tipo, repetir, ativa) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
+      [nome, meta_entregas || 25, valor_bonus || 30, tipo || 'dia', repetir || false, ativa !== false]
+    );
+    res.json(r.rows[0]);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/promotions/:id', async (req, res) => {
+  try {
+    const { nome, meta_entregas, valor_bonus, tipo, repetir, ativa } = req.body;
+    const r = await pool.query(
+      'UPDATE promotions SET nome=$1, meta_entregas=$2, valor_bonus=$3, tipo=$4, repetir=$5, ativa=$6 WHERE id=$7 RETURNING *',
+      [nome, meta_entregas, valor_bonus, tipo, repetir, ativa, req.params.id]
+    );
+    res.json(r.rows[0]);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/promotions/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM promotions WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/promotions/progress', async (req, res) => {
+  try {
+    const today = new Date().toISOString().slice(0,10);
+    const r = await pool.query(
+      `SELECT pp.*, p.nome, p.meta_entregas, p.valor_bonus, u.name as motoboy_name
+       FROM promotion_progress pp
+       JOIN promotions p ON p.id = pp.promotion_id
+       JOIN users u ON u.id = pp.motoboy_id
+       WHERE pp.data_ref = $1
+       ORDER BY pp.contagem DESC`,
+      [today]
+    );
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/promotions/motoboy/:id', async (req, res) => {
+  try {
+    const today = new Date().toISOString().slice(0,10);
+    const activePromos = await pool.query('SELECT * FROM promotions WHERE ativa=true');
+    const progRes = await pool.query(
+      `SELECT * FROM promotion_progress WHERE motoboy_id=$1 AND data_ref=$2`,
+      [req.params.id, today]
+    );
+    const result = activePromos.rows.map(promo => {
+      const prog = progRes.rows.find(rr => rr.promotion_id === promo.id);
+      return {
+        promotion_id: promo.id,
+        nome: promo.nome,
+        meta_entregas: promo.meta_entregas,
+        valor_bonus: promo.valor_bonus,
+        tipo: promo.tipo,
+        contagem: prog ? prog.contagem : 0,
+        pago: prog ? prog.pago : false
+      };
+    });
+    res.json(result);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 
 app.post('/distance', async (req, res) => {
   try {
