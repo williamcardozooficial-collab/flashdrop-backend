@@ -251,7 +251,7 @@ app.get('/users/:id', async (req, res) => {
 
 app.post('/users', async (req, res) => {
   try {
-    const { username, password, role, name, address, phone, vehicle, cpf } = req.body;
+    const { username, password, role, name, address, phone, vehicle, cpf, telegram_id, custom_credit_limit, custom_id } = req.body;
     if (phone) {
       const dupPhone = await pool.query('SELECT id FROM users WHERE phone=$1', [phone]);
       if (dupPhone.rows.length > 0) return res.status(400).json({ error: 'Telefone ja cadastrado.' });
@@ -262,13 +262,16 @@ app.post('/users', async (req, res) => {
     }
     const approved = true;
     const r = await pool.query(
-      'INSERT INTO users (username,password,role,name,address,phone,vehicle,cpf,approved) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *',
-      [username, password, role, name, address, phone, vehicle, cpf || null, approved]
+      'INSERT INTO users (username,password,role,name,address,phone,vehicle,cpf,approved,telegram_id,custom_credit_limit) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *',
+      [username, password, role, name, address, phone, vehicle, cpf || null, approved, telegram_id || null, custom_credit_limit || null]
     );
     let prefix2, digits2;
     if (role === 'motoboy') { prefix2 = 'M'; digits2 = 4; }
     else if (role === 'loja') { prefix2 = 'L'; digits2 = 6; }
-    if (prefix2) {
+    if (custom_id && custom_id.trim()) {
+      await pool.query('UPDATE users SET custom_id=$1 WHERE id=$2', [custom_id.trim().toUpperCase(), r.rows[0].id]);
+      r.rows[0].custom_id = custom_id.trim().toUpperCase();
+    } else if (prefix2) {
       const cntRes = await pool.query("SELECT COUNT(*) FROM users WHERE role=$1 AND custom_id IS NOT NULL", [role]);
       const cnt = parseInt(cntRes.rows[0].count) + 1;
       const newCid = prefix2 + String(cnt).padStart(digits2, '0');
