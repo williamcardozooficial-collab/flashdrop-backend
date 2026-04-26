@@ -284,6 +284,33 @@ async function initDB() {
       UNIQUE(promotion_id, motoboy_id, data_ref)
     )`);
   } catch(e) {}
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS produtos (
+      id SERIAL PRIMARY KEY,
+      loja_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      nome VARCHAR(200) NOT NULL,
+      descricao TEXT,
+      preco DECIMAL DEFAULT 0,
+      categoria VARCHAR(100),
+      foto_url TEXT,
+      ativo BOOLEAN DEFAULT true,
+      ordem INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`);
+  } catch(e) {}
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS vitrine_config (
+      id SERIAL PRIMARY KEY,
+      loja_id INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      ativa BOOLEAN DEFAULT false,
+      descricao_loja TEXT,
+      banner_url TEXT,
+      categoria_loja VARCHAR(100),
+      tempo_entrega_min INTEGER,
+      tempo_entrega_max INTEGER,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`);
+  } catch(e) {}
   // ──────────────────────────────────────────────────────────────────
 
   console.log('DB initialized');
@@ -1288,6 +1315,77 @@ app.post('/referrals/cleanup', async (req, res) => {
       RETURNING id`);
     res.json({refs_deletados: result.rows.length, earnings_deletados: earnResult.rows.length});
   } catch(e) { res.status(500).json({error: e.message}); }
+});
+
+// ── VITRINE / CARDAPIO ──────────────────────────────────────────────────
+
+app.get('/vitrine/lojas', async (req, res) => {
+  try {
+    const r = await pool.query(`SELECT u.id, u.username, u.name, u.address, u.phone, vc.descricao_loja, vc.banner_url, vc.categoria_loja, vc.tempo_entrega_min, vc.tempo_entrega_max FROM users u INNER JOIN vitrine_config vc ON vc.loja_id = u.id WHERE u.role='loja' AND u.approved=true AND vc.ativa=true ORDER BY u.name`);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/vitrine/lojas/:id', async (req, res) => {
+  try {
+    const r = await pool.query(`SELECT u.id, u.username, u.name, u.address, u.phone, vc.descricao_loja, vc.banner_url, vc.categoria_loja, vc.tempo_entrega_min, vc.tempo_entrega_max FROM users u LEFT JOIN vitrine_config vc ON vc.loja_id = u.id WHERE u.id=$1 AND u.role='loja'`, [req.params.id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Loja nao encontrada' });
+    res.json(r.rows[0]);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/vitrine/lojas/:id/produtos', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT id, nome, descricao, preco, categoria, foto_url, ordem FROM produtos WHERE loja_id=$1 AND ativo=true ORDER BY categoria, ordem, nome', [req.params.id]);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/produtos', async (req, res) => {
+  try {
+    const { loja_id } = req.query;
+    if (!loja_id) return res.status(400).json({ error: 'loja_id obrigatorio' });
+    const r = await pool.query('SELECT * FROM produtos WHERE loja_id=$1 ORDER BY categoria, ordem, nome', [loja_id]);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/produtos', async (req, res) => {
+  try {
+    const { loja_id, nome, descricao, preco, categoria, foto_url, ordem } = req.body;
+    const r = await pool.query('INSERT INTO produtos (loja_id, nome, descricao, preco, categoria, foto_url, ordem) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *', [loja_id, nome, descricao||null, preco||0, categoria||null, foto_url||null, ordem||0]);
+    res.json(r.rows[0]);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/produtos/:id', async (req, res) => {
+  try {
+    const { nome, descricao, preco, categoria, foto_url, ativo, ordem } = req.body;
+    const r = await pool.query('UPDATE produtos SET nome=$1, descricao=$2, preco=$3, categoria=$4, foto_url=$5, ativo=$6, ordem=$7 WHERE id=$8 RETURNING *', [nome, descricao||null, preco||0, categoria||null, foto_url||null, ativo!==false, ordem||0, req.params.id]);
+    res.json(r.rows[0]);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/produtos/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM produtos WHERE id=$1', [req.params.id]);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/vitrine/config/:loja_id', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM vitrine_config WHERE loja_id=$1', [req.params.loja_id]);
+    res.json(r.rows[0] || null);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/vitrine/config/:loja_id', async (req, res) => {
+  try {
+    const { ativa, descricao_loja, banner_url, categoria_loja, tempo_entrega_min, tempo_entrega_max } = req.body;
+    const r = await pool.query(`INSERT INTO vitrine_config (loja_id, ativa, descricao_loja, banner_url, categoria_loja, tempo_entrega_min, tempo_entrega_max) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (loja_id) DO UPDATE SET ativa=$2, descricao_loja=$3, banner_url=$4, categoria_loja=$5, tempo_entrega_min=$6, tempo_entrega_max=$7 RETURNING *`, [req.params.loja_id, ativa||false, descricao_loja||null, banner_url||null, categoria_loja||null, tempo_entrega_min||null, tempo_entrega_max||null]);
+    res.json(r.rows[0]);
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 async function checkAndLaunchOrders() {
