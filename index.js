@@ -1505,6 +1505,7 @@ app.post('/pagamento-restaurante/:id/responder', async (req, res) => {
     }
     res.json({ ok: true, decisao });
   } catch(e) { res.status(500).json({ error: e.message }); }
+});
 
 async function checkAndLaunchOrders() {
   try {
