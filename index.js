@@ -1,4 +1,4 @@
-const jwt = require('jsonwebtoken');
+const jwt = require('jsonwebtoken'); // rebuild
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -1393,6 +1393,21 @@ app.get('/vitrine/config/:loja_id', async (req, res) => {
 });
 
 app.put('/vitrine/config/:loja_id', async (req, res) => {
+    try {
+          const { banner_url, descricao, horario_abertura, horario_fechamento, tempo_entrega_min, tempo_entrega_max } = req.body;
+          const lojaId = req.params.loja_id;
+          await pool.query(
+                  `INSERT INTO vitrine_config (loja_id, banner_url, descricao, horario_abertura, horario_fechamento, tempo_entrega_min, tempo_entrega_max)
+                         VALUES ($1,$2,$3,$4,$5,$6,$7)
+                                ON CONFLICT (loja_id) DO UPDATE SET
+                                         banner_url=EXCLUDED.banner_url, descricao=EXCLUDED.descricao,
+                                                  horario_abertura=EXCLUDED.horario_abertura, horario_fechamento=EXCLUDED.horario_fechamento,
+                                                           tempo_entrega_min=EXCLUDED.tempo_entrega_min, tempo_entrega_max=EXCLUDED.tempo_entrega_max`,
+                  [lojaId, banner_url, descricao, horario_abertura, horario_fechamento, tempo_entrega_min, tempo_entrega_max]
+                );
+          res.json({ ok: true });
+    } catch(e) { res.status(500).json({ error: e.message }); }
+});
 
 // ─── PAGAR AO RESTAURANTE ────────────────────────────────────────────────────
 app.get('/orders/:id/pagar-restaurante/info', async (req, res) => {
