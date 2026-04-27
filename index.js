@@ -1507,6 +1507,17 @@ app.post('/pagamento-restaurante/:id/responder', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/pagamento-restaurante/loja/:username', async (req, res) => {
+    try {
+          const now = Date.now();
+          const r = await pool.query(
+                  "SELECT * FROM pagamento_restaurante WHERE loja_user=$1 AND status='pendente' AND expires_at > $2 ORDER BY created_at DESC LIMIT 1",
+                  [req.params.username, now]
+                );
+          res.json(r.rows.length > 0 ? r.rows[0] : null);
+    } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 async function checkAndLaunchOrders() {
   try {
     const now = Date.now();
