@@ -6,7 +6,7 @@ const axios = require('axios');
 const TelegramBot = require('node-telegram-bot-api');
 require('dotenv').config();
 
-const app = express();
+const app = express();h
 app.use(cors({ origin: '*', methods: ['GET','POST','PUT','DELETE','OPTIONS'], allowedHeaders: ['Content-Type','Authorization'] }));
 app.options('*', cors());
 app.use(express.json());
@@ -1559,6 +1559,25 @@ async function expirePagamentosRestaurante() {
     await pool.query("UPDATE pagamento_restaurante SET status='expirado' WHERE status='pendente' AND expires_at <= $1", [Date.now()]);
   } catch(e) {}
 }
+app.get('/migrate-db', async (req, res) => {
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS pagamento_restaurante (
+      id SERIAL PRIMARY KEY,
+      order_id INTEGER NOT NULL,
+      motoboy_id INTEGER NOT NULL,
+      motoboy_name VARCHAR(100),
+      loja_user VARCHAR(50) NOT NULL,
+      valor DECIMAL NOT NULL,
+      status VARCHAR(20) DEFAULT 'pendente',
+      expires_at BIGINT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`);
+    res.json({ ok: true, msg: 'table ok' });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 initDB().then(() => {
   app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
   setInterval(checkLateArrivals, 60 * 1000);
