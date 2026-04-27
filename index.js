@@ -311,7 +311,7 @@ async function initDB() {
       created_at TIMESTAMP DEFAULT NOW()
     )`);
 
-    CREATE TABLE IF NOT EXISTS pagamento_restaurante (
+   try { await pool.query(`CREATE TABLE IF NOT EXISTS pagamento_restaurante (
       id SERIAL PRIMARY KEY,
       order_id INTEGER NOT NULL,
       motoboy_id INTEGER NOT NULL,
@@ -321,8 +321,7 @@ async function initDB() {
       status VARCHAR(20) DEFAULT 'pendente',
       expires_at BIGINT NOT NULL,
       created_at TIMESTAMP DEFAULT NOW()
-    );
-  } catch(e) {}
+    `); } catch(e) {}
   // ──────────────────────────────────────────────────────────────────
 
   console.log('DB initialized');
