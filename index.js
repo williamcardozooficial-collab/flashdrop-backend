@@ -1395,6 +1395,22 @@ app.get('/vitrine/config/:loja_id', async (req, res) => {
 app.put('/vitrine/config/:loja_id', async (req, res) => {
 
 // ─── PAGAR AO RESTAURANTE ────────────────────────────────────────────────────
+app.get('/orders/:id/pagar-restaurante/info', async (req, res) => {
+  try {
+    const orderId = parseInt(req.params.id);
+    const ord = await pool.query('SELECT * FROM orders WHERE id=$1', [orderId]);
+    if (ord.rows.length === 0) return res.status(404).json({ error: 'Pedido nao encontrado' });
+    const order = ord.rows[0];
+    const lojaU = await pool.query('SELECT credit FROM users WHERE username=$1', [order.loja_user]);
+    const lojaCredit = lojaU.rows.length > 0 ? (parseFloat(lojaU.rows[0].credit)||0) : 0;
+    const valorPedido = parseFloat(order.valor_pedido)||0;
+    const maxValor = valorPedido + lojaCredit;
+    const pending = await pool.query("SELECT id FROM pagamento_restaurante WHERE order_id=$1 AND status='pendente' AND expires_at>$2", [orderId, Date.now()]);
+    res.json({ max_valor: maxValor, has_pending: pending.rows.length > 0, loja_credit: lojaCredit, valor_pedido: valorPedido });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+
 app.post('/orders/:id/pagar-restaurante', async (req, res) => {
   try {
     const orderId = parseInt(req.params.id);
