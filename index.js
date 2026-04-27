@@ -310,6 +310,7 @@ async function initDB() {
       tempo_entrega_max INTEGER,
       created_at TIMESTAMP DEFAULT NOW()
     )`);
+  } catch(e) {}
 
    try { await pool.query(`CREATE TABLE IF NOT EXISTS pagamento_restaurante (
       id SERIAL PRIMARY KEY,
