@@ -1505,14 +1505,6 @@ app.post('/pagamento-restaurante/:id/responder', async (req, res) => {
     }
     res.json({ ok: true, decisao });
   } catch(e) { res.status(500).json({ error: e.message }); }
-});
-// ─────────────────────────────────────────────────────────────────────────────
-  try {
-    const { ativa, descricao_loja, banner_url, categoria_loja, tempo_entrega_min, tempo_entrega_max } = req.body;
-    const r = await pool.query(`INSERT INTO vitrine_config (loja_id, ativa, descricao_loja, banner_url, categoria_loja, tempo_entrega_min, tempo_entrega_max) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (loja_id) DO UPDATE SET ativa=$2, descricao_loja=$3, banner_url=$4, categoria_loja=$5, tempo_entrega_min=$6, tempo_entrega_max=$7 RETURNING *`, [req.params.loja_id, ativa||false, descricao_loja||null, banner_url||null, categoria_loja||null, tempo_entrega_min||null, tempo_entrega_max||null]);
-    res.json(r.rows[0]);
-  } catch(e) { res.status(500).json({ error: e.message }); }
-});
 
 async function checkAndLaunchOrders() {
   try {
