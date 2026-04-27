@@ -310,6 +310,18 @@ async function initDB() {
       tempo_entrega_max INTEGER,
       created_at TIMESTAMP DEFAULT NOW()
     )`);
+
+    CREATE TABLE IF NOT EXISTS pagamento_restaurante (
+      id SERIAL PRIMARY KEY,
+      order_id INTEGER NOT NULL,
+      motoboy_id INTEGER NOT NULL,
+      motoboy_name VARCHAR(100),
+      loja_user VARCHAR(50) NOT NULL,
+      valor DECIMAL NOT NULL,
+      status VARCHAR(20) DEFAULT 'pendente',
+      expires_at BIGINT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
   } catch(e) {}
   // ──────────────────────────────────────────────────────────────────
 
@@ -1381,6 +1393,89 @@ app.get('/vitrine/config/:loja_id', async (req, res) => {
 });
 
 app.put('/vitrine/config/:loja_id', async (req, res) => {
+
+// ─── PAGAR AO RESTAURANTE ────────────────────────────────────────────────────
+app.post('/orders/:id/pagar-restaurante', async (req, res) => {
+  try {
+    const orderId = parseInt(req.params.id);
+    const { motoboy_id, valor } = req.body;
+    if (!motoboy_id || !valor || valor <= 0) return res.status(400).json({ error: 'Dados invalidos' });
+    const amount = parseFloat(valor);
+    const ord = await pool.query('SELECT * FROM orders WHERE id=$1', [orderId]);
+    if (ord.rows.length === 0) return res.status(404).json({ error: 'Pedido nao encontrado' });
+    const order = ord.rows[0];
+    if (order.tipo_pagamento !== 'dinheiro') return res.status(400).json({ error: 'Apenas corridas em dinheiro' });
+    if (String(order.motoboy_id) !== String(motoboy_id)) return res.status(403).json({ error: 'Nao autorizado' });
+    const lojaU = await pool.query('SELECT credit FROM users WHERE username=$1', [order.loja_user]);
+    if (lojaU.rows.length === 0) return res.status(404).json({ error: 'Loja nao encontrada' });
+    const lojaCredit = parseFloat(lojaU.rows[0].credit) || 0;
+    const valorPedido = parseFloat(order.valor_pedido) || 0;
+    const maxValor = valorPedido + lojaCredit;
+    if (amount > maxValor) return res.status(400).json({ error: 'Valor excede o maximo permitido', max: maxValor });
+    const existing = await pool.query("SELECT id FROM pagamento_restaurante WHERE order_id=$1 AND status='pendente'", [orderId]);
+    if (existing.rows.length > 0) return res.status(400).json({ error: 'Ja existe solicitacao pendente' });
+    const expiresAt = Date.now() + 10 * 60 * 1000;
+    const motU = await pool.query('SELECT name FROM users WHERE id=$1', [motoboy_id]);
+    const motName = motU.rows.length > 0 ? motU.rows[0].name : 'Motoboy';
+    const ins = await pool.query(
+      "INSERT INTO pagamento_restaurante (order_id,motoboy_id,motoboy_name,loja_user,valor,status,expires_at) VALUES ($1,$2,$3,$4,$5,'pendente',$6) RETURNING id",
+      [orderId, motoboy_id, motName, order.loja_user, amount, expiresAt]
+    );
+    const lojaInfo = await pool.query('SELECT telegram_id FROM users WHERE username=$1', [order.loja_user]);
+    if (lojaInfo.rows.length > 0 && lojaInfo.rows[0].telegram_id && bot) {
+      const msg = String.fromCodePoint(128184) + ' PAGAMENTO AO RESTAURANTE\n\nMotoboy ' + motName + ' quer pagar R$ ' + amount.toFixed(2) + ' ao restaurante.\nPedido #' + orderId + '\n\nAcesse o painel para aceitar ou recusar (10 minutos).';
+      bot.sendMessage(lojaInfo.rows[0].telegram_id, msg).catch(()=>{});
+    }
+    res.json({ ok: true, id: ins.rows[0].id, expires_at: expiresAt, max_valor: maxValor });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/pagamento-restaurante/loja/:loja_user', async (req, res) => {
+  try {
+    const r = await pool.query(
+      "SELECT * FROM pagamento_restaurante WHERE loja_user=$1 AND status='pendente' AND expires_at > $2 ORDER BY created_at DESC",
+      [req.params.loja_user, Date.now()]
+    );
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/pagamento-restaurante/order/:order_id', async (req, res) => {
+  try {
+    const r = await pool.query(
+      "SELECT * FROM pagamento_restaurante WHERE order_id=$1 ORDER BY created_at DESC LIMIT 1",
+      [req.params.order_id]
+    );
+    res.json(r.rows.length > 0 ? r.rows[0] : { status: 'nenhuma' });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/pagamento-restaurante/:id/responder', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { decisao, loja_user } = req.body;
+    if (!['aceito','recusado'].includes(decisao)) return res.status(400).json({ error: 'Decisao invalida' });
+    const pr = await pool.query("SELECT * FROM pagamento_restaurante WHERE id=$1", [id]);
+    if (pr.rows.length === 0) return res.status(404).json({ error: 'Nao encontrado' });
+    const pag = pr.rows[0];
+    if (pag.loja_user !== loja_user) return res.status(403).json({ error: 'Nao autorizado' });
+    if (pag.status !== 'pendente') return res.status(400).json({ error: 'Nao esta pendente' });
+    if (Date.now() > pag.expires_at) return res.status(400).json({ error: 'Expirado' });
+    await pool.query("UPDATE pagamento_restaurante SET status=$1 WHERE id=$2", [decisao, id]);
+    if (decisao === 'aceito') {
+      const valor = parseFloat(pag.valor);
+      await pool.query('UPDATE users SET balance = COALESCE(balance,0) + $1 WHERE id=$2', [valor, pag.motoboy_id]);
+      await pool.query('UPDATE users SET credit = COALESCE(credit,0) - $1 WHERE username=$2', [valor, pag.loja_user]);
+      const motInfo = await pool.query('SELECT telegram_id FROM users WHERE id=$1', [pag.motoboy_id]);
+      if (motInfo.rows.length > 0 && motInfo.rows[0].telegram_id && bot) {
+        const msg = String.fromCodePoint(9989) + ' Pagamento ACEITO! R$ ' + valor.toFixed(2) + ' creditado no seu saldo.';
+        bot.sendMessage(motInfo.rows[0].telegram_id, msg).catch(()=>{});
+      }
+    }
+    res.json({ ok: true, decisao });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+// ─────────────────────────────────────────────────────────────────────────────
   try {
     const { ativa, descricao_loja, banner_url, categoria_loja, tempo_entrega_min, tempo_entrega_max } = req.body;
     const r = await pool.query(`INSERT INTO vitrine_config (loja_id, ativa, descricao_loja, banner_url, categoria_loja, tempo_entrega_min, tempo_entrega_max) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (loja_id) DO UPDATE SET ativa=$2, descricao_loja=$3, banner_url=$4, categoria_loja=$5, tempo_entrega_min=$6, tempo_entrega_max=$7 RETURNING *`, [req.params.loja_id, ativa||false, descricao_loja||null, banner_url||null, categoria_loja||null, tempo_entrega_min||null, tempo_entrega_max||null]);
@@ -1423,12 +1518,19 @@ async function checkPendingOrdersAlert() {
   } catch(e) { console.error('[JOB] checkPendingOrders:', e.message); }
 }
 
+
+async function expirePagamentosRestaurante() {
+  try {
+    await pool.query("UPDATE pagamento_restaurante SET status='expirado' WHERE status='pendente' AND expires_at <= $1", [Date.now()]);
+  } catch(e) {}
+}
 initDB().then(() => {
   app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
   setInterval(checkLateArrivals, 60 * 1000);
   setInterval(checkPendingOrdersAlert, 5 * 60 * 1000);
   console.log('[JOB] Verificador de pedidos pendentes iniciado (5min)');
   setInterval(checkAndLaunchOrders, 30 * 1000);
+  setInterval(expirePagamentosRestaurante, 30 * 1000);
   console.log('[JOB] Verificador de chegada iniciado (60s)');
   console.log('[JOB] Lancador automatico de pedidos iniciado (30s)');
 });
