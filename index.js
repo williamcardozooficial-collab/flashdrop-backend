@@ -772,6 +772,12 @@ app.put('/orders/:id', async (req, res) => {
                     `UPDATE referrals SET total_pedidos_validos = total_pedidos_validos + 1,
                        total_ganho = total_ganho + $1 WHERE id=$2`, [comLoja, ref.id]);
                   console.log('[REFERRAL] Comissao loja paga: R$' + comLoja + ' ao indicador id=' + ref.referrer_id);
+                  await pool.query(
+                    'INSERT INTO motoboy_wallet_events (motoboy_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)',
+                    [ref.referrer_id, 'comissao_indicacao_loja', comLoja, 'Comissao indicacao loja ' + loja.name + ' pedido #' + req.params.id, req.params.id]);
+                  await pool.query(
+                    `INSERT INTO platform_events (tipo, valor, descricao, order_id) VALUES ('indicacao_loja', $1, $2, $3)`,
+                    [comLoja, 'Indicacao loja: ' + loja.name + ' -> motoboy id ' + ref.referrer_id, req.params.id]);
                 }
               }
             }
