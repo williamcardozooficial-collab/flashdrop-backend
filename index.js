@@ -685,7 +685,7 @@ app.put('/orders/:id', async (req, res) => {
 
       // ── PROMOÇÕES: contabilizar entrega do motoboy ──────────────────
       try {
-        if (ord.motoboy_id) {
+        if (order.motoboy_id) {
           const todayPromos = await pool.query(
             `SELECT * FROM promotions WHERE ativa=true AND tipo='dia'`
           );
@@ -696,11 +696,11 @@ app.put('/orders/:id', async (req, res) => {
                VALUES ($1, $2, 1, $3)
                ON CONFLICT (promotion_id, motoboy_id, data_ref)
                DO UPDATE SET contagem = promotion_progress.contagem + 1`,
-              [promo.id, ord.motoboy_id, today]
+              [promo.id, order.motoboy_id, today]
             );
             const prog = await pool.query(
               `SELECT * FROM promotion_progress WHERE promotion_id=$1 AND motoboy_id=$2 AND data_ref=$3`,
-              [promo.id, ord.motoboy_id, today]
+              [promo.id, order.motoboy_id, today]
             );
             const p = prog.rows[0];
             if (p && p.contagem >= promo.meta_entregas && !p.pago) {
@@ -711,7 +711,7 @@ app.put('/orders/:id', async (req, res) => {
               );
               await pool.query(
                 `UPDATE users SET balance = COALESCE(balance,0) + $1 WHERE id=$2`,
-                [bonus, ord.motoboy_id]
+                [bonus, order.motoboy_id]
               );
               await pool.query(
                 `UPDATE platform_wallet SET balance = balance - $1, total_sacado = total_sacado + $1, updated_at=NOW() WHERE id=1`,
@@ -719,9 +719,9 @@ app.put('/orders/:id', async (req, res) => {
               );
               await pool.query(
                 `INSERT INTO platform_events (tipo, valor, descricao, order_id) VALUES ('promocao', $1, $2, $3)`,
-                [bonus, 'Bonus promocao ' + promo.nome + ' - motoboy id ' + ord.motoboy_id, req.params.id]
+                [bonus, 'Bonus promocao ' + promo.nome + ' - motoboy id ' + order.motoboy_id, req.params.id]
               );
-              console.log('[PROMO] Bonus R$' + bonus + ' pago ao motoboy id=' + ord.motoboy_id);
+              console.log('[PROMO] Bonus R$' + bonus + ' pago ao motoboy id=' + order.motoboy_id);
             }
           }
         }
@@ -754,6 +754,7 @@ app.put('/orders/:id', async (req, res) => {
                 const comLoja = parseFloat(ref.comissao_por_pedido_loja || 0);
                 if (comLoja > 0) {
                   await pool.query('UPDATE users SET balance = balance + $1 WHERE id=$2', [comLoja, ref.referrer_id]);
+                  await pool.query(`UPDATE platform_wallet SET balance = balance - $1, total_sacado = total_sacado + $1, updated_at=NOW() WHERE id=1`, [comLoja]);
                   await pool.query(
                     `INSERT INTO referral_earnings (referrer_id, referred_id, order_id, valor, tipo)
                      VALUES ($1,$2,$3,$4,'comissao_pedido_loja')`,
@@ -785,6 +786,7 @@ app.put('/orders/:id', async (req, res) => {
                   const bonus = parseFloat(upd.bonus_valor || 0);
                   if (bonus > 0) {
                     await pool.query('UPDATE users SET balance = balance + $1 WHERE id=$2', [bonus, upd.referrer_id]);
+                      await pool.query(`UPDATE platform_wallet SET balance = balance - $1, total_sacado = total_sacado + $1, updated_at=NOW() WHERE id=1`, [bonus]);
                     await pool.query(
                       `INSERT INTO referral_earnings (referrer_id, referred_id, order_id, valor, tipo)
                        VALUES ($1,$2,$3,$4,'bonus_meta_motoboy')`,
