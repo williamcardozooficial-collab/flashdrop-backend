@@ -600,7 +600,7 @@ app.put('/orders/:id', async (req, res) => {
         }
 
         // Verifica limite de credito apenas para corridas em dinheiro
-        const orderRes = await pool.query('SELECT tipo_pagamento, valor_motoboy, comissao, valor_pedido FROM orders WHERE id=$1', [req.params.id]);
+        const orderRes = await pool.query('SELECT tipo_pagamento, valor_motoboy, comissao, valor_pedido, delivery_code FROM orders WHERE id=$1', [req.params.id]);
         if (orderRes.rows.length > 0) {
           const order = orderRes.rows[0];
           const isDinheiro = order.tipo_pagamento === 'dinheiro';
