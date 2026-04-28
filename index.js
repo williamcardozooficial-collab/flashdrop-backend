@@ -666,6 +666,10 @@ app.put('/orders/:id', async (req, res) => {
         // PIX ou Maquina: motoboy recebe valor_motoboy
         if (valorMotoboy > 0) {
           await pool.query('UPDATE users SET balance = balance + $1 WHERE id=$2', [valorMotoboy, order.motoboy_id]);
+              await pool.query(
+                'INSERT INTO motoboy_wallet_events (motoboy_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)',
+                [order.motoboy_id, 'corrida', valorMotoboy, 'Ganho corrida #' + req.params.id, req.params.id]
+              );
         }
       }
 
@@ -712,6 +716,10 @@ app.put('/orders/:id', async (req, res) => {
               await pool.query(
                 `UPDATE users SET balance = COALESCE(balance,0) + $1 WHERE id=$2`,
                 [bonus, order.motoboy_id]
+              );
+              await pool.query(
+                'INSERT INTO motoboy_wallet_events (motoboy_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)',
+                [order.motoboy_id, 'bonus_promo', bonus, 'Bonus promocao ' + promo.nome, req.params.id]
               );
               await pool.query(
                 `UPDATE platform_wallet SET balance = balance - $1, total_sacado = total_sacado + $1, updated_at=NOW() WHERE id=1`,
@@ -786,6 +794,10 @@ app.put('/orders/:id', async (req, res) => {
                   const bonus = parseFloat(upd.bonus_valor || 0);
                   if (bonus > 0) {
                     await pool.query('UPDATE users SET balance = balance + $1 WHERE id=$2', [bonus, upd.referrer_id]);
+              await pool.query(
+                'INSERT INTO motoboy_wallet_events (motoboy_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)',
+                [upd.referrer_id, 'bonus_indicacao', bonus, 'Bonus indicacao motoboy #' + req.params.id, req.params.id]
+              );
                       await pool.query(`UPDATE platform_wallet SET balance = balance - $1, total_sacado = total_sacado + $1, updated_at=NOW() WHERE id=1`, [bonus]);
                     await pool.query(
                       `INSERT INTO referral_earnings (referrer_id, referred_id, order_id, valor, tipo)
@@ -911,10 +923,28 @@ app.put('/settings', async (req, res) => {
 
 // ── CAIXA DA PLATAFORMA ────────────────────────────────────────────
 
+// ── EVENTOS DE SALDO DO MOTOBOY (últimas 24h) ──────────────────────────────
+app.get('/users/:id/wallet-events', async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT * FROM motoboy_wallet_events WHERE motoboy_id = $1 AND created_at >= NOW() - INTERVAL '24 hours' ORDER BY created_at DESC`,
+      [req.params.id]
+    );
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/platform/wallet', async (req, res) => {
   try {
-    const r = await pool.query('SELECT * FROM platform_wallet WHERE id=1');
-    res.json(r.rows[0] || { balance: 0, total_ganho: 0, total_sacado: 0 });
+        const r = await pool.query('SELECT * FROM platform_wallet WHERE id=1');
+        const hoje = new Date().toISOString().slice(0, 10);
+        const gdRes = await pool.query(
+          `SELECT COALESCE(SUM(valor),0) AS ganho_hoje FROM platform_events WHERE tipo='comissao' AND created_at >= $1::date`,
+          [hoje]
+        );
+        const walletRow = r.rows[0] || { balance: 0, total_ganho: 0, total_sacado: 0 };
+        walletRow.ganho_hoje = parseFloat(gdRes.rows[0].ganho_hoje || 0);
+        res.json(walletRow);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1572,6 +1602,15 @@ app.get('/migrate-db', async (req, res) => {
       valor DECIMAL NOT NULL,
       status VARCHAR(20) DEFAULT 'pendente',
       expires_at BIGINT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`);
+    await pool.query(`CREATE TABLE IF NOT EXISTS motoboy_wallet_events (
+      id SERIAL PRIMARY KEY,
+      motoboy_id INTEGER NOT NULL,
+      tipo VARCHAR(30) NOT NULL,
+      valor DECIMAL DEFAULT 0,
+      descricao TEXT,
+      order_id INTEGER,
       created_at TIMESTAMP DEFAULT NOW()
     )`);
     res.json({ ok: true, msg: 'table ok' });
