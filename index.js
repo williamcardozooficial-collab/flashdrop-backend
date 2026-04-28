@@ -632,11 +632,12 @@ app.put('/orders/:id', async (req, res) => {
     const sets = Object.keys(fields).map((k,i) => `${k}=$${i+2}`).join(',');
     const vals = Object.values(fields);
 
-    const prevOrderRes = await pool.query('SELECT motoboy_id FROM orders WHERE id=$1', [req.params.id]);
+    const prevOrderRes = await pool.query('SELECT motoboy_id, status FROM orders WHERE id=$1', [req.params.id]);
     const prevMotoboyId = prevOrderRes.rows.length > 0 ? prevOrderRes.rows[0].motoboy_id : null;
 
     const r = await pool.query(`UPDATE orders SET ${sets} WHERE id=$1 RETURNING *`, [req.params.id, ...vals]);
     const order = r.rows[0];
+    if (fields.status === 'entregue' && prevOrderRes.rows[0] && prevOrderRes.rows[0].status === 'entregue') { return res.json(order); }
 
     // Cancelamento pelo motoboy: bloquear por 10 minutos
     if (fields.status === 'pendente' && fields.motoboy_id === null && prevMotoboyId) {
