@@ -648,14 +648,12 @@ app.put('/orders/:id', async (req, res) => {
       await pool.query('UPDATE users SET blocked_until=$1 WHERE id=$2', [blockedUntil, prevMotoboyId]);
     }
 
-    if (fields.status === 'entregue' && order.motoboy_id) {
-      // ── VALIDAÇÃO DO CÓDIGO DE ENTREGA ─────────────────────────
-      if (order.delivery_code) {
-        const obsInformada = (fields.observacao_entrega || '').trim();
-        if (obsInformada !== String(order.delivery_code)) {
-          return res.status(400).json({ error: 'Codigo de entrega incorreto. Verifique o codigo com o cliente e tente novamente.' });
-        }
+    if (fields.status === 'entregue' && order.motoboy_id && order.delivery_code) {
+      const obsInformada = (fields.observacao_entrega || '').trim();
+      if (obsInformada !== String(order.delivery_code)) {
+        return res.status(400).json({ error: 'Codigo de entrega incorreto. Verifique o codigo com o cliente e tente novamente.' });
       }
+    }
       // ─────────────────────────────────────────────────────────────
       const valorMotoboy = parseFloat(order.valor_motoboy) || 0;
       const valorPedido = parseFloat(order.valor_pedido) || 0;
