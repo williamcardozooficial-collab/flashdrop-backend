@@ -634,8 +634,16 @@ app.put('/orders/:id', async (req, res) => {
     const sets = Object.keys(fields).map((k,i) => `${k}=$${i+2}`).join(',');
     const vals = Object.values(fields);
 
-    const prevOrderRes = await pool.query('SELECT motoboy_id, status FROM orders WHERE id=$1', [req.params.id]);
+    const prevOrderRes = await pool.query('SELECT motoboy_id, status, delivery_code FROM orders WHERE id=$1', [req.params.id]);
     const prevMotoboyId = prevOrderRes.rows.length > 0 ? prevOrderRes.rows[0].motoboy_id : null;
+
+    // Validacao do codigo de entrega ANTES do UPDATE
+    if (fields.status === 'entregue' && prevOrderRes.rows.length > 0 && prevOrderRes.rows[0].delivery_code) {
+      const obsInformada = (fields.observacao_entrega || '').trim();
+      if (obsInformada !== String(prevOrderRes.rows[0].delivery_code)) {
+        return res.status(400).json({ error: 'Codigo de entrega incorreto. Verifique o codigo com o cliente e tente novamente.' });
+      }
+    }
 
     const r = await pool.query(`UPDATE orders SET ${sets} WHERE id=$1 RETURNING *`, [req.params.id, ...vals]);
     const order = r.rows[0];
@@ -649,12 +657,6 @@ app.put('/orders/:id', async (req, res) => {
     }
 
     if (fields.status === 'entregue' && order.motoboy_id) {
-      if (order.delivery_code) {
-        const obsInformada = (fields.observacao_entrega || '').trim();
-        if (obsInformada !== String(order.delivery_code)) {
-          return res.status(400).json({ error: 'Codigo de entrega incorreto. Verifique o codigo com o cliente e tente novamente.' });
-        }
-      }
       // ─────────────────────────────────────────────────────────────
       const valorMotoboy = parseFloat(order.valor_motoboy) || 0;
       const valorPedido = parseFloat(order.valor_pedido) || 0;
