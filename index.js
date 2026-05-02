@@ -1637,6 +1637,27 @@ app.get('/migrate-db', async (req, res) => {
   }
 });
 
+// ===== ENDPOINT RASTREAMENTO MOTOBOYS =====
+app.get('/api/motoboys/localizacoes', async (req, res) => {
+    try {
+          const result = await pool.query(`SELECT id, name as nome, lat as latitude, lng as longitude, online, last_location_update as atualizado_em FROM users WHERE role = 'motoboy' AND blocked = false AND lat IS NOT NULL AND lng IS NOT NULL ORDER BY online DESC, name ASC`);
+          res.json(result.rows);
+        } catch (e) {
+          res.status(500).json({ error: e.message });
+        }
+  });
+
+app.post('/api/motoboys/localizacao', async (req, res) => {
+    const { motoboy_id, latitude, longitude } = req.body;
+    if (!motoboy_id || !latitude || !longitude) return res.status(400).json({ error: 'Dados incompletos' });
+    try {
+          await pool.query('UPDATE users SET lat=$1, lng=$2, last_location_update=NOW() WHERE id=$3 AND role=$4', [latitude, longitude, motoboy_id, 'motoboy']);
+          res.json({ ok: true });
+        } catch (e) {
+          res.status(500).json({ error: e.message });
+        }
+  });
+// ===== FIM ENDPOINT RASTREAMENTO =====
 initDB().then(() => {
   app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
   setInterval(checkLateArrivals, 60 * 1000);
