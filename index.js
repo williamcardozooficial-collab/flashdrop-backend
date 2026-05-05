@@ -211,6 +211,14 @@ async function initDB() {
   try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_credit_limit DECIMAL DEFAULT NULL"); } catch(e) {}
   // Limite padrao de credito na tabela de configuracoes
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS credit_limit DECIMAL DEFAULT 20.00"); } catch(e) {}
+  // ── TAXA CHUVA e TAXA NOTURNA ──
+  try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_chuva DECIMAL DEFAULT 0"); } catch(e) {}
+  try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_chuva_ativa BOOLEAN DEFAULT false"); } catch(e) {}
+  try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_chuva_desconto_de VARCHAR(10) DEFAULT 'admin'"); } catch(e) {}
+  try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_noturna DECIMAL DEFAULT 0"); } catch(e) {}
+  try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_noturna_ativa BOOLEAN DEFAULT false"); } catch(e) {}
+  try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_noturna_hora_inicio VARCHAR(5) DEFAULT '22:00'"); } catch(e) {}
+  try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_noturna_hora_fim VARCHAR(5) DEFAULT '06:00'"); } catch(e) {}
 
   // Auto-generate custom_id for existing users
   try {
@@ -929,12 +937,23 @@ app.get('/settings', async (req, res) => {
 
 /* Ã¢ÂÂÃ¢ÂÂ AJUSTES DA PLATAFORMA (inclui credit_limit) Ã¢ÂÂÃ¢ÂÂ */
 app.put('/settings', async (req, res) => {
-  const { min_fee, price_per_km, arrancada, commission, max_per_motoboy, launch_delay_minutes, credit_limit } = req.body;
+  const { min_fee, price_per_km, arrancada, commission, max_per_motoboy, launch_delay_minutes, credit_limit,
+          taxa_chuva, taxa_chuva_ativa, taxa_chuva_desconto_de,
+          taxa_noturna, taxa_noturna_ativa, taxa_noturna_hora_inicio, taxa_noturna_hora_fim } = req.body;
   const delayVal = (launch_delay_minutes != null) ? parseInt(launch_delay_minutes) : 60;
   const creditLimitVal = (credit_limit != null) ? parseFloat(credit_limit) : 20.00;
   const r = await pool.query(
-    'UPDATE settings SET min_fee=$1, price_per_km=$2, arrancada=$3, commission=$4, max_per_motoboy=$5, launch_delay_minutes=$6, credit_limit=$7 WHERE id=1 RETURNING *',
-    [min_fee, price_per_km, arrancada, commission, max_per_motoboy, delayVal, creditLimitVal]
+    `UPDATE settings SET
+      min_fee=$1, price_per_km=$2, arrancada=$3, commission=$4, max_per_motoboy=$5,
+      launch_delay_minutes=$6, credit_limit=$7,
+      taxa_chuva=$8, taxa_chuva_ativa=$9, taxa_chuva_desconto_de=$10,
+      taxa_noturna=$11, taxa_noturna_ativa=$12,
+      taxa_noturna_hora_inicio=$13, taxa_noturna_hora_fim=$14
+    WHERE id=1 RETURNING *`,
+    [min_fee, price_per_km, arrancada, commission, max_per_motoboy, delayVal, creditLimitVal,
+     taxa_chuva || 0, taxa_chuva_ativa || false, taxa_chuva_desconto_de || 'admin',
+     taxa_noturna || 0, taxa_noturna_ativa || false,
+     taxa_noturna_hora_inicio || '22:00', taxa_noturna_hora_fim || '06:00']
   );
   res.json(r.rows[0]);
 });
