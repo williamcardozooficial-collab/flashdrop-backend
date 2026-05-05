@@ -219,6 +219,10 @@ async function initDB() {
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_noturna_ativa BOOLEAN DEFAULT false"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_noturna_hora_inicio VARCHAR(5) DEFAULT '22:00'"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_noturna_hora_fim VARCHAR(5) DEFAULT '06:00'"); } catch(e) {}
+  // ── TAXA EXTRA NOS PEDIDOS (armazenar taxas aplicadas) ──
+  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS taxa_extra_chuva DECIMAL DEFAULT 0"); } catch(e) {}
+  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS taxa_extra_noturna DECIMAL DEFAULT 0"); } catch(e) {}
+  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS chuva_desconto_de VARCHAR(10) DEFAULT 'admin'"); } catch(e) {}
 
   // Auto-generate custom_id for existing users
   try {
@@ -567,10 +571,38 @@ app.post('/orders', async (req, res) => {
     if (lojaRes.rows.length > 0) telefone_loja = lojaRes.rows[0].phone;
   } catch(e) {}
   const deliveryCode = String(Math.floor(1000 + Math.random() * 9000));
+
+  // ── APLICAR TAXAS (CHUVA e NOTURNA) ──────────────────────────────
+  let valorMotoboy = parseFloat(d.valor_motoboy) || 0;
+  let valorTotal = parseFloat(d.valor_total) || 0;
+  let taxa_extra_chuva = 0;
+  let taxa_extra_noturna = 0;
+  let chuva_desconto_de = 'admin';
+  try {
+    const cfgRes = await pool.query('SELECT * FROM settings WHERE id=1');
+    const cfg = cfgRes.rows[0] || {};
+    if (cfg.taxa_noturna_ativa && parseFloat(cfg.taxa_noturna) > 0) {
+      const nowH = new Date().toTimeString().slice(0,5);
+      const ini = cfg.taxa_noturna_hora_inicio || '22:00';
+      const fim = cfg.taxa_noturna_hora_fim || '06:00';
+      let noturno = false;
+      if (ini > fim) { noturno = nowH >= ini || nowH < fim; }
+      else { noturno = nowH >= ini && nowH < fim; }
+      if (noturno) { taxa_extra_noturna = parseFloat(cfg.taxa_noturna); valorMotoboy += taxa_extra_noturna; }
+    }
+    if (cfg.taxa_chuva_ativa && parseFloat(cfg.taxa_chuva) > 0) {
+      const tc = parseFloat(cfg.taxa_chuva);
+      taxa_extra_chuva = tc;
+      chuva_desconto_de = cfg.taxa_chuva_desconto_de || 'admin';
+      valorMotoboy += tc;
+      if (chuva_desconto_de === 'loja') { valorTotal += tc; }
+    }
+  } catch(eTaxa) { console.error('[TAXA] Erro ao calcular taxas:', eTaxa.message); }
+
   const r = await pool.query(
-    `INSERT INTO orders (loja_user,loja_name,plataforma,endereco_coleta,endereco_entrega,bairro_destino,nome_cliente,telefone_cliente,cod_pedido,cobrar_cliente,tipo_pagamento,valor_pedido,valor_total,valor_motoboy,comissao,distancia,previsao,obs,status,pending_until,telefone_loja,launch_at,complemento_coleta,complemento_entrega,obs_coleta,obs_entrega_loja,delivery_code)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'em_preparo',$19,$20,$21,$22,$23,$24,$25,$26) RETURNING *`,
-    [d.loja_user,d.loja_name,d.plataforma,d.endereco_coleta,d.endereco_entrega,d.bairro_destino,d.nome_cliente,d.telefone_cliente,d.cod_pedido,d.cobrar_cliente||'nao',d.tipo_pagamento||'dinheiro',d.valor_pedido||0,d.valor_total,d.valor_motoboy,d.comissao,d.distancia,d.previsao,d.obs,Date.now()+15000,telefone_loja,d.launch_at||0,d.complemento_coleta||null,d.complemento_entrega||null,d.obs_coleta||null,d.obs_entrega_loja||null,deliveryCode]
+    `INSERT INTO orders (loja_user,loja_name,plataforma,endereco_coleta,endereco_entrega,bairro_destino,nome_cliente,telefone_cliente,cod_pedido,cobrar_cliente,tipo_pagamento,valor_pedido,valor_total,valor_motoboy,comissao,distancia,previsao,obs,status,pending_until,telefone_loja,launch_at,complemento_coleta,complemento_entrega,obs_coleta,obs_entrega_loja,delivery_code,taxa_extra_chuva,taxa_extra_noturna,chuva_desconto_de) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'em_preparo',$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29) RETURNING *`,
+    [d.loja_user,d.loja_name,d.plataforma,d.endereco_coleta,d.endereco_entrega,d.bairro_destino,d.nome_cliente,d.telefone_cliente,d.cod_pedido,d.cobrar_cliente||'nao',d.tipo_pagamento||'dinheiro',d.valor_pedido||0,valorTotal,valorMotoboy,d.comissao,d.distancia,d.previsao,d.obs,Date.now()+15000,telefone_loja,d.launch_at||0,d.complemento_coleta||null,d.complemento_entrega||null,d.obs_coleta||null,d.obs_entrega_loja||null,deliveryCode,taxa_extra_chuva,taxa_extra_noturna,chuva_desconto_de]
+  )
   );
   if (bot) {
     const motoboys = await pool.query("SELECT telegram_id, name FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL");
@@ -707,6 +739,28 @@ app.put('/orders/:id', async (req, res) => {
         } catch(ePw) { console.error('Platform wallet error:', ePw.message); }
       }
 
+      // ── TAXA CHUVA/NOTURNA ao entregar: debitar da caixa da plataforma e creditar motoboy ──
+      try {
+        const tc_chuva = parseFloat(order.taxa_extra_chuva || 0);
+        const tc_noturna = parseFloat(order.taxa_extra_noturna || 0);
+        const total_extra = tc_chuva + tc_noturna;
+        if (total_extra > 0) {
+          const fromAdmin = (order.chuva_desconto_de || 'admin') === 'admin';
+          if (fromAdmin && tc_chuva > 0) {
+            await pool.query(`UPDATE platform_wallet SET balance = balance - $1, total_sacado = total_sacado + $1, updated_at=NOW() WHERE id=1`, [tc_chuva]);
+            await pool.query(`INSERT INTO platform_events (tipo, valor, descricao, order_id) VALUES ('taxa_chuva_admin', $1, $2, $3)`, [tc_chuva, 'Taxa chuva repassada ao motoboy pedido #' + req.params.id, req.params.id]);
+          }
+          if (tc_noturna > 0) {
+            await pool.query(`UPDATE platform_wallet SET balance = balance - $1, total_sacado = total_sacado + $1, updated_at=NOW() WHERE id=1`, [tc_noturna]);
+            await pool.query(`INSERT INTO platform_events (tipo, valor, descricao, order_id) VALUES ('taxa_noturna', $1, $2, $3)`, [tc_noturna, 'Taxa noturna repassada ao motoboy pedido #' + req.params.id, req.params.id]);
+          }
+          // Para pedidos em dinheiro: creditar taxa no saldo do motoboy (pois valor_motoboy nao gera balance direto)
+          if (order.tipo_pagamento === 'dinheiro') {
+            await pool.query('UPDATE users SET balance = balance + $1 WHERE id=$2', [total_extra, order.motoboy_id]);
+          }
+          await pool.query('INSERT INTO motoboy_wallet_events (motoboy_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)', [order.motoboy_id, 'taxa_extra', total_extra, 'Taxa chuva/noturna corrida #' + req.params.id, req.params.id]);
+        }
+      } catch(eTaxa2) { console.error('[TAXA] Erro ao processar taxa entrega:', eTaxa2.message); }
       // ── PROMOÇÕES: contabilizar entrega do motoboy ──────────────────
       try {
         if (order.motoboy_id) {
@@ -1687,3 +1741,4 @@ initDB().then(() => {
   console.log('[JOB] Verificador de chegada iniciado (60s)');
   console.log('[JOB] Lancador automatico de pedidos iniciado (30s)');
 });
+
