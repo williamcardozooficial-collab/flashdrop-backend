@@ -339,6 +339,15 @@ async function initDB() {
     `); } catch(e) {}
   // ──────────────────────────────────────────────────────────────────
 
+  try { await pool.query(`
+    CREATE TABLE IF NOT EXISTS categorias_loja (
+      id SERIAL PRIMARY KEY,
+      loja_id VARCHAR(20) NOT NULL,
+      nome VARCHAR(100) NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    )
+  `); } catch(e) {}
+
   console.log('DB initialized');
 }
 
@@ -1741,6 +1750,34 @@ app.post('/update-foto', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+// ===== CATEGORIAS =====
+app.get('/categorias', async (req, res) => {
+  const { loja_id } = req.query;
+  if (!loja_id) return res.status(400).json({ error: 'loja_id obrigatorio' });
+  try {
+    const r = await pool.query('SELECT id, nome FROM categorias_loja WHERE loja_id=$1 ORDER BY id ASC', [loja_id]);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/categorias', async (req, res) => {
+  const { loja_id, nome } = req.body;
+  if (!loja_id || !nome) return res.status(400).json({ error: 'loja_id e nome obrigatorios' });
+  try {
+    const r = await pool.query('INSERT INTO categorias_loja (loja_id, nome) VALUES ($1, $2) RETURNING id, nome', [loja_id, nome]);
+    res.json({ ok: true, categoria: r.rows[0] });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/categorias/:id', async (req, res) => {
+  const { id } = req.params;
+  const { loja_id } = req.body;
+  if (!loja_id) return res.status(400).json({ error: 'loja_id obrigatorio' });
+  try {
+    await pool.query('DELETE FROM categorias_loja WHERE id=$1 AND loja_id=$2', [id, loja_id]);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+// ===== FIM CATEGORIAS =====
+
 // ===== FIM FOTO DA LOJA =====
 
 // ===== FIM ENDPOINT RASTREAMENTO =====
