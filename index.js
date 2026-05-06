@@ -209,6 +209,7 @@ async function initDB() {
   try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS credit_mode INTEGER DEFAULT 0"); } catch(e) {}
   // custom_credit_limit: NULL = usa padrao da plataforma; valor definido = usa este individualmente
   try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_credit_limit DECIMAL DEFAULT NULL"); } catch(e) {}
+    try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS foto_url TEXT"); } catch(e) {}
   // Limite padrao de credito na tabela de configuracoes
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS credit_limit DECIMAL DEFAULT 20.00"); } catch(e) {}
   // ── TAXA CHUVA e TAXA NOTURNA ──
@@ -1729,6 +1730,19 @@ app.post('/api/motoboys/localizacao', async (req, res) => {
           res.status(500).json({ error: e.message });
         }
   });
+// ===== FOTO DA LOJA =====
+app.post('/update-foto', async (req, res) => {
+  const { username, foto_url } = req.body;
+  if (!username) return res.status(400).json({ error: 'username obrigatorio' });
+  try {
+    await pool.query('UPDATE users SET foto_url=$1 WHERE username=$2', [foto_url || null, username]);
+    res.json({ ok: true });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+// ===== FIM FOTO DA LOJA =====
+
 // ===== FIM ENDPOINT RASTREAMENTO =====
 initDB().then(() => {
   app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
