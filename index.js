@@ -312,6 +312,7 @@ async function initDB() {
       created_at TIMESTAMP DEFAULT NOW()
     )`);
   } catch(e) {}
+  try { await pool.query("ALTER TABLE produtos ADD COLUMN IF NOT EXISTS variacoes JSONB DEFAULT NULL"); } catch(e) {}
   try {
     await pool.query(`CREATE TABLE IF NOT EXISTS vitrine_config (
       id SERIAL PRIMARY KEY,
@@ -1496,16 +1497,20 @@ app.get('/produtos', async (req, res) => {
 
 app.post('/produtos', async (req, res) => {
   try {
-    const { loja_id, nome, descricao, preco, categoria, foto_url, ordem } = req.body;
-    const r = await pool.query('INSERT INTO produtos (loja_id, nome, descricao, preco, categoria, foto_url, ordem) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *', [loja_id, nome, descricao||null, preco||0, categoria||null, foto_url||null, ordem||0]);
+    const { loja_id, nome, descricao, preco, categoria, foto_url, ordem, variacoes } = req.body;
+    const varJson = variacoes && variacoes.length ? JSON.stringify(variacoes) : null;
+    const r = await pool.query('INSERT INTO produtos (loja_id, nome, descricao, preco, categoria, foto_url, ordem, variacoes) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *', [loja_id, nome, descricao||null, preco||0, categoria||null, foto_url||null, ordem||0, varJson]);
     res.json(r.rows[0]);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 app.put('/produtos/:id', async (req, res) => {
   try {
-    const { nome, descricao, preco, categoria, foto_url, ativo, ordem } = req.body;
-    const r = await pool.query('UPDATE produtos SET nome=$1, descricao=$2, preco=$3, categoria=$4, foto_url=$5, ativo=$6, ordem=$7 WHERE id=$8 RETURNING *', [nome, descricao||null, preco||0, categoria||null, foto_url||null, ativo!==false, ordem||0, req.params.id]);
+    const { nome, descricao, preco, categoria, foto_url, ativo, ordem, variacoes } = req.body;
+    const varJsonUp = variacoes !== undefined ? (variacoes && variacoes.length ? JSON.stringify(variacoes) : null) : undefined;
+    const r = varJsonUp !== undefined
+      ? await pool.query('UPDATE produtos SET nome=$1, descricao=$2, preco=$3, categoria=$4, foto_url=$5, ativo=$6, ordem=$7, variacoes=$8 WHERE id=$9 RETURNING *', [nome, descricao||null, preco||0, categoria||null, foto_url||null, ativo!==false, ordem||0, varJsonUp, req.params.id])
+      : await pool.query('UPDATE produtos SET nome=$1, descricao=$2, preco=$3, categoria=$4, foto_url=$5, ativo=$6, ordem=$7 WHERE id=$8 RETURNING *', [nome, descricao||null, preco||0, categoria||null, foto_url||null, ativo!==false, ordem||0, req.params.id]);
     res.json(r.rows[0]);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
