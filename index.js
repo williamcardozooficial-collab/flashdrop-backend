@@ -992,7 +992,7 @@ app.delete('/orders/:id', async (req, res) => {
       // pois o saldo da loja nunca foi descontado no pedido a dinheiro
       // Apenas pedidos PIX/maquina (nao-dinheiro) geram estorno se nao foram entregues
       const isDinheiro = order.tipo_pagamento === 'dinheiro';
-      if (!isDinheiro && order.status !== 'entregue' && order.loja_user) {
+      if (!isDinheiro && order.status !== 'entregue' && order.loja_user && !['cardapio','cardapio_aceito'].includes(order.plataforma)) {
         const valorTotal = parseFloat(order.valor_total) || 0;
         if (valorTotal > 0) {
           await pool.query("UPDATE users SET credit = credit + $1 WHERE username=$2", [valorTotal, order.loja_user]);
