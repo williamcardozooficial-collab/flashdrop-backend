@@ -315,6 +315,7 @@ async function initDB() {
   try { await pool.query("ALTER TABLE produtos ADD COLUMN IF NOT EXISTS variacoes JSONB DEFAULT NULL"); } catch(e) {}
 try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS loja_online BOOLEAN DEFAULT false"); } catch(e) {}
 try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS loja_horario_offline VARCHAR(5) DEFAULT NULL"); } catch(e) {}
+try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS loja_formas_pagamento TEXT DEFAULT NULL"); } catch(e) {}
   try {
     await pool.query(`CREATE TABLE IF NOT EXISTS vitrine_config (
       id SERIAL PRIMARY KEY,
