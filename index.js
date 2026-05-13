@@ -355,6 +355,13 @@ try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS loja_horario_
 }
 
 app.get('/health', (req, res) => res.json({ ok: true }));
+app.get('/debug/time', (req, res) => {
+  const now = new Date();
+  const brOffset = -3 * 60;
+  const brTime = new Date(now.getTime() + brOffset * 60 * 1000);
+  const hhmm = brTime.toISOString().slice(11, 16);
+  res.json({ utc: now.toISOString(), brasilia_hhmm: hhmm, server_toTimeString: now.toTimeString().slice(0,5) });
+});
 
 const loginHandler = async (req, res) => {
   const { username, password } = req.body;
@@ -1790,9 +1797,11 @@ app.delete('/categorias/:id', async (req, res) => {
 // ===== FIM ENDPOINT RASTREAMENTO =====
 async function checkLojaAutoOffline() {
   try {
+    // Horario de Brasilia = UTC-3
     const now = new Date();
-    const hhmm = now.toTimeString().slice(0,5);
-    // Fecha lojas com horario agendado <= horario atual (para nao perder o minuto exato)
+    const brOffset = -3 * 60; // minutos
+    const brTime = new Date(now.getTime() + brOffset * 60 * 1000);
+    const hhmm = brTime.toISOString().slice(11, 16); // HH:MM em horario de Brasilia
     const res = await pool.query(
       "SELECT id, loja_horario_offline FROM users WHERE role='loja' AND loja_online=true AND loja_horario_offline IS NOT NULL"
     );
@@ -1803,7 +1812,7 @@ async function checkLojaAutoOffline() {
           "UPDATE users SET loja_online=false, loja_horario_offline=NULL WHERE id=$1",
           [row.id]
         );
-        console.log('[JOB] Loja id=' + row.id + ' fechada automaticamente. Agendado=' + agendado + ' Atual=' + hhmm);
+        console.log('[JOB] Loja id=' + row.id + ' fechada. Agendado=' + agendado + ' HoraBrasilia=' + hhmm);
       }
     }
   } catch(e) { console.error('[JOB] checkLojaAutoOffline:', e.message); }
