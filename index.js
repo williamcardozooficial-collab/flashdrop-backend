@@ -313,6 +313,8 @@ async function initDB() {
     )`);
   } catch(e) {}
   try { await pool.query("ALTER TABLE produtos ADD COLUMN IF NOT EXISTS variacoes JSONB DEFAULT NULL"); } catch(e) {}
+try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS loja_online BOOLEAN DEFAULT false"); } catch(e) {}
+try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS loja_horario_offline VARCHAR(5) DEFAULT NULL"); } catch(e) {}
   try {
     await pool.query(`CREATE TABLE IF NOT EXISTS vitrine_config (
       id SERIAL PRIMARY KEY,
@@ -1786,6 +1788,17 @@ app.delete('/categorias/:id', async (req, res) => {
 // ===== FIM FOTO DA LOJA =====
 
 // ===== FIM ENDPOINT RASTREAMENTO =====
+async function checkLojaAutoOffline() {
+  try {
+    const now = new Date();
+    const hhmm = now.toTimeString().slice(0,5);
+    await pool.query(
+      "UPDATE users SET loja_online=false, loja_horario_offline=NULL WHERE role='loja' AND loja_online=true AND loja_horario_offline IS NOT NULL AND loja_horario_offline=$1",
+      [hhmm]
+    );
+  } catch(e) { console.error('[JOB] checkLojaAutoOffline:', e.message); }
+}
+
 initDB().then(() => {
   app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
   setInterval(checkLateArrivals, 60 * 1000);
@@ -1793,6 +1806,9 @@ initDB().then(() => {
   console.log('[JOB] Verificador de pedidos pendentes iniciado (5min)');
   setInterval(checkAndLaunchOrders, 30 * 1000);
   setInterval(expirePagamentosRestaurante, 30 * 1000);
+  setInterval(checkLojaAutoOffline, 60 * 1000);
+  checkLojaAutoOffline();
+  console.log('[JOB] Auto-offline de lojas iniciado (60s)');
   console.log('[JOB] Verificador de chegada iniciado (60s)');
   console.log('[JOB] Lancador automatico de pedidos iniciado (30s)');
 });
