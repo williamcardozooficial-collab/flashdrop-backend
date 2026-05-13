@@ -678,8 +678,15 @@ app.put('/orders/:id', async (req, res) => {
               });
             }
 
-            if (balance <= -individualLimit) {
-              // Saldo negativo ultrapassou o limite individual
+            // Verifica se aceitar este pedido ultrapassaria o limite negativo
+            // Em corridas dinheiro: motoboy vai dever valor_pedido + comissao ao sistema
+            const valorPedidoOrd = parseFloat(order.valor_pedido || 0);
+            const comissaoOrd = parseFloat(order.comissao || 0);
+            const debitoEstimado = valorPedidoOrd + comissaoOrd;
+            const saldoAposAceitar = balance - debitoEstimado;
+
+            if (balance <= -individualLimit || saldoAposAceitar < -individualLimit) {
+              // Saldo atual ja ultrapassou OU aceitar este pedido vai ultrapassar o limite
               return res.status(403).json({
                 error: 'Voce nao possui saldo suficiente para pegar este pedido. Procure manter saldo na plataforma para poder aceitar pedidos em dinheiro.',
                 credit_blocked: true
