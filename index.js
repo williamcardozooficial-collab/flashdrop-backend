@@ -1792,10 +1792,20 @@ async function checkLojaAutoOffline() {
   try {
     const now = new Date();
     const hhmm = now.toTimeString().slice(0,5);
-    await pool.query(
-      "UPDATE users SET loja_online=false, loja_horario_offline=NULL WHERE role='loja' AND loja_online=true AND loja_horario_offline IS NOT NULL AND loja_horario_offline=$1",
-      [hhmm]
+    // Fecha lojas com horario agendado <= horario atual (para nao perder o minuto exato)
+    const res = await pool.query(
+      "SELECT id, loja_horario_offline FROM users WHERE role='loja' AND loja_online=true AND loja_horario_offline IS NOT NULL"
     );
+    for (const row of res.rows) {
+      const agendado = row.loja_horario_offline;
+      if (agendado && agendado <= hhmm) {
+        await pool.query(
+          "UPDATE users SET loja_online=false, loja_horario_offline=NULL WHERE id=$1",
+          [row.id]
+        );
+        console.log('[JOB] Loja id=' + row.id + ' fechada automaticamente. Agendado=' + agendado + ' Atual=' + hhmm);
+      }
+    }
   } catch(e) { console.error('[JOB] checkLojaAutoOffline:', e.message); }
 }
 
