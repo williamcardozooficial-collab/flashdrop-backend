@@ -316,6 +316,17 @@ async function initDB() {
 try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS loja_online BOOLEAN DEFAULT false"); } catch(e) {}
 try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS loja_horario_offline VARCHAR(5) DEFAULT NULL"); } catch(e) {}
 try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS loja_formas_pagamento TEXT DEFAULT NULL"); } catch(e) {}
+try {
+  await pool.query(`CREATE TABLE IF NOT EXISTS loja_wallet_events (
+    id SERIAL PRIMARY KEY,
+    loja_id INTEGER NOT NULL,
+    tipo VARCHAR(40) NOT NULL,
+    valor DECIMAL DEFAULT 0,
+    descricao TEXT,
+    order_id INTEGER,
+    created_at TIMESTAMP DEFAULT NOW()
+  )`);
+} catch(e) {}
   try {
     await pool.query(`CREATE TABLE IF NOT EXISTS vitrine_config (
       id SERIAL PRIMARY KEY,
@@ -740,6 +751,18 @@ app.put('/orders/:id', async (req, res) => {
         // Loja recebe valor_pedido de volta (motoboy vai repassar)
         if (valorPedido > 0) {
           await pool.query("UPDATE users SET credit = credit + $1 WHERE username=$2", [valorPedido, order.loja_user]);
+              // ── REGISTRAR EVENTO DE SALDO DA LOJA (dinheiro entregue) ──
+              if (valorPedido > 0) {
+                try {
+                  const lojaUserRes = await pool.query('SELECT id FROM users WHERE username=$1', [order.loja_user]);
+                  if (lojaUserRes.rows.length > 0) {
+                    await pool.query(
+                      'INSERT INTO loja_wallet_events (loja_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)',
+                      [lojaUserRes.rows[0].id, 'recebimento_dinheiro', valorPedido, 'Recebimento pedido #' + req.params.id + ' (dinheiro entregue)', req.params.id]
+                    );
+                  }
+                } catch(eLwe) {}
+              }
         }
       } else {
         // PIX ou Maquina: motoboy recebe valor_motoboy
@@ -996,6 +1019,16 @@ app.delete('/orders/:id', async (req, res) => {
         const valorTotal = parseFloat(order.valor_total) || 0;
         if (valorTotal > 0) {
           await pool.query("UPDATE users SET credit = credit + $1 WHERE username=$2", [valorTotal, order.loja_user]);
+          // ── REGISTRAR EVENTO DE SALDO DA LOJA (estorno) ──
+          try {
+            const lojaEvRes = await pool.query('SELECT id FROM users WHERE username=$1', [order.loja_user]);
+            if (lojaEvRes.rows.length > 0) {
+              await pool.query(
+                'INSERT INTO loja_wallet_events (loja_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)',
+                [lojaEvRes.rows[0].id, 'estorno', valorTotal, 'Estorno pedido #' + req.params.id + ' (pedido excluido)', req.params.id]
+              );
+            }
+          } catch(eLweE) {}
         }
       }
     }
@@ -1040,6 +1073,29 @@ app.put('/settings', async (req, res) => {
 });
 
 // ── CAIXA DA PLATAFORMA ────────────────────────────────────────────
+
+// ── EVENTOS DE SALDO DA LOJA (últimos 7 dias) ──────────────────────────────
+app.get('/loja/:id/wallet-events', async (req, res) => {
+  try {
+    const days = parseInt(req.query.days) || 7;
+    const r = await pool.query(
+      `SELECT * FROM loja_wallet_events WHERE loja_id = $1 AND created_at >= NOW() - ($2 || ' days')::INTERVAL ORDER BY created_at DESC LIMIT 200`,
+      [req.params.id, days]
+    );
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/loja/:id/wallet-event', async (req, res) => {
+  try {
+    const { tipo, valor, descricao, order_id } = req.body;
+    await pool.query(
+      'INSERT INTO loja_wallet_events (loja_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)',
+      [req.params.id, tipo, valor || 0, descricao || null, order_id || null]
+    );
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
 
 // ── EVENTOS DE SALDO DO MOTOBOY (últimas 24h) ──────────────────────────────
 app.get('/users/:id/wallet-events', async (req, res) => {
