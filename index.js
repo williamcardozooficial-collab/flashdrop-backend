@@ -210,6 +210,8 @@ async function initDB() {
   // custom_credit_limit: NULL = usa padrao da plataforma; valor definido = usa este individualmente
   try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_credit_limit DECIMAL DEFAULT NULL"); } catch(e) {}
     try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS foto_url TEXT"); } catch(e) {}
+try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_key TEXT DEFAULT NULL"); } catch(e) {}
+try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARCHAR(200) DEFAULT NULL"); } catch(e) {}
   // Limite padrao de credito na tabela de configuracoes
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS credit_limit DECIMAL DEFAULT 20.00"); } catch(e) {}
   // ── TAXA CHUVA e TAXA NOTURNA ──
