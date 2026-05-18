@@ -396,6 +396,23 @@ app.get('/users', async (req, res) => {
   res.json(r.rows);
 });
 
+// GET /lojas/vitrine — lojas ativas ordenadas por pedidos entregues nos ultimos 7 dias
+app.get('/lojas/vitrine', async (req, res) => {
+  try {
+    const r = await pool.query(`
+      SELECT
+        u.id, u.name, u.username, u.custom_id, u.address, u.foto_url, u.loja_online, u.blocked,
+        COUNT(o.id) FILTER (WHERE o.status='entregue' AND o.created_at >= NOW() - INTERVAL '7 days') AS pedidos_entregues_7d
+      FROM users u
+      LEFT JOIN orders o ON o.loja_user = u.username
+      WHERE u.role = 'loja' AND u.blocked IS NOT TRUE AND u.loja_online = true
+      GROUP BY u.id
+      ORDER BY pedidos_entregues_7d DESC, u.name ASC
+    `);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/users/pending', async (req, res) => {
   try {
     const r = await pool.query("SELECT id,username,role,name,address,phone,vehicle,cpf,approved,created_at FROM users WHERE approved=false ORDER BY created_at ASC");
