@@ -2028,6 +2028,24 @@ app.post('/mercadopago/webhook', async (req, res) => {
 
 // ══════════════════════════════════════════════════════════════════
 
+// GET /mercadopago/historico/:userId — retorna historico de recargas dos ultimos 7 dias
+app.get('/mercadopago/historico/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const r = await pool.query(
+      `SELECT id, payment_id, valor, status, created_at, updated_at
+       FROM mp_recargas
+       WHERE user_id = $1 AND created_at >= NOW() - INTERVAL '7 days'
+       ORDER BY created_at DESC LIMIT 20`,
+      [userId]
+    );
+    res.json(r.rows);
+  } catch(err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 initDB().then(() => {
   app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
   setInterval(checkLateArrivals, 60 * 1000);
