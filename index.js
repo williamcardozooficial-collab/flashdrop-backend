@@ -2065,6 +2065,62 @@ app.get('/mercadopago/historico/:userId', async (req, res) => {
 });
 
 
+// POST /orders/:id/verificar-na-loja — valida se motoboy esta a <= 300m da loja
+app.post('/orders/:id/verificar-na-loja', async (req, res) => {
+  try {
+    const { lat, lng } = req.body;
+    if (!lat || !lng) return res.status(400).json({ error: 'Localizacao nao fornecida.' });
+
+    // Busca o endereco de coleta do pedido
+    const orderRes = await pool.query('SELECT endereco_coleta, complemento_coleta FROM orders WHERE id=$1', [req.params.id]);
+    if (!orderRes.rows.length) return res.status(404).json({ error: 'Pedido nao encontrado.' });
+    const { endereco_coleta, complemento_coleta } = orderRes.rows[0];
+    if (!endereco_coleta) return res.status(400).json({ error: 'Pedido sem endereco de coleta.' });
+
+    // Geocodifica o endereco de coleta via Google Maps
+    const apiKey = process.env.GOOGLE_MAPS_KEY;
+    if (!apiKey) return res.status(500).json({ error: 'API key nao configurada.' });
+
+    const enderecoCompleto = endereco_coleta + (complemento_coleta ? ', ' + complemento_coleta : '') + ', Caxias do Sul, RS';
+    const geoUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(enderecoCompleto)}&key=${apiKey}`;
+    const geoResp = await axios.get(geoUrl);
+    const geoData = geoResp.data;
+
+    if (!geoData.results || geoData.results.length === 0) {
+      // Se nao conseguir geocodificar, libera a chegada (nao bloqueia por falha de API)
+      return res.json({ ok: true, distancia: null, aviso: 'Nao foi possivel verificar localizacao, chegada liberada.' });
+    }
+
+    const lojaLat = geoData.results[0].geometry.location.lat;
+    const lojaLng = geoData.results[0].geometry.location.lng;
+
+    // Calcula distancia haversine em metros
+    function haversine(lat1, lon1, lat2, lon2) {
+      const R = 6371000; // raio da Terra em metros
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLon/2) * Math.sin(dLon/2);
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+
+    const distancia = Math.round(haversine(parseFloat(lat), parseFloat(lng), lojaLat, lojaLng));
+    const RAIO = 300; // metros
+
+    if (distancia <= RAIO) {
+      return res.json({ ok: true, distancia });
+    } else {
+      return res.status(400).json({ ok: false, distancia, error: `Voce esta a ${distancia}m da loja. Aproxime-se para registrar a chegada (maximo ${RAIO}m).` });
+    }
+  } catch(err) {
+    console.error('[VERIFICAR-NA-LOJA]', err.message);
+    // Em caso de erro tecnico, libera para nao prejudicar o motoboy
+    return res.json({ ok: true, distancia: null, aviso: 'Erro na verificacao, chegada liberada.' });
+  }
+});
+
+
 initDB().then(() => {
   app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
   setInterval(checkLateArrivals, 60 * 1000);
