@@ -634,24 +634,9 @@ app.post('/orders', async (req, res) => {
   } catch(eTaxa) { console.error('[TAXA] Erro ao calcular taxas:', eTaxa.message); }
 
   const r = await pool.query(
-    `INSERT INTO orders (loja_user,loja_name,plataforma,endereco_coleta,endereco_entrega,bairro_destino,nome_cliente,telefone_cliente,cod_pedido,cobrar_cliente,tipo_pagamento,valor_pedido,valor_total,valor_motoboy,comissao,distancia,previsao,obs,status,pending_until,telefone_loja,launch_at,complemento_coleta,complemento_entrega,obs_coleta,obs_entrega_loja,delivery_code,taxa_extra_chuva,taxa_extra_noturna,chuva_desconto_de) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'em_preparo',$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29) RETURNING *`,
+    `INSERT INTO orders (loja_user,loja_name,plataforma,endereco_coleta,endereco_entrega,bairro_destino,nome_cliente,telefone_cliente,cod_pedido,cobrar_cliente,tipo_pagamento,valor_pedido,valor_total,valor_motoboy,comissao,distancia,previsao,obs,status,pending_until,telefone_loja,launch_at,complemento_coleta,complemento_entrega,obs_coleta,obs_entrega_loja,delivery_code,taxa_extra_chuva,taxa_extra_noturna,chuva_desconto_de) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'novo',$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29) RETURNING *`,
     [d.loja_user,d.loja_name,d.plataforma,d.endereco_coleta,d.endereco_entrega,d.bairro_destino,d.nome_cliente,d.telefone_cliente,d.cod_pedido,d.cobrar_cliente||'nao',d.tipo_pagamento||'dinheiro',d.valor_pedido||0,valorTotal,valorMotoboy,d.comissao,d.distancia,d.previsao,d.obs,Date.now()+15000,telefone_loja,d.launch_at||0,d.complemento_coleta||null,d.complemento_entrega||null,d.obs_coleta||null,d.obs_entrega_loja||null,deliveryCode,taxa_extra_chuva,taxa_extra_noturna,chuva_desconto_de]
   );
-  if (bot) {
-    const motoboys = await pool.query("SELECT telegram_id, name FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL");
-    const pedido = r.rows[0];
-    let lojaNome = pedido.loja_name;
-    if (!lojaNome && pedido.loja_user) {
-      const lojaRes = await pool.query("SELECT name FROM users WHERE username=$1", [pedido.loja_user]);
-      if (lojaRes.rows.length > 0) lojaNome = lojaRes.rows[0].name;
-    }
-    lojaNome = lojaNome || pedido.loja_user;
-    const pagLabel = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX'}[pedido.tipo_pagamento] || pedido.tipo_pagamento || '-');
-    const msgPedido = `Novo Pedido #${pedido.id} - Em Preparo\n\nLoja: ${lojaNome}\nPagamento: ${pagLabel}\nMotoboy ganha: R$ ${parseFloat(pedido.valor_motoboy).toFixed(2)}\nDistancia: ${pedido.distancia} km\n\nPedido em preparo. Sera lancado ao sistema em breve.\nFique de olho!`;
-    const groupId = process.env.TELEGRAM_GROUP_ID;
-    if (groupId) bot.sendMessage(groupId, msgPedido).catch(() => {});
-    motoboys.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgPedido).catch(() => {}));
-  }
   res.json(r.rows[0]);
 });
 
@@ -727,6 +712,23 @@ app.put('/orders/:id', async (req, res) => {
 
     const r = await pool.query(`UPDATE orders SET ${sets} WHERE id=$1 RETURNING *`, [req.params.id, ...vals]);
     const order = r.rows[0];
+    // Notificar motoboys quando loja coloca pedido em preparo
+    if (fields.status === 'em_preparo' && bot) {
+      try {
+        const motoboys = await pool.query("SELECT telegram_id FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL");
+        let lojaNome = order.loja_name;
+        if (!lojaNome && order.loja_user) {
+          const lojaRes = await pool.query("SELECT name FROM users WHERE username=$1", [order.loja_user]);
+          if (lojaRes.rows.length > 0) lojaNome = lojaRes.rows[0].name;
+        }
+        lojaNome = lojaNome || order.loja_user;
+        const pagLabel = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX'}[order.tipo_pagamento] || order.tipo_pagamento || '-');
+        const msgPedido = `🔔 Novo Pedido #${order.id} - Em Preparo\n\nLoja: ${lojaNome}\nPagamento: ${pagLabel}\nMotoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}\nDistancia: ${order.distancia} km\n\nPedido em preparo. Sera lancado ao sistema em breve.\nFique de olho!`;
+        const groupId = process.env.TELEGRAM_GROUP_ID;
+        if (groupId) bot.sendMessage(groupId, msgPedido).catch(() => {});
+        motoboys.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgPedido).catch(() => {}));
+      } catch(eBotPrep) { console.error('[BOT] Erro notif em_preparo:', eBotPrep.message); }
+    }
     if (fields.status === 'entregue' && prevOrderRes.rows[0] && prevOrderRes.rows[0].status === 'entregue') { return res.json(order); }
 
     // Cancelamento pelo motoboy: bloquear por 10 minutos
