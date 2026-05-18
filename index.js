@@ -1884,6 +1884,150 @@ async function checkLojaAutoOffline() {
   } catch(e) { console.error('[JOB] checkLojaAutoOffline:', e.message); }
 }
 
+
+// ══════════════════════════════════════════════════════════════════
+// MERCADO PAGO - SOLICITAR SALDO (PIX)
+// ══════════════════════════════════════════════════════════════════
+
+// Criar tabela de recargas MP
+async function initMPTable() {
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS mp_recargas (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      payment_id VARCHAR(100),
+      valor DECIMAL NOT NULL,
+      status VARCHAR(30) DEFAULT 'pendente',
+      pix_code TEXT,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    )`);
+  } catch(e) { console.log('[MP] Tabela mp_recargas:', e.message); }
+}
+initMPTable();
+
+// POST /mercadopago/gerar-pix — gera cobranca PIX para recarga de saldo
+app.post('/mercadopago/gerar-pix', async (req, res) => {
+  try {
+    const { valor, userId, userName, userEmail } = req.body;
+    const MP_TOKEN = process.env.MP_ACCESS_TOKEN;
+    if (!MP_TOKEN) return res.status(500).json({ error: 'MP_ACCESS_TOKEN nao configurado no servidor.' });
+    if (!valor || parseFloat(valor) < 10) return res.status(400).json({ error: 'Valor minimo e R$ 10,00' });
+
+    const payload = {
+      transaction_amount: parseFloat(valor),
+      description: 'Recarga FlashDrop - ' + (userName || 'Loja'),
+      payment_method_id: 'pix',
+      payer: {
+        email: userEmail || (userId + '@flashdrop.app'),
+        first_name: (userName || 'Cliente').split(' ')[0],
+        last_name: (userName || 'Cliente').split(' ').slice(1).join(' ') || 'FlashDrop',
+        identification: { type: 'CPF', number: '00000000000' }
+      },
+      notification_url: 'https://flashdrop-backend-production.up.railway.app/mercadopago/webhook',
+      metadata: { user_id: userId, tipo: 'recarga_saldo' },
+      date_of_expiration: new Date(Date.now() + 30 * 60 * 1000).toISOString()
+    };
+
+    const mpRes = await axios.post('https://api.mercadopago.com/v1/payments', payload, {
+      headers: {
+        'Authorization': 'Bearer ' + MP_TOKEN,
+        'Content-Type': 'application/json',
+        'X-Idempotency-Key': 'fd-' + userId + '-' + Date.now()
+      }
+    });
+
+    const payment = mpRes.data;
+    const pixData = payment.point_of_interaction?.transaction_data;
+
+    // Salvar no banco
+    await pool.query(
+      'INSERT INTO mp_recargas (user_id, payment_id, valor, status, pix_code) VALUES ($1,$2,$3,$4,$5)',
+      [userId, String(payment.id), parseFloat(valor), payment.status, pixData?.qr_code || null]
+    );
+
+    return res.json({
+      payment_id: payment.id,
+      status: payment.status,
+      pix_code: pixData?.qr_code,
+      qr_code_base64: pixData?.qr_code_base64,
+      expiry: payment.date_of_expiration,
+      valor: parseFloat(valor)
+    });
+
+  } catch(err) {
+    console.error('[MP] Erro gerar PIX:', err.response?.data || err.message);
+    const errMsg = err.response?.data?.message || err.response?.data?.cause?.[0]?.description || err.message;
+    return res.status(500).json({ error: errMsg });
+  }
+});
+
+// GET /mercadopago/status/:paymentId — verifica status do pagamento
+app.get('/mercadopago/status/:paymentId', async (req, res) => {
+  try {
+    const MP_TOKEN = process.env.MP_ACCESS_TOKEN;
+    if (!MP_TOKEN) return res.status(500).json({ error: 'MP_ACCESS_TOKEN nao configurado.' });
+
+    const mpRes = await axios.get('https://api.mercadopago.com/v1/payments/' + req.params.paymentId, {
+      headers: { 'Authorization': 'Bearer ' + MP_TOKEN }
+    });
+
+    const p = mpRes.data;
+    return res.json({ payment_id: p.id, status: p.status, valor: p.transaction_amount });
+  } catch(err) {
+    return res.status(500).json({ error: err.response?.data?.message || err.message });
+  }
+});
+
+// POST /mercadopago/webhook — recebe notificacao do MP e credita saldo automaticamente
+app.post('/mercadopago/webhook', async (req, res) => {
+  try {
+    const { type, data } = req.body;
+    if (type === 'payment' && data?.id) {
+      const MP_TOKEN = process.env.MP_ACCESS_TOKEN;
+      if (MP_TOKEN) {
+        const mpRes = await axios.get('https://api.mercadopago.com/v1/payments/' + data.id, {
+          headers: { 'Authorization': 'Bearer ' + MP_TOKEN }
+        });
+        const payment = mpRes.data;
+        if (payment.status === 'approved') {
+          const userId = payment.metadata?.user_id;
+          const valor = parseFloat(payment.transaction_amount);
+          if (userId && valor > 0) {
+            // Verifica se ja processou este pagamento
+            const existing = await pool.query(
+              "SELECT id, status FROM mp_recargas WHERE payment_id=$1",
+              [String(payment.id)]
+            );
+            const alreadyApproved = existing.rows.some(r => r.status === 'aprovado');
+            if (!alreadyApproved) {
+              // Credita saldo na conta da loja
+              await pool.query('UPDATE users SET credit = COALESCE(credit,0) + $1 WHERE id=$2', [valor, userId]);
+              // Atualiza status da recarga
+              await pool.query(
+                "UPDATE mp_recargas SET status='aprovado', updated_at=NOW() WHERE payment_id=$1",
+                [String(payment.id)]
+              );
+              // Registra no extrato da loja
+              await pool.query(
+                'INSERT INTO loja_wallet_events (loja_id, tipo, valor, descricao) VALUES ($1,$2,$3,$4)',
+                [userId, 'recarga_mp', valor, 'Recarga via Mercado Pago - R$ ' + valor.toFixed(2)]
+              );
+              console.log('[MP] Saldo R$ ' + valor + ' creditado para user_id=' + userId);
+            }
+          }
+        }
+      }
+    }
+    return res.status(200).json({ received: true });
+  } catch(err) {
+    console.error('[MP] Webhook error:', err.message);
+    return res.status(200).json({ received: true });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════
+
 initDB().then(() => {
   app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
   setInterval(checkLateArrivals, 60 * 1000);
