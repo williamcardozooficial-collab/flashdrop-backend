@@ -993,6 +993,28 @@ app.put('/orders/:id', async (req, res) => {
       await pool.query("UPDATE orders SET t_retornado=NOW() WHERE id=$1", [req.params.id]);
     }
 
+
+    // === NOTIFICACOES WHATSAPP POR STATUS DO PEDIDO ===
+    try {
+      const botUrl = process.env.BOT_URL;
+      const botSecret = process.env.BOT_SECRET;
+      const tel = order && order.telefone_cliente;
+      if (botUrl && botSecret && tel && fields.status) {
+        let wMsg = null;
+        if (fields.status === 'aceito') {
+          wMsg = '🔥 Pedido confirmado com sucesso!\nSeu pedido já está sendo preparado pela loja. 👨\u200d🍳\nAssim que sair para entrega, avisaremos você. 🚀';
+        } else if (fields.status === 'saiu_para_entrega') {
+          wMsg = '🚴 Seu pedido saiu para entrega!\nNosso entregador já está a caminho. 🚀\nFique de olho, ele chega em breve! 📦';
+        } else if (fields.status === 'entregue') {
+          wMsg = '✅ Pedido entregue com sucesso!\nEsperamos que você tenha gostado. 😊\nObrigado por usar a Flash Drop! 🚀💙';
+        }
+        if (wMsg) {
+          const digits = tel.replace(/\D/g, '');
+          const formatted = digits.length === 10 ? digits.slice(0,2)+'9'+digits.slice(2) : digits;
+          await axios.post(`${botUrl}/api/send-message`, { phone: formatted, message: wMsg }, { headers: { 'x-bot-secret': botSecret }, timeout: 10000 });
+        }
+      }
+    } catch (wErr) { console.log('Erro WhatsApp pedido:', wErr.message); }
     res.json(order);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
