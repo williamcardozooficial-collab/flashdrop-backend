@@ -1002,7 +1002,11 @@ app.put('/orders/:id', async (req, res) => {
       if (botUrl && botSecret && tel && fields.status) {
         let wMsg = null;
         if (fields.status === 'aceito') {
-          wMsg = '🔥 Pedido confirmado com sucesso!\nSeu pedido já está sendo preparado pela loja. 👨\u200d🍳\nAssim que sair para entrega, avisaremos você. 🚀';
+          wMsg = '🔥 Pedido confirmado com sucesso!\nSeu pedido já está sendo preparado por *${order.loja_name || 'a loja'}*. 
+
+📞 Dúvidas? Fale com a loja:
+${order.telefone_loja || ''}
+ 👨\u200d🍳\nAssim que sair para entrega, avisaremos você. 🚀';
         } else if (fields.status === 'saiu_para_entrega') {
           wMsg = '🚴 Seu pedido saiu para entrega!\nNosso entregador já está a caminho. 🚀\nFique de olho, ele chega em breve! 📦';
         } else if (fields.status === 'entregue') {
