@@ -539,7 +539,17 @@ app.post('/register', async (req, res) => {
 
 app.post('/users/:id/approve', async (req, res) => {
   try {
-    const r = await pool.query('UPDATE users SET approved=true WHERE id=$1 RETURNING id,username,name,approved', [req.params.id]);
+        const r = await pool.query('UPDATE users SET approved=true WHERE id=$1 RETURNING id,username,name,phone,approved', [req.params.id]);
+            // Envia WhatsApp ao usuário aprovado
+    try {
+      const botUrl = process.env.BOT_URL;
+      const botSecret = process.env.BOT_SECRET;
+      const phone = r.rows[0] && r.rows[0].phone;
+      if (botUrl && botSecret && phone) {
+        const msg = '🎉 Parabéns! Seu login foi aprovado com sucesso. ✅\nAgora você já pode acessar nossa plataforma através do site abaixo:\n🚀 https://flashdrop-frontend-six.vercel.app/login.html\nSeja bem-vindo(a) à Flash Drop! 💙';
+        await axios.post(`${botUrl}/api/send-message`, { phone, message: msg }, { headers: { 'x-bot-secret': botSecret }, timeout: 10000 });
+      }
+    } catch (wErr) { console.log('Erro WhatsApp aprovacao:', wErr.message); }
     res.json(r.rows[0]);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
