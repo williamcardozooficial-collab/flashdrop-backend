@@ -524,6 +524,15 @@ app.post('/register', async (req, res) => {
       } catch(refErr) { console.log('Referral link error:', refErr.message); }
     }
     if (bot) bot.sendMessage(ADMIN_ID, '\uD83D\uDCCB Novo Cadastro Pendente!\n\nNome: ' + r.rows[0].name + '\nUsuario: ' + r.rows[0].username + '\nFuncao: ' + r.rows[0].role + '\n\nAcesse o painel admin para aprovar.').catch(function(){});
+        // Envia mensagem WhatsApp para o numero cadastrado
+    try {
+      const botUrl = process.env.BOT_URL;
+      const botSecret = process.env.BOT_SECRET;
+      if (botUrl && botSecret && phone) {
+        const msg = 'Ol\u00e1 \ud83d\udc4b\nSeu cadastro foi recebido com sucesso e j\u00e1 est\u00e1 em an\u00e1lise. \ud83d\udd0e\nAssim que for aprovado, voc\u00ea ser\u00e1 avisado imediatamente. \u2705\nObrigado por fazer parte da Flash Drop \ud83d\ude80';
+        await axios.post(`${botUrl}/api/send-message`, { phone, message: msg }, { headers: { 'x-bot-secret': botSecret }, timeout: 10000 });
+      }
+    } catch (wErr) { console.log('Erro WhatsApp cadastro:', wErr.message); }
     res.json({ ok: true, user: r.rows[0] });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
