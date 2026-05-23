@@ -681,7 +681,7 @@ app.put('/orders/:id', async (req, res) => {
     const fields = req.body;
 
     // === VERIFICACAO DE LIMITE DE CREDITO AO ACEITAR CORRIDA EM DINHEIRO ===
-    if (fields.status === 'aceito' && fields.motoboy_id) {
+    if (fields.status === 'em_preparo' && fields.motoboy_id) {
 
       // Verifica bloqueio por cancelamento
       const mbRes = await pool.query('SELECT blocked_until, balance, credit_mode, custom_credit_limit FROM users WHERE id=$1', [fields.motoboy_id]);
@@ -1001,13 +1001,13 @@ app.put('/orders/:id', async (req, res) => {
       const tel = order && order.telefone_cliente;
       if (botUrl && botSecret && tel && fields.status) {
         let wMsg = null;
-        if (fields.status === 'aceito') {
+        if (fields.status === 'em_preparo') {
           wMsg = '🔥 Pedido confirmado com sucesso!\nSeu pedido já está sendo preparado por *${order.loja_name || 'a loja'}*. 
 
 📞 Dúvidas? Fale com a loja:
 ${order.telefone_loja || ''}
  👨\u200d🍳\nAssim que sair para entrega, avisaremos você. 🚀';
-        } else if (fields.status === 'saiu_para_entrega') {
+        } else if (fields.status === 'coletado') {
           wMsg = '🚴 Seu pedido saiu para entrega!\nNosso entregador já está a caminho. 🚀\nFique de olho, ele chega em breve! 📦';
         } else if (fields.status === 'entregue') {
           wMsg = '✅ Pedido entregue com sucesso!\nEsperamos que você tenha gostado. 😊\nObrigado por usar a Flash Drop! 🚀💙';
