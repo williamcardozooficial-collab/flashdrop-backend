@@ -358,6 +358,15 @@ try {
 
   try { await pool.query(`
     CREATE TABLE IF NOT EXISTS categorias_loja (
+
+  // Tabela de configuracoes
+  try { await pool.query(`
+    CREATE TABLE IF NOT EXISTS config_app (
+      chave VARCHAR(100) PRIMARY KEY,
+      valor TEXT NOT NULL
+    )
+  `); } catch(e) {}
+
       id SERIAL PRIMARY KEY,
       loja_id VARCHAR(20) NOT NULL,
       nome VARCHAR(100) NOT NULL,
@@ -2138,6 +2147,28 @@ app.post('/orders/:id/verificar-na-loja', async (req, res) => {
     // Em caso de erro tecnico, libera para nao prejudicar o motoboy
     return res.json({ ok: true, distancia: null, aviso: 'Erro na verificacao, chegada liberada.' });
   }
+});
+
+// ===== ROTAS DE CONFIG (links admin) =====
+app.get('/config', async (req, res) => {
+  try {
+    const r = await pool.query("SELECT chave, valor FROM config_app");
+    const config = {};
+    r.rows.forEach(row => { config[row.chave] = row.valor; });
+    res.json(config);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/config', async (req, res) => {
+  try {
+    const { chave, valor } = req.body;
+    await pool.query(
+      `INSERT INTO config_app (chave, valor) VALUES ($1, $2)
+       ON CONFLICT (chave) DO UPDATE SET valor = $2`,
+      [chave, valor]
+    );
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 
