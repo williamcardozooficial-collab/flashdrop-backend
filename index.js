@@ -677,7 +677,37 @@ app.post('/orders', async (req, res) => {
     `INSERT INTO orders (loja_user,loja_name,plataforma,endereco_coleta,endereco_entrega,bairro_destino,nome_cliente,telefone_cliente,cod_pedido,cobrar_cliente,tipo_pagamento,valor_pedido,valor_total,valor_motoboy,comissao,distancia,previsao,obs,status,pending_until,telefone_loja,launch_at,complemento_coleta,complemento_entrega,obs_coleta,obs_entrega_loja,delivery_code,taxa_extra_chuva,taxa_extra_noturna,chuva_desconto_de) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'novo',$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29) RETURNING *`,
     [d.loja_user,d.loja_name,d.plataforma,d.endereco_coleta,d.endereco_entrega,d.bairro_destino,d.nome_cliente,d.telefone_cliente,d.cod_pedido,d.cobrar_cliente||'nao',d.tipo_pagamento||'dinheiro',d.valor_pedido||0,valorTotal,valorMotoboy,d.comissao,d.distancia,d.previsao,d.obs,Date.now()+15000,telefone_loja,d.launch_at||0,d.complemento_coleta||null,d.complemento_entrega||null,d.obs_coleta||null,d.obs_entrega_loja||null,deliveryCode,taxa_extra_chuva,taxa_extra_noturna,chuva_desconto_de]
   );
-  res.json(r.rows[0]);
+  const pedido = r.rows[0];
+  // Notifica loja e cliente via WhatsApp bot
+  try {
+    const botUrl = process.env.BOT_URL;
+    const botSecret = process.env.BOT_SECRET;
+    if (botUrl && botSecret) {
+      const msgLoja = '\uD83D\uDECE Novo pedido recebido!\n' +
+        'Pedido #' + pedido.id + '\n' +
+        'Cliente: ' + pedido.nome_cliente + '\n' +
+        'Total: R$' + parseFloat(pedido.valor_total).toFixed(2).replace('.', ',') + '\n' +
+        'Acesse o painel para aceitar ou recusar.';
+      const msgCliente = '\u2705 Seu pedido foi recebido!\n' +
+        'Pedido #' + pedido.id + ' na loja ' + pedido.loja_nome + '\n' +
+        'Aguarde a confirmação da loja.';
+      // Envia para a loja
+      if (pedido.telefone_loja) {
+        axios.post(botUrl + '/api/send-message',
+          { phone: pedido.telefone_loja, message: msgLoja },
+          { headers: { 'x-bot-secret': botSecret } }
+        ).catch(e => console.error('[BOT] Erro ao notificar loja:', e.message));
+      }
+      // Envia para o cliente
+      if (pedido.telefone_cliente) {
+        axios.post(botUrl + '/api/send-message',
+          { phone: pedido.telefone_cliente, message: msgCliente },
+          { headers: { 'x-bot-secret': botSecret } }
+        ).catch(e => console.error('[BOT] Erro ao notificar cliente:', e.message));
+      }
+    }
+  } catch(eBotPedido) { console.error('[BOT] Erro geral pedido:', eBotPedido.message); }
+  res.json(pedido);
 });
 
 app.put('/orders/:id', async (req, res) => {
