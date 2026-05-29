@@ -688,8 +688,17 @@ app.post('/orders', async (req, res) => {
         'Cliente: ' + pedido.nome_cliente + '\n' +
         'Total: R$' + parseFloat(pedido.valor_total).toFixed(2).replace('.', ',') + '\n' +
         'Acesse o painel para aceitar ou recusar.';
+      // Buscar telefone da loja para incluir na mensagem do cliente
+      let lojaPhone = pedido.telefone_loja || null;
+      if (!lojaPhone) {
+        try {
+          const lRes = await pool.query('SELECT phone FROM users WHERE username=$1', [pedido.loja_user]);
+          if (lRes.rows.length > 0) lojaPhone = lRes.rows[0].phone;
+        } catch(eLp) {}
+      }
+      const lojaPhoneLine = lojaPhone ? '\nTelefone da loja: ' + lojaPhone : '';
       const msgCliente = '\u2705 Seu pedido foi recebido!\n' +
-        'Pedido #' + pedido.id + ' na loja ' + pedido.loja_name + '\n' +
+        'Pedido #' + pedido.id + ' na loja ' + pedido.loja_name + lojaPhoneLine + '\n' +
         'Aguarde a confirmação da loja.';
       // Envia para a loja
       if (pedido.telefone_loja) {
