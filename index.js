@@ -689,7 +689,7 @@ app.post('/orders', async (req, res) => {
         'Total: R$' + parseFloat(pedido.valor_total).toFixed(2).replace('.', ',') + '\n' +
         'Acesse o painel para aceitar ou recusar.';
       const msgCliente = '\u2705 Seu pedido foi recebido!\n' +
-        'Pedido #' + pedido.id + ' na loja ' + pedido.loja_nome + '\n' +
+        'Pedido #' + pedido.id + ' na loja ' + pedido.loja_name + '\n' +
         'Aguarde a confirmação da loja.';
       // Envia para a loja
       if (pedido.telefone_loja) {
