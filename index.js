@@ -222,6 +222,9 @@ try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARC
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_noturna_ativa BOOLEAN DEFAULT false"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_noturna_hora_inicio VARCHAR(5) DEFAULT '22:00'"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_noturna_hora_fim VARCHAR(5) DEFAULT '06:00'"); } catch(e) {}
+  try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS app_link TEXT DEFAULT ''"); } catch(e) {}
+  try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS wpp_link TEXT DEFAULT ''"); } catch(e) {}
+  try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS app_data TEXT DEFAULT ''"); } catch(e) {}
   // ── TAXA EXTRA NOS PEDIDOS (armazenar taxas aplicadas) ──
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS taxa_extra_chuva DECIMAL DEFAULT 0"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS taxa_extra_noturna DECIMAL DEFAULT 0"); } catch(e) {}
@@ -1095,7 +1098,8 @@ app.get('/settings', async (req, res) => {
 app.put('/settings', async (req, res) => {
   const { min_fee, price_per_km, arrancada, commission, max_per_motoboy, launch_delay_minutes, credit_limit,
           taxa_chuva, taxa_chuva_ativa, taxa_chuva_desconto_de,
-          taxa_noturna, taxa_noturna_ativa, taxa_noturna_hora_inicio, taxa_noturna_hora_fim } = req.body;
+          taxa_noturna, taxa_noturna_ativa, taxa_noturna_hora_inicio, taxa_noturna_hora_fim ,
+          app_link, wpp_link, app_data } = req.body;
   const delayVal = (launch_delay_minutes != null) ? parseInt(launch_delay_minutes) : 60;
   const creditLimitVal = (credit_limit != null) ? parseFloat(credit_limit) : 20.00;
   const r = await pool.query(
@@ -1104,12 +1108,14 @@ app.put('/settings', async (req, res) => {
       launch_delay_minutes=$6, credit_limit=$7,
       taxa_chuva=$8, taxa_chuva_ativa=$9, taxa_chuva_desconto_de=$10,
       taxa_noturna=$11, taxa_noturna_ativa=$12,
-      taxa_noturna_hora_inicio=$13, taxa_noturna_hora_fim=$14
-    WHERE id=1 RETURNING *`,
+      taxa_noturna_hora_inicio=$13, taxa_noturna_hora_fim=$14,
+      app_link=$15, wpp_link=$16, app_data=$17
+      WHERE id=1 RETURNING *`,
     [min_fee, price_per_km, arrancada, commission, max_per_motoboy, delayVal, creditLimitVal,
      taxa_chuva || 0, taxa_chuva_ativa || false, taxa_chuva_desconto_de || 'admin',
      taxa_noturna || 0, taxa_noturna_ativa || false,
-     taxa_noturna_hora_inicio || '22:00', taxa_noturna_hora_fim || '06:00']
+     taxa_noturna_hora_inicio || '22:00', taxa_noturna_hora_fim || '06:00',
+     app_link || '', wpp_link || '', app_data || '']
   );
   res.json(r.rows[0]);
 });
