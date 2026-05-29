@@ -862,7 +862,7 @@ app.put('/orders/:id', async (req, res) => {
             `SELECT * FROM promotions WHERE ativa=true AND tipo='dia'`
           );
           for (const promo of todayPromos.rows) {
-            const today = new Date().toISOString().slice(0,10);
+            const today = new Date(Date.now()-3*60*60*1000).toISOString().slice(0,10);
             await pool.query(
               `INSERT INTO promotion_progress (promotion_id, motoboy_id, contagem, data_ref)
                VALUES ($1, $2, 1, $3)
@@ -1245,7 +1245,7 @@ app.delete('/promotions/:id', async (req, res) => {
 
 app.get('/promotions/progress', async (req, res) => {
   try {
-    const today = new Date().toISOString().slice(0,10);
+    const today = new Date(Date.now()-3*60*60*1000).toISOString().slice(0,10);
     const r = await pool.query(
       `SELECT pp.*, p.nome, p.meta_entregas, p.valor_bonus, u.name as motoboy_name
        FROM promotion_progress pp
@@ -1261,7 +1261,7 @@ app.get('/promotions/progress', async (req, res) => {
 
 app.get('/promotions/motoboy/:id', async (req, res) => {
   try {
-    const today = new Date().toISOString().slice(0,10);
+    const today = new Date(Date.now()-3*60*60*1000).toISOString().slice(0,10);
     const activePromos = await pool.query('SELECT * FROM promotions WHERE ativa=true');
     const progRes = await pool.query(
       `SELECT * FROM promotion_progress WHERE motoboy_id=$1 AND data_ref=$2`,
