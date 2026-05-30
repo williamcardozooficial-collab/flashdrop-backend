@@ -1144,10 +1144,7 @@ app.put('/orders/:id', async (req, res) => {
       const botSecretEntregue = process.env.BOT_SECRET;
       if (botUrlEntregue && botSecretEntregue && order.telefone_cliente) {
         const nomeLoja = order.loja_name || order.loja_user;
-        const msgEntregue = '\u2705 Pedido entregue!\n' +
-          'Pedido #' + order.id + '\n\n' +
-          'Obrigado pela prefer\u00eancia! Em nome da ' + nomeLoja + ', esperamos que aproveite muito. \uD83D\uDE0A\uD83D\uDC9A\n' +
-          'Volte sempre!';
+        const msgEntregue = '\u2705 Pedido entregue!';
         axios.post(botUrlEntregue + '/api/send-message',
           { phone: order.telefone_cliente, message: msgEntregue },
           { headers: { 'x-bot-secret': botSecretEntregue } }
