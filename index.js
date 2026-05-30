@@ -1144,7 +1144,7 @@ app.put('/orders/:id', async (req, res) => {
       const botSecretEntregue = process.env.BOT_SECRET;
       if (botUrlEntregue && botSecretEntregue && order.telefone_cliente) {
         const nomeLoja = order.loja_name || order.loja_user;
-        const msgEntregue = '\u2705 Pedido entregue!';
+        const msgEntregue = '\u2705 Pedido entregue!\n\nPedido #' + order.id + '\nObrigado pela prefer\u00eancia! Em nome da ' + nomeLoja + ', esperamos que aproveite muito sua compra. \uD83D\uDE0A\uD83D\uDC9A\uD83D\uDECD\uFE0F Conhe\u00e7a tamb\u00e9m nossas lojas parceiras e descubra novas op\u00e7\u00f5es para seus pr\u00f3ximos pedidos:\n\uD83D\uDD17 https://flashdrop-frontend-six.vercel.app/lojas.html\n\uD83D\uDE80 Entregas r\u00e1pidas, seguras e com praticidade para voc\u00ea.\nVolte sempre! \uD83D\uDC9A';
         axios.post(botUrlEntregue + '/api/send-message',
           { phone: order.telefone_cliente, message: msgEntregue },
           { headers: { 'x-bot-secret': botSecretEntregue } }
