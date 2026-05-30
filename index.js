@@ -1083,6 +1083,24 @@ app.put('/orders/:id', async (req, res) => {
       }
     } catch(eBotNaLoja) { console.error('[BOT] Erro geral WhatsApp na_loja:', eBotNaLoja.message); }
   }
+  // Notificar cliente via WhatsApp quando pedido foi coletado (motoboy a caminho)
+  if (fields.status === 'coletado') {
+    try {
+      const botUrlColetado = process.env.BOT_URL;
+      const botSecretColetado = process.env.BOT_SECRET;
+      if (botUrlColetado && botSecretColetado && order.telefone_cliente) {
+        const delivCode = order.delivery_code || '----';
+        const msgColetado = '\uD83D\uDCE6 Pedido coletado! O motoboy est\u00e1 indo at\u00e9 voc\u00ea.\n\n' +
+          'Para receber o pedido, voc\u00ea precisar\u00e1 informar o c\u00f3digo de entrega:\n\n' +
+          '\uD83D\uDD10 C\u00f3digo: *' + delivCode + '*\n\n' +
+          'Guarde este c\u00f3digo e informe ao motoboy na entrega.';
+        axios.post(botUrlColetado + '/api/send-message',
+          { phone: order.telefone_cliente, message: msgColetado },
+          { headers: { 'x-bot-secret': botSecretColetado } }
+        ).catch(e => console.error('[BOT] Erro WhatsApp coletado cliente:', e.message));
+      }
+    } catch(eBotColetado) { console.error('[BOT] Erro geral WhatsApp coletado:', eBotColetado.message); }
+  }
   res.json(order);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
