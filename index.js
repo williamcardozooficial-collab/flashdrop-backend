@@ -1101,6 +1101,40 @@ app.put('/orders/:id', async (req, res) => {
       }
     } catch(eBotColetado) { console.error('[BOT] Erro geral WhatsApp coletado:', eBotColetado.message); }
   }
+  // Notificar cliente via WhatsApp quando motoboy chegou no cliente
+  if (fields.status === 'no_cliente') {
+    try {
+      const botUrlNoCliente = process.env.BOT_URL;
+      const botSecretNoCliente = process.env.BOT_SECRET;
+      if (botUrlNoCliente && botSecretNoCliente && order.telefone_cliente) {
+        const msgNoCliente = '\uD83D\uDEF5 O motoboy chegou!\n' +
+          'Pedido #' + order.id + '\n' +
+          'Seu entregador est\u00e1 na porta. Por favor, v\u00e1 ao encontro dele para receber seu pedido. \uD83D\uDCE6\u2764\uFE0F';
+        axios.post(botUrlNoCliente + '/api/send-message',
+          { phone: order.telefone_cliente, message: msgNoCliente },
+          { headers: { 'x-bot-secret': botSecretNoCliente } }
+        ).catch(e => console.error('[BOT] Erro WhatsApp no_cliente:', e.message));
+      }
+    } catch(eBotNoCliente) { console.error('[BOT] Erro geral WhatsApp no_cliente:', eBotNoCliente.message); }
+  }
+  // Notificar cliente via WhatsApp quando pedido foi entregue
+  if (fields.status === 'entregue') {
+    try {
+      const botUrlEntregue = process.env.BOT_URL;
+      const botSecretEntregue = process.env.BOT_SECRET;
+      if (botUrlEntregue && botSecretEntregue && order.telefone_cliente) {
+        const nomeLoja = order.loja_name || order.loja_user;
+        const msgEntregue = '\u2705 Pedido entregue!\n' +
+          'Pedido #' + order.id + '\n\n' +
+          'Obrigado pela prefer\u00eancia! Em nome da ' + nomeLoja + ', esperamos que aproveite muito. \uD83D\uDE0A\uD83D\uDC9A\n' +
+          'Volte sempre!';
+        axios.post(botUrlEntregue + '/api/send-message',
+          { phone: order.telefone_cliente, message: msgEntregue },
+          { headers: { 'x-bot-secret': botSecretEntregue } }
+        ).catch(e => console.error('[BOT] Erro WhatsApp entregue cliente:', e.message));
+      }
+    } catch(eBotEntregue) { console.error('[BOT] Erro geral WhatsApp entregue:', eBotEntregue.message); }
+  }
   res.json(order);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
