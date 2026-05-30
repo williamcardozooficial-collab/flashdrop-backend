@@ -1067,6 +1067,22 @@ app.put('/orders/:id', async (req, res) => {
       }
     } catch(eBotAceito) { console.error('[BOT] Erro geral WhatsApp aceito:', eBotAceito.message); }
   }
+  // Notificar cliente via WhatsApp quando motoboy chega na loja
+  if (fields.status === 'na_loja') {
+    try {
+      const botUrlNaLoja = process.env.BOT_URL;
+      const botSecretNaLoja = process.env.BOT_SECRET;
+      if (botUrlNaLoja && botSecretNaLoja && order.telefone_cliente) {
+        const msgNaLoja = '\uD83C\uDFE1 Motoboy chegou na loja!\n' +
+          'Pedido #' + order.id + '\n' +
+          'O motoboy est\u00e1 buscando seu pedido. Em breve estar\u00e1 a caminho! \uD83D\uDE80';
+        axios.post(botUrlNaLoja + '/api/send-message',
+          { phone: order.telefone_cliente, message: msgNaLoja },
+          { headers: { 'x-bot-secret': botSecretNaLoja } }
+        ).catch(e => console.error('[BOT] Erro WhatsApp na_loja cliente:', e.message));
+      }
+    } catch(eBotNaLoja) { console.error('[BOT] Erro geral WhatsApp na_loja:', eBotNaLoja.message); }
+  }
   res.json(order);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
