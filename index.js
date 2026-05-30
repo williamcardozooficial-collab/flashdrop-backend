@@ -1051,7 +1051,23 @@ app.put('/orders/:id', async (req, res) => {
     }
 
 
-    res.json(order);
+    // Notificar cliente via WhatsApp quando motoboy aceita o pedido
+  if (fields.status === 'aceito') {
+    try {
+      const botUrlAceito = process.env.BOT_URL;
+      const botSecretAceito = process.env.BOT_SECRET;
+      if (botUrlAceito && botSecretAceito && order.telefone_cliente) {
+        const msgAceito = '\uD83D\uDEB4\u200D\u2642\uFE0F Motoboy a caminho!\n' +
+          'Pedido #' + order.id + '\n' +
+          'Um motoboy aceitou seu pedido e est\u00e1 indo buscar na loja agora. \uD83C\uDFE1\u27A1\uFE0F\uD83D\uDCE6';
+        axios.post(botUrlAceito + '/api/send-message',
+          { phone: order.telefone_cliente, message: msgAceito },
+          { headers: { 'x-bot-secret': botSecretAceito } }
+        ).catch(e => console.error('[BOT] Erro WhatsApp aceito cliente:', e.message));
+      }
+    } catch(eBotAceito) { console.error('[BOT] Erro geral WhatsApp aceito:', eBotAceito.message); }
+  }
+  res.json(order);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
