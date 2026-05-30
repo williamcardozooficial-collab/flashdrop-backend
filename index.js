@@ -862,6 +862,8 @@ app.put('/orders/:id', async (req, res) => {
         const debitoDinheiro = valorPedido + comissao;
         if (debitoDinheiro > 0) {
           await pool.query('UPDATE users SET balance = balance - $1 WHERE id=$2', [debitoDinheiro, order.motoboy_id]);
+                // Evento: motoboy cobrou do cliente em dinheiro (valor vai ser debitado do saldo)
+                try { await pool.query('INSERT INTO motoboy_wallet_events (motoboy_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)', [order.motoboy_id, 'cobranca_cliente', debitoDinheiro, 'Corrida #' + req.params.id + ' - dinheiro cobrado do cliente (debito)', req.params.id]); } catch(eWev1) {}
         }
         // Loja recebe valor_pedido de volta (motoboy vai repassar)
         if (valorPedido > 0) {
@@ -1941,6 +1943,8 @@ app.post('/pagamento-restaurante/:id/responder', async (req, res) => {
     if (decisao === 'aceito') {
       const valor = parseFloat(pag.valor);
       await pool.query('UPDATE users SET balance = COALESCE(balance,0) + $1 WHERE id=$2', [valor, pag.motoboy_id]);
+                // Evento: motoboy pagou a loja (credito no saldo - valor repassado)
+                try { await pool.query('INSERT INTO motoboy_wallet_events (motoboy_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)', [pag.motoboy_id, 'pagamento_loja', valor, 'Pagou a loja pedido #' + pag.order_id + ' (credito no saldo)', pag.order_id]); } catch(eWev2) {}
       await pool.query('UPDATE users SET credit = COALESCE(credit,0) - $1 WHERE username=$2', [valor, pag.loja_user]);
       const motInfo = await pool.query('SELECT telegram_id FROM users WHERE id=$1', [pag.motoboy_id]);
       if (motInfo.rows.length > 0 && motInfo.rows[0].telegram_id && bot) {
