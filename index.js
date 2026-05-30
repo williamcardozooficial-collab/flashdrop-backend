@@ -807,6 +807,20 @@ app.put('/orders/:id', async (req, res) => {
         if (groupId) bot.sendMessage(groupId, msgPedido).catch(() => {});
         motoboys.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgPedido).catch(() => {}));
       } catch(eBotPrep) { console.error('[BOT] Erro notif em_preparo:', eBotPrep.message); }
+    // Notificar cliente via WhatsApp que pedido esta em preparo
+    try {
+      const botUrlPrep = process.env.BOT_URL;
+      const botSecretPrep = process.env.BOT_SECRET;
+      if (botUrlPrep && botSecretPrep && order.telefone_cliente) {
+        const msgClientePrep = '\uD83D\uDD25 Seu pedido est\u00e1 sendo preparado!\n' +
+          'Pedido #' + order.id + ' na loja ' + (order.loja_name || order.loja_user) + '\n' +
+          'Em breve um motoboy vai buscar seu pedido. \uD83D\uDEB4';
+        axios.post(botUrlPrep + '/api/send-message',
+          { phone: order.telefone_cliente, message: msgClientePrep },
+          { headers: { 'x-bot-secret': botSecretPrep } }
+        ).catch(e => console.error('[BOT] Erro WhatsApp em_preparo cliente:', e.message));
+      }
+    } catch(eBotCliente) { console.error('[BOT] Erro geral WhatsApp em_preparo:', eBotCliente.message); }
     }
     if (fields.status === 'entregue' && prevOrderRes.rows[0] && prevOrderRes.rows[0].status === 'entregue') { return res.json(order); }
 
