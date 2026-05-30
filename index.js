@@ -821,6 +821,24 @@ app.put('/orders/:id', async (req, res) => {
         ).catch(e => console.error('[BOT] Erro WhatsApp em_preparo cliente:', e.message));
       }
     } catch(eBotCliente) { console.error('[BOT] Erro geral WhatsApp em_preparo:', eBotCliente.message); }
+        // Notificar grupo WhatsApp quando em preparo
+        try {
+          const botUrlGroup = process.env.BOT_URL;
+          const botSecretGroup = process.env.BOT_SECRET;
+          if (botUrlGroup && botSecretGroup) {
+            let lojaNomeGroup = order.loja_name || order.loja_user;
+            const pagLabelGroup = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX'}[order.tipo_pagamento] || order.tipo_pagamento || '-');
+            const msgGroup = '\uD83D\uDD25 Pedido em Preparo!\n' +
+              'Pedido #' + order.id + ' - ' + lojaNomeGroup + '\n' +
+              'Distancia: ' + order.distancia + ' km\n' +
+              'Pagamento: ' + pagLabelGroup + '\n' +
+              'Motoboy ganha: R$ ' + parseFloat(order.valor_motoboy).toFixed(2);
+            axios.post(botUrlGroup + '/api/send-group-message',
+              { message: msgGroup },
+              { headers: { 'x-bot-secret': botSecretGroup } }
+            ).catch(e => console.error('[BOT] Erro msg grupo em_preparo:', e.message));
+          }
+        } catch(eGroupPrep) { console.error('[BOT] Erro geral grupo em_preparo:', eGroupPrep.message); }
     }
     if (fields.status === 'entregue' && prevOrderRes.rows[0] && prevOrderRes.rows[0].status === 'entregue') { return res.json(order); }
 
@@ -1573,6 +1591,24 @@ app.post('/orders/:id/launch', async (req, res) => {
       ).catch(e => console.error('[BOT] Erro WhatsApp launch cliente:', e.message));
     }
   } catch(eLaunchBot) { console.error('[BOT] Erro geral WhatsApp launch:', eLaunchBot.message); }
+      // Notificar grupo WhatsApp quando pedido fica disponivel (pendente - launch manual)
+      try {
+        const botUrlGroupL = process.env.BOT_URL;
+        const botSecretGroupL = process.env.BOT_SECRET;
+        if (botUrlGroupL && botSecretGroupL) {
+          let lojaNomePend = pedido.loja_name || pedido.loja_user;
+          const pagLabelPend = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX'}[pedido.tipo_pagamento] || pedido.tipo_pagamento || '-');
+          const msgGroupPend = '\uD83D\uDEB4 Pedido Disponivel!\n' +
+            'Pedido #' + pedido.id + ' - ' + lojaNomePend + '\n' +
+            'Distancia: ' + pedido.distancia + ' km\n' +
+            'Pagamento: ' + pagLabelPend + '\n' +
+            'Motoboy ganha: R$ ' + parseFloat(pedido.valor_motoboy).toFixed(2);
+          axios.post(botUrlGroupL + '/api/send-group-message',
+            { message: msgGroupPend },
+            { headers: { 'x-bot-secret': botSecretGroupL } }
+          ).catch(e => console.error('[BOT] Erro msg grupo launch:', e.message));
+        }
+      } catch(eGroupLaunch) { console.error('[BOT] Erro geral grupo launch:', eGroupLaunch.message); }
   res.json(r.rows[0]);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -1962,6 +1998,24 @@ async function checkAndLaunchOrders() {
         ).catch(e => console.error('[BOT] Erro WhatsApp auto-launch cliente:', e.message));
       }
     } catch(eAutoBot) { console.error('[BOT] Erro geral WhatsApp auto-launch:', eAutoBot.message); }
+          // Notificar grupo WhatsApp quando pedido fica disponivel (pendente - auto-launch)
+          try {
+            const botUrlGroupA = process.env.BOT_URL;
+            const botSecretGroupA = process.env.BOT_SECRET;
+            if (botUrlGroupA && botSecretGroupA) {
+              let lojaNomeAuto = pedido.loja_name || pedido.loja_user;
+              const pagLabelAuto = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX'}[pedido.tipo_pagamento] || pedido.tipo_pagamento || '-');
+              const msgGroupAuto = '\uD83D\uDEB4 Pedido Disponivel!\n' +
+                'Pedido #' + pedido.id + ' - ' + lojaNomeAuto + '\n' +
+                'Distancia: ' + pedido.distancia + ' km\n' +
+                'Pagamento: ' + pagLabelAuto + '\n' +
+                'Motoboy ganha: R$ ' + parseFloat(pedido.valor_motoboy).toFixed(2);
+              axios.post(botUrlGroupA + '/api/send-group-message',
+                { message: msgGroupAuto },
+                { headers: { 'x-bot-secret': botSecretGroupA } }
+              ).catch(e => console.error('[BOT] Erro msg grupo auto-launch:', e.message));
+            }
+          } catch(eGroupAuto) { console.error('[BOT] Erro geral grupo auto-launch:', eGroupAuto.message); }
     }
   } catch(e) { console.error('[JOB] Erro ao lancar pedidos:', e.message); }
 }
