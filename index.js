@@ -225,6 +225,7 @@ try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARC
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS app_link TEXT DEFAULT ''"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS wpp_link TEXT DEFAULT ''"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS app_data TEXT DEFAULT ''"); } catch(e) {}
+  try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS perc_cartao_aprox DECIMAL DEFAULT 5.00"); } catch(e) {}
   // ── TAXA EXTRA NOS PEDIDOS (armazenar taxas aplicadas) ──
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS taxa_extra_chuva DECIMAL DEFAULT 0"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS taxa_extra_noturna DECIMAL DEFAULT 0"); } catch(e) {}
@@ -741,6 +742,7 @@ app.put('/orders/:id', async (req, res) => {
         if (orderRes.rows.length > 0) {
           const order = orderRes.rows[0];
           const isDinheiro = order.tipo_pagamento === 'dinheiro';
+          const isCartaoAprox = order.tipo_pagamento === 'cartao_aproximacao';
 
           if (isDinheiro) {
             // Logica: custom_credit_limit define o limite individual do motoboy
@@ -770,6 +772,24 @@ app.put('/orders/:id', async (req, res) => {
                 credit_blocked: true
               });
             }
+          }
+
+          // Valida saldo do motoboy para cartao_aproximacao
+          if (isCartaoAprox) {
+            try {
+              const cfgCartaoRes = await pool.query('SELECT perc_cartao_aprox FROM settings WHERE id=1');
+              const percCartao = parseFloat(cfgCartaoRes.rows[0]?.perc_cartao_aprox) || 5.00;
+              const xValor = parseFloat(order.valor_pedido) || 0;
+              const yTaxa = parseFloat(order.valor_total) || 0;
+              const valorFinalCartao = Math.round(((xValor + yTaxa) * (1 - percCartao / 100)) * 100) / 100;
+              const mbBalance = parseFloat(mb.balance) || 0;
+              if (mbBalance < valorFinalCartao) {
+                return res.status(403).json({
+                  error: 'Saldo insuficiente para aceitar este pedido. Voce precisa de pelo menos R$ ' + valorFinalCartao.toFixed(2) + ' de saldo para pedidos com cartao por aproximacao.',
+                  credit_blocked: true
+                });
+              }
+            } catch(eCartaoCheck) { console.error('[CARTAO] Erro ao checar saldo:', eCartaoCheck.message); }
           }
         }
       }
@@ -881,6 +901,32 @@ app.put('/orders/:id', async (req, res) => {
                 } catch(eLwe) {}
               }
         }
+      } else if (order.tipo_pagamento === 'cartao_aproximacao') {
+        // Cartao por aproximacao: (X+Y) - P% -> credita loja, debita motoboy
+        try {
+          const cfgAproxRes = await pool.query('SELECT perc_cartao_aprox FROM settings WHERE id=1');
+          const percAprox = parseFloat(cfgAproxRes.rows[0]?.perc_cartao_aprox) || 5.00;
+          const X = valorPedido;
+          const Y = parseFloat(order.valor_total) || 0;
+          const valorFinalAprox = Math.round(((X + Y) * (1 - percAprox / 100)) * 100) / 100;
+          if (valorFinalAprox > 0) {
+            // Creditar loja
+            await pool.query('UPDATE users SET credit = credit + $1 WHERE username=$2', [valorFinalAprox, order.loja_user]);
+            try {
+              const lojaResAprox = await pool.query('SELECT id FROM users WHERE username=$1', [order.loja_user]);
+              if (lojaResAprox.rows.length > 0) {
+                await pool.query('INSERT INTO loja_wallet_events (loja_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)',
+                  [lojaResAprox.rows[0].id, 'cartao_aproximacao', valorFinalAprox, 'Recebimento pedido #' + req.params.id + ' (cartao aprox ' + percAprox + '%)', req.params.id]);
+              }
+            } catch(eLweAprox) {}
+            // Debitar motoboy
+            if (order.motoboy_id) {
+              await pool.query('UPDATE users SET balance = balance - $1 WHERE id=$2', [valorFinalAprox, order.motoboy_id]);
+              try { await pool.query('INSERT INTO motoboy_wallet_events (motoboy_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)',
+                [order.motoboy_id, 'debito_cartao_aprox', valorFinalAprox, 'Debito corrida #' + req.params.id + ' cartao aprox (' + percAprox + '%)', req.params.id]); } catch(eMwAprox) {}
+            }
+          }
+        } catch(eAprox) { console.error('[CARTAO_APROX] Erro financeiro:', eAprox.message); }
       } else {
         // PIX ou Maquina: motoboy recebe valor_motoboy
         if (valorMotoboy > 0) {
@@ -1265,7 +1311,8 @@ app.get('/settings', async (req, res) => {
 app.put('/settings', async (req, res) => {
   const { min_fee, price_per_km, arrancada, commission, max_per_motoboy, launch_delay_minutes, credit_limit,
           taxa_chuva, taxa_chuva_ativa, taxa_chuva_desconto_de,
-          taxa_noturna, taxa_noturna_ativa, taxa_noturna_hora_inicio, taxa_noturna_hora_fim ,
+          taxa_noturna, taxa_noturna_ativa, taxa_noturna_hora_inicio, taxa_noturna_hora_fim,
+          perc_cartao_aprox,
           app_link, wpp_link, app_data } = req.body;
   const delayVal = (launch_delay_minutes != null) ? parseInt(launch_delay_minutes) : 60;
   const creditLimitVal = (credit_limit != null) ? parseFloat(credit_limit) : 20.00;
@@ -1276,13 +1323,15 @@ app.put('/settings', async (req, res) => {
       taxa_chuva=$8, taxa_chuva_ativa=$9, taxa_chuva_desconto_de=$10,
       taxa_noturna=$11, taxa_noturna_ativa=$12,
       taxa_noturna_hora_inicio=$13, taxa_noturna_hora_fim=$14,
-      app_link=$15, wpp_link=$16, app_data=$17
+      app_link=$15, wpp_link=$16, app_data=$17,
+      perc_cartao_aprox=$18
       WHERE id=1 RETURNING *`,
     [min_fee, price_per_km, arrancada, commission, max_per_motoboy, delayVal, creditLimitVal,
      taxa_chuva || 0, taxa_chuva_ativa || false, taxa_chuva_desconto_de || 'admin',
      taxa_noturna || 0, taxa_noturna_ativa || false,
      taxa_noturna_hora_inicio || '22:00', taxa_noturna_hora_fim || '06:00',
-     app_link || '', wpp_link || '', app_data || '']
+     app_link || '', wpp_link || '', app_data || '',
+     parseFloat(perc_cartao_aprox) || 5.00]
   );
   res.json(r.rows[0]);
 });
