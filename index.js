@@ -1121,6 +1121,27 @@ app.put('/orders/:id', async (req, res) => {
       }
     } catch(eBotAceito) { console.error('[BOT] Erro geral WhatsApp aceito:', eBotAceito.message); }
   }
+  // Notificar motoboy via WhatsApp quando aceita pedido cartao_aproximacao
+  if (fields.status === 'aceito' && order.tipo_pagamento === 'cartao_aproximacao' && fields.motoboy_id) {
+    try {
+      const botUrlAproxMb = process.env.BOT_URL;
+      const botSecretAproxMb = process.env.BOT_SECRET;
+      if (botUrlAproxMb && botSecretAproxMb) {
+        const mbPhoneRes = await pool.query('SELECT phone FROM users WHERE id=$1', [fields.motoboy_id]);
+        const mbPhone = mbPhoneRes.rows.length > 0 ? mbPhoneRes.rows[0].phone : null;
+        if (mbPhone) {
+          const valorProd = parseFloat(order.valor_pedido || 0);
+          const msgAproxMb = '\uD83D\uDCB3 Aten\u00e7\u00e3o!\n\nEste pedido foi aceito com pagamento via cart\u00e3o de cr\u00e9dito.\n\nPara concluir a entrega, voc\u00ea precisa possuir uma forma de cobran\u00e7a por cart\u00e3o, utilizando sua pr\u00f3pria maquininha ou um sistema de pagamento por aproxima\u00e7\u00e3o (TAP) no celular.\n\n\uD83D\uDCF1 \u00c9 responsabilidade do entregador realizar a cobran\u00e7a do cliente no momento da entrega.' +
+            (valorProd > 0 ? '\n\n\uD83D\uDCB0 Valor a cobrar do cliente: R$ ' + valorProd.toFixed(2) : '') +
+            '\n\n\u26A0\uFE0F Caso voc\u00ea n\u00e3o possua meios para receber pagamentos por cart\u00e3o, cancele este pedido imediatamente e entre em contato com o suporte para informar a situa\u00e7\u00e3o.\n\n\u2705 Ao continuar com este pedido, voc\u00ea declara possuir os meios necess\u00e1rios para realizar a cobran\u00e7a do cliente.';
+          axios.post(botUrlAproxMb + '/api/send-message',
+            { phone: mbPhone, message: msgAproxMb },
+            { headers: { 'x-bot-secret': botSecretAproxMb } }
+          ).catch(e => console.error('[BOT] Erro WhatsApp cartao_aprox motoboy:', e.message));
+        }
+      }
+    } catch(eBotAproxMb) { console.error('[BOT] Erro geral cartao_aprox motoboy:', eBotAproxMb.message); }
+  }
   // Notificar cliente e loja via WhatsApp quando motoboy chega na loja
   if (fields.status === 'na_loja') {
     try {
