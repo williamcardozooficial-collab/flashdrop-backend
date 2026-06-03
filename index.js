@@ -702,19 +702,7 @@ app.post('/orders', async (req, res) => {
         'Pedido #' + pedido.id + ' na loja ' + pedido.loja_name + lojaPhoneLine + '\n' +
         'Aguarde a confirmação da loja.';
       // Envia para a loja
-      if (pedido.telefone_loja) {
-        axios.post(botUrl + '/api/send-message',
-          { phone: pedido.telefone_loja, message: msgLoja },
-          { headers: { 'x-bot-secret': botSecret } }
-        ).catch(e => console.error('[BOT] Erro ao notificar loja:', e.message));
-      }
       // Envia para o cliente
-      if (pedido.telefone_cliente) {
-        axios.post(botUrl + '/api/send-message',
-          { phone: pedido.telefone_cliente, message: msgCliente },
-          { headers: { 'x-bot-secret': botSecret } }
-        ).catch(e => console.error('[BOT] Erro ao notificar cliente:', e.message));
-      }
     }
   } catch(eBotPedido) { console.error('[BOT] Erro geral pedido:', eBotPedido.message); }
   res.json(pedido);
@@ -812,15 +800,6 @@ app.put('/orders/:id', async (req, res) => {
     try {
       const botUrlPrep = process.env.BOT_URL;
       const botSecretPrep = process.env.BOT_SECRET;
-      if (botUrlPrep && botSecretPrep && order.telefone_cliente) {
-        const msgClientePrep = '\uD83D\uDD25 Seu pedido est\u00e1 sendo preparado!\n' +
-          'Pedido #' + order.id + ' na loja ' + (order.loja_name || order.loja_user) + '\n' +
-          'Em breve um motoboy vai buscar seu pedido. \uD83D\uDEB4';
-        axios.post(botUrlPrep + '/api/send-message',
-          { phone: order.telefone_cliente, message: msgClientePrep },
-          { headers: { 'x-bot-secret': botSecretPrep } }
-        ).catch(e => console.error('[BOT] Erro WhatsApp em_preparo cliente:', e.message));
-      }
     } catch(eBotCliente) { console.error('[BOT] Erro geral WhatsApp em_preparo:', eBotCliente.message); }
         // Notificar grupo WhatsApp quando em preparo
         try {
@@ -1110,15 +1089,6 @@ app.put('/orders/:id', async (req, res) => {
     try {
       const botUrlAceito = process.env.BOT_URL;
       const botSecretAceito = process.env.BOT_SECRET;
-      if (botUrlAceito && botSecretAceito && order.telefone_cliente) {
-        const msgAceito = '\uD83D\uDEB4\u200D\u2642\uFE0F Motoboy a caminho!\n' +
-          'Pedido #' + order.id + '\n' +
-          'Um motoboy aceitou seu pedido e est\u00e1 indo buscar na loja agora. \uD83C\uDFE1\u27A1\uFE0F\uD83D\uDCE6';
-        axios.post(botUrlAceito + '/api/send-message',
-          { phone: order.telefone_cliente, message: msgAceito },
-          { headers: { 'x-bot-secret': botSecretAceito } }
-        ).catch(e => console.error('[BOT] Erro WhatsApp aceito cliente:', e.message));
-      }
     } catch(eBotAceito) { console.error('[BOT] Erro geral WhatsApp aceito:', eBotAceito.message); }
   }
   // Notificar motoboy via WhatsApp quando aceita pedido cartao_aproximacao
@@ -1151,25 +1121,7 @@ app.put('/orders/:id', async (req, res) => {
       const botSecretNaLoja = process.env.BOT_SECRET;
       if (botUrlNaLoja && botSecretNaLoja) {
         // Mensagem para o cliente
-        if (order.telefone_cliente) {
-          const msgNaLoja = '\uD83C\uDFE1 Motoboy chegou na loja!\n' +
-            'Pedido #' + order.id + '\n' +
-            'O motoboy est\u00e1 buscando seu pedido. Em breve estar\u00e1 a caminho! \uD83D\uDE80';
-          axios.post(botUrlNaLoja + '/api/send-message',
-            { phone: order.telefone_cliente, message: msgNaLoja },
-            { headers: { 'x-bot-secret': botSecretNaLoja } }
-          ).catch(function(){});
-        }
         // Mensagem para a loja avisando que motoboy chegou
-        if (order.telefone_loja) {
-          const msgNaLojaLoja = '\uD83D\uDEB4 Motoboy chegou para buscar o pedido!\n' +
-            'Pedido #' + order.id + '\n' +
-            'O motoboy est\u00e1 na loja aguardando. Entregue o pedido para ele. \uD83D\uDCE6';
-          axios.post(botUrlNaLoja + '/api/send-message',
-            { phone: order.telefone_loja, message: msgNaLojaLoja },
-            { headers: { 'x-bot-secret': botSecretNaLoja } }
-          ).catch(function(){});
-        }
       }
     } catch(eBotNaLoja) { console.error('[BOT] Erro geral WhatsApp na_loja:', eBotNaLoja.message); }
   }
@@ -1212,14 +1164,6 @@ app.put('/orders/:id', async (req, res) => {
     try {
       const botUrlEntregue = process.env.BOT_URL;
       const botSecretEntregue = process.env.BOT_SECRET;
-      if (botUrlEntregue && botSecretEntregue && order.telefone_cliente) {
-        const nomeLoja = order.loja_name || order.loja_user;
-        const msgEntregue = '\u2705 Pedido entregue!\n\nPedido #' + order.id + '\nObrigado pela prefer\u00eancia! Em nome da ' + nomeLoja + ', esperamos que aproveite muito sua compra. \uD83D\uDE0A\uD83D\uDC9A\uD83D\uDECD\uFE0F Conhe\u00e7a tamb\u00e9m nossas lojas parceiras e descubra novas op\u00e7\u00f5es para seus pr\u00f3ximos pedidos:\n\uD83D\uDD17 https://flashdrop-frontend-six.vercel.app/lojas.html\n\uD83D\uDE80 Entregas r\u00e1pidas, seguras e com praticidade para voc\u00ea.\nVolte sempre! \uD83D\uDC9A';
-        axios.post(botUrlEntregue + '/api/send-message',
-          { phone: order.telefone_cliente, message: msgEntregue },
-          { headers: { 'x-bot-secret': botSecretEntregue } }
-        ).catch(e => console.error('[BOT] Erro WhatsApp entregue cliente:', e.message));
-      }
     } catch(eBotEntregue) { console.error('[BOT] Erro geral WhatsApp entregue:', eBotEntregue.message); }
   }
   res.json(order);
