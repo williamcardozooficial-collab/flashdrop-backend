@@ -1593,7 +1593,19 @@ app.post('/orders/:id/launch', async (req, res) => {
       const motoboys = await pool.query("SELECT telegram_id FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL");
       motoboys.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgLancado).catch(() => {}));
     }
-
+    // Notificar cliente via WhatsApp que motoboy foi chamado
+  try {
+    const botUrlLaunch = process.env.BOT_URL;
+    const botSecretLaunch = process.env.BOT_SECRET;
+    if (botUrlLaunch && botSecretLaunch && pedido.telefone_cliente) {
+      const msgLaunch = '\uD83D\uDEB4 Seu pedido est\u00e1 pronto!\n' +
+        'Pedido #' + pedido.id + ' na loja ' + (pedido.loja_name || pedido.loja_user) + '\n' +
+        'Estamos procurando um motoboy para buscar seu pedido agora. \uD83D\uDD0D';
+      axios.post(botUrlLaunch + '/api/send-message',
+        { phone: pedido.telefone_cliente, message: msgLaunch },
+        { headers: { 'x-bot-secret': botSecretLaunch } }
+      ).catch(e => console.error('[BOT] Erro WhatsApp launch cliente:', e.message));
+    }
   } catch(eLaunchBot) { console.error('[BOT] Erro geral WhatsApp launch:', eLaunchBot.message); }
       // Notificar grupo WhatsApp quando pedido fica disponivel (pendente - launch manual)
       try {
@@ -1990,7 +2002,19 @@ async function checkAndLaunchOrders() {
         motoboys.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgAuto).catch(() => {}));
       }
       console.log(`[JOB] Pedido #${pedido.id} lancado automaticamente.`);
-
+    // Notificar cliente via WhatsApp no lancamento automatico
+    try {
+      const botUrlAuto = process.env.BOT_URL;
+      const botSecretAuto = process.env.BOT_SECRET;
+      if (botUrlAuto && botSecretAuto && pedido.telefone_cliente) {
+        const msgAuto = '\uD83D\uDEB4 Seu pedido est\u00e1 pronto!\n' +
+          'Pedido #' + pedido.id + ' na loja ' + (pedido.loja_name || pedido.loja_user) + '\n' +
+          'Estamos procurando um motoboy para buscar seu pedido agora. \uD83D\uDD0D';
+        axios.post(botUrlAuto + '/api/send-message',
+          { phone: pedido.telefone_cliente, message: msgAuto },
+          { headers: { 'x-bot-secret': botSecretAuto } }
+        ).catch(e => console.error('[BOT] Erro WhatsApp auto-launch cliente:', e.message));
+      }
     } catch(eAutoBot) { console.error('[BOT] Erro geral WhatsApp auto-launch:', eAutoBot.message); }
           // Notificar grupo WhatsApp quando pedido fica disponivel (pendente - auto-launch)
           try {
