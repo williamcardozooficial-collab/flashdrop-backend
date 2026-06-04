@@ -6,7 +6,7 @@ const axios = require('axios');
 const TelegramBot = require('node-telegram-bot-api');
 require('dotenv').config();
 
-const app = express();
+const app = express();h
 app.use(cors({ origin: '*', methods: ['GET','POST','PUT','DELETE','OPTIONS'], allowedHeaders: ['Content-Type','Authorization'] }));
 app.options('*', cors());
 app.use(express.json());
@@ -1132,10 +1132,11 @@ app.put('/orders/:id', async (req, res) => {
       const botSecretColetado = process.env.BOT_SECRET;
       if (botUrlColetado && botSecretColetado && order.telefone_cliente) {
         const delivCode = order.delivery_code || '----';
-        const msgColetado = '\uD83D\uDCE6 Pedido coletado! O motoboy est\u00e1 indo at\u00e9 voc\u00ea.\n\n' +
-          'Para receber o pedido, voc\u00ea precisar\u00e1 informar o c\u00f3digo de entrega:\n\n' +
-          '\uD83D\uDD10 C\u00f3digo: *' + delivCode + '*\n\n' +
-          'Guarde este c\u00f3digo e informe ao motoboy na entrega.';
+        const msgColetado = '\uD83D\uDCE6 Pedido coletado!\n\n' +
+                      'Quando o motoboy estiver pr\u00f3ximo ao seu endere\u00e7o, voc\u00ea receber\u00e1 uma nova notifica\u00e7\u00e3o, que ele chegou, *Fique Atento* \uD83D\uDCF2\n\n' +
+                      'Para receber o pedido, ser\u00e1 necess\u00e1rio informar o c\u00f3digo de entrega:\n\n' +
+                      '\uD83D\uDD10 C\u00f3digo: *' + delivCode + '*\n\n' +
+                      '\u26A0\uFE0F Guarde este c\u00f3digo em seguran\u00e7a e informe-o ao motoboy no momento da entrega. Sem o c\u00f3digo, a entrega n\u00e3o poder\u00e1 ser finalizada.';
         axios.post(botUrlColetado + '/api/send-message',
           { phone: order.telefone_cliente, message: msgColetado },
           { headers: { 'x-bot-secret': botSecretColetado } }
