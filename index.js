@@ -366,9 +366,12 @@ try {
   id SERIAL PRIMARY KEY,
       loja_id VARCHAR(20) NOT NULL,
       nome VARCHAR(100) NOT NULL,
+      ordem INTEGER DEFAULT 0,
       created_at TIMESTAMP DEFAULT NOW()
     )
   `); } catch(e) {}
+  // Add ordem column to existing categorias_loja tables
+  try { await pool.query(`ALTER TABLE categorias_loja ADD COLUMN IF NOT EXISTS ordem INTEGER DEFAULT 0`); } catch(e) {}
 
   console.log('DB initialized');
 }
@@ -2091,7 +2094,7 @@ app.get('/categorias', async (req, res) => {
   const { loja_id } = req.query;
   if (!loja_id) return res.status(400).json({ error: 'loja_id obrigatorio' });
   try {
-    const r = await pool.query('SELECT id, nome FROM categorias_loja WHERE loja_id=$1 ORDER BY id ASC', [loja_id]);
+    const r = await pool.query('SELECT id, nome, ordem FROM categorias_loja WHERE loja_id=$1 ORDER BY ordem ASC, id ASC', [loja_id]);
     res.json(r.rows);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -2109,6 +2112,16 @@ app.delete('/categorias/:id', async (req, res) => {
   if (!loja_id) return res.status(400).json({ error: 'loja_id obrigatorio' });
   try {
     await pool.query('DELETE FROM categorias_loja WHERE id=$1 AND loja_id=$2', [id, loja_id]);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+app.put('/categorias/ordem', async (req, res) => {
+  const { loja_id, ordem } = req.body;
+  if (!loja_id || !Array.isArray(ordem)) return res.status(400).json({ error: 'loja_id e ordem obrigatorios' });
+  try {
+    for (let i = 0; i < ordem.length; i++) {
+      await pool.query('UPDATE categorias_loja SET ordem=$1 WHERE id=$2 AND loja_id=$3', [i, ordem[i], loja_id]);
+    }
     res.json({ ok: true });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
