@@ -37,6 +37,11 @@ function san(obj, ...fields) {
 }
 // FIM SANITIZACAO
 
+// Gera slug do nome da loja
+function slugify(str){
+  return str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9\s-]/g,'').trim().replace(/[\s_]+/g,'-').replace(/-+/g,'-');
+}
+
 // Telegram Bot
 const bot = process.env.TELEGRAM_BOT_TOKEN ? new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, {polling: true}) : null;
 const ADMIN_ID = 738230199;
@@ -373,7 +378,17 @@ try {
   // Add ordem column to existing categorias_loja tables
   try { await pool.query(`ALTER TABLE categorias_loja ADD COLUMN IF NOT EXISTS ordem INTEGER DEFAULT 0`); } catch(e) {}
 
-  console.log('DB initialized');
+  
+try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS slug VARCHAR(100) UNIQUE"); } catch(e) {}
+try {
+  const _sls = await pool.query("SELECT id, name FROM users WHERE role='loja' AND (slug IS NULL OR slug='')");
+  for (const _l of _sls.rows) {
+    let _b=slugify(_l.name); let _s=_b; let _n=1;
+    while(true){const _d=await pool.query("SELECT id FROM users WHERE slug=$1 AND id!=$2",[_s,_l.id]);if(!_d.rows.length)break;_s=_b+'-'+(++_n);}
+    await pool.query("UPDATE users SET slug=$1 WHERE id=$2",[_s,_l.id]);
+  }
+} catch(e){console.log('slug migration:',e.message);}
+console.log('DB initialized');
 }
 
 app.get('/health', (req, res) => res.json({ ok: true }));
@@ -1531,6 +1546,14 @@ app.delete('/notices/:id', async (req, res) => {
   try {
     await pool.query("DELETE FROM notices WHERE id=$1", [req.params.id]);
     res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/loja/slug/:slug', async (req, res) => {
+  try {
+    const r = await pool.query("SELECT id,username,name,address,phone,foto_url,custom_id,slug,loja_online,loja_formas_pagamento FROM users WHERE slug=$1 AND role='loja'", [req.params.slug]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Loja nao encontrada' });
+    res.json(r.rows[0]);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
