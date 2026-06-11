@@ -2402,80 +2402,116 @@ app.post('/orders/:id/verificar-na-loja', async (req, res) => {
 // Body: { loja_id, itens:[{nome,preco,qtd}], totalItens, taxaEntrega, totalFinal, nomeCliente }
 // Retorna: { checkout_url, preference_id }
 app.post('/mercadopago/checkout-pedido', async (req, res) => {
-  try {
-    const { loja_id, itens, totalItens, taxaEntrega, totalFinal, nomeCliente } = req.body;
-    if (!loja_id) return res.status(400).json({ error: 'loja_id obrigatorio' });
-    if (!totalFinal || parseFloat(totalFinal) <= 0) return res.status(400).json({ error: 'Valor invalido' });
+try {
+const { loja_id, itens, totalItens, taxaEntrega, totalFinal, nomeCliente } = req.body;
+if (!loja_id) return res.status(400).json({ error: 'loja_id obrigatorio' });
+if (!totalFinal || parseFloat(totalFinal) <= 0) return res.status(400).json({ error: 'Valor invalido' });
 
-    // Buscar token da loja no banco
-    const lojaRes = await pool.query('SELECT mp_access_token, name FROM users WHERE id=$1', [loja_id]);
-    if (!lojaRes.rows.length) return res.status(404).json({ error: 'Loja nao encontrada' });
-    const loja = lojaRes.rows[0];
-    if (!loja.mp_access_token) return res.status(400).json({ error: 'Loja nao configurou o Mercado Pago' });
+// Buscar token MP: usa token da loja se tiver, senao usa o global do .env
+const lojaRes = await pool.query('SELECT mp_access_token, name FROM users WHERE id=$1', [loja_id]);
+if (!lojaRes.rows.length) return res.status(404).json({ error: 'Loja nao encontrada' });
+const loja = lojaRes.rows[0];
+const mpToken = (loja.mp_access_token) || process.env.MP_ACCESS_TOKEN;
+if (!mpToken) return res.status(400).json({ error: 'Token Mercado Pago nao configurado no servidor' });
 
-    const mpToken = loja.mp_access_token;
-    const valor = parseFloat(totalFinal);
+const valor = parseFloat(totalFinal);
 
-    // Montar itens da preference
-    const prefItens = [];
-    if (Array.isArray(itens) && itens.length > 0) {
-      itens.forEach(function(it) {
-        prefItens.push({
-          title: it.nome || 'Produto',
-          quantity: parseInt(it.qtd) || 1,
-          unit_price: parseFloat(it.preco) || 0,
-          currency_id: 'BRL'
-        });
-      });
-    } else {
-      prefItens.push({
-        title: 'Pedido ' + (loja.name || 'FlashDrop'),
-        quantity: 1,
-        unit_price: valor,
-        currency_id: 'BRL'
-      });
-    }
+// Montar itens da preference
+const prefItens = [];
+if (Array.isArray(itens) && itens.length > 0) {
+itens.forEach(function(it) {
+prefItens.push({
+title: it.nome || 'Produto',
+quantity: parseInt(it.qtd) || 1,
+unit_price: parseFloat(it.preco) || 0,
+currency_id: 'BRL'
+});
+});
+} else {
+prefItens.push({
+title: 'Pedido ' + (loja.name || 'FlashDrop'),
+quantity: 1,
+unit_price: valor,
+currency_id: 'BRL'
+});
+}
 
-    const prefPayload = {
-      items: prefItens,
-      payer: { name: nomeCliente || 'Cliente' },
-      payment_methods: {
-        excluded_payment_types: [],
-        installments: 1
-      },
-      back_urls: {
-        success: 'https://flashdrop-frontend-six.vercel.app/cardapio/pagamento-sucesso',
-        failure: 'https://flashdrop-frontend-six.vercel.app/cardapio/pagamento-falha',
-        pending: 'https://flashdrop-frontend-six.vercel.app/cardapio/pagamento-pendente'
-      },
-      auto_return: 'approved',
-      notification_url: 'https://flashdrop-backend-production.up.railway.app/mercadopago/webhook-pedido/' + loja_id,
-      metadata: { loja_id: loja_id, tipo: 'pedido_cardapio' },
-      statement_descriptor: 'FlashDrop Delivery'
-    };
+// 1) Criar preference (Checkout Pro) para obter checkout_url
+const prefPayload = {
+items: prefItens,
+payer: { name: nomeCliente || 'Cliente' },
+payment_methods: { excluded_payment_types: [], installments: 1 },
+back_urls: {
+success: 'https://flashdrop-frontend-six.vercel.app/cardapio/pagamento-sucesso',
+failure: 'https://flashdrop-frontend-six.vercel.app/cardapio/pagamento-falha',
+pending: 'https://flashdrop-frontend-six.vercel.app/cardapio/pagamento-pendente'
+},
+auto_return: 'approved',
+notification_url: 'https://flashdrop-backend-production.up.railway.app/mercadopago/webhook-pedido/' + loja_id,
+metadata: { loja_id: loja_id, tipo: 'pedido_cardapio' },
+statement_descriptor: 'FlashDrop Delivery'
+};
 
-    const mpRes = await axios.post('https://api.mercadopago.com/checkout/preferences', prefPayload, {
-      headers: {
-        'Authorization': 'Bearer ' + mpToken,
-        'Content-Type': 'application/json',
-        'X-Idempotency-Key': 'fdpedido-' + loja_id + '-' + Date.now()
-      }
-    });
+const prefRes = await axios.post('https://api.mercadopago.com/checkout/preferences', prefPayload, {
+headers: {
+'Authorization': 'Bearer ' + mpToken,
+'Content-Type': 'application/json',
+'X-Idempotency-Key': 'fdpedido-' + loja_id + '-' + Date.now()
+}
+});
+const pref = prefRes.data;
 
-    const pref = mpRes.data;
-    res.json({
-      checkout_url: pref.init_point,
-      sandbox_url: pref.sandbox_init_point,
-      preference_id: pref.id
-    });
+// 2) Criar pagamento PIX para gerar copia e cola
+let pixCopiaECola = null;
+let pixQrCodeBase64 = null;
+try {
+const pixPayload = {
+transaction_amount: valor,
+description: 'Pedido ' + (loja.name || 'FlashDrop'),
+payment_method_id: 'pix',
+payer: {
+email: 'cliente@flashdrop.app',
+first_name: (nomeCliente || 'Cliente').split(' ')[0],
+last_name: (nomeCliente || 'Cliente').split(' ').slice(1).join(' ') || 'FlashDrop',
+identification: { type: 'CPF', number: '00000000000' }
+},
+notification_url: 'https://flashdrop-backend-production.up.railway.app/mercadopago/webhook-pedido/' + loja_id,
+metadata: { loja_id: loja_id, preference_id: pref.id, tipo: 'pedido_cardapio' },
+date_of_expiration: new Date(Date.now() + 30 * 60 * 1000).toISOString()
+};
+const pixRes = await axios.post('https://api.mercadopago.com/v1/payments', pixPayload, {
+headers: {
+'Authorization': 'Bearer ' + mpToken,
+'Content-Type': 'application/json',
+'X-Idempotency-Key': 'fdpix-' + loja_id + '-' + Date.now()
+}
+});
+const pixData = pixRes.data.point_of_interaction && pixRes.data.point_of_interaction.transaction_data;
+if (pixData) {
+pixCopiaECola = pixData.qr_code || null;
+pixQrCodeBase64 = pixData.qr_code_base64 || null;
+}
+// Salvar payment_id associado ao preference_id para verificacao posterior
+window._lastPixPaymentId = pixRes.data.id;
+} catch(pixErr) {
+console.error('[MP-CHECKOUT] Erro ao gerar PIX:', pixErr.response ? JSON.stringify(pixErr.response.data) : pixErr.message);
+}
 
-  } catch(err) {
-    console.error('[MP-CHECKOUT] Erro:', err.response ? JSON.stringify(err.response.data) : err.message);
-    const errMsg = err.response && err.response.data && err.response.data.message
-      ? err.response.data.message
-      : (err.message || 'Erro ao criar checkout');
-    res.status(500).json({ error: errMsg });
-  }
+res.json({
+checkout_url: pref.init_point,
+sandbox_url: pref.sandbox_init_point,
+preference_id: pref.id,
+pix_copia_cola: pixCopiaECola,
+pix_qrcode_base64: pixQrCodeBase64
+});
+
+} catch(err) {
+console.error('[MP-CHECKOUT] Erro:', err.response ? JSON.stringify(err.response.data) : err.message);
+const errMsg = err.response && err.response.data && err.response.data.message
+? err.response.data.message
+: (err.message || 'Erro ao criar checkout');
+res.status(500).json({ error: errMsg });
+}
 });
 
 // POST /mercadopago/webhook-pedido/:loja_id — webhook de pagamento de pedido (futuro)
@@ -2486,35 +2522,32 @@ app.post('/mercadopago/webhook-pedido/:loja_id', async (req, res) => {
 });
 // GET /mercadopago/verificar-pagamento-pedido?preference_id=xxx&loja_id=xxx
 app.get('/mercadopago/verificar-pagamento-pedido', async (req, res) => {
-  try {
-    const { preference_id, loja_id } = req.query;
-    if (!preference_id || !loja_id) return res.status(400).json({ error: 'preference_id e loja_id obrigatorios' });
-    const lojaRes = await pool.query('SELECT mp_access_token FROM users WHERE id=$1', [loja_id]);
-    if (!lojaRes.rows.length || !lojaRes.rows[0].mp_access_token) {
-      return res.status(400).json({ error: 'Loja sem token MP configurado' });
-    }
-    const mpToken = lojaRes.rows[0].mp_access_token;
-    // Buscar pagamentos por preference_id
-    let aprovado = null;
-    try {
-      const sr1 = await axios.get('https://api.mercadopago.com/v1/payments/search', {
-        headers: { 'Authorization': 'Bearer ' + mpToken },
-        params: { preference_id: preference_id, sort: 'date_created', criteria: 'desc', limit: 10 }
-      });
-      const p1 = sr1.data && sr1.data.results ? sr1.data.results : [];
-      aprovado = p1.find(p => p.status === 'approved');
-    } catch(e1) { console.error('[MP-VER] search err:', e1.message); }
-    if (aprovado) {
-      return res.json({ pago: true, payment_id: aprovado.id, valor: aprovado.transaction_amount, status: aprovado.status });
-    }
-    return res.json({ pago: false });
-  } catch (err) {
-    console.error('[MP-VER] Erro:', err.response ? JSON.stringify(err.response.data) : err.message);
-    return res.status(500).json({ error: err.message });
-  }
+try {
+const { preference_id, loja_id } = req.query;
+if (!preference_id || !loja_id) return res.status(400).json({ error: 'preference_id e loja_id obrigatorios' });
+const lojaRes = await pool.query('SELECT mp_access_token FROM users WHERE id=$1', [loja_id]);
+if (!lojaRes.rows.length) return res.status(400).json({ error: 'Loja nao encontrada' });
+const mpToken = (lojaRes.rows[0] && lojaRes.rows[0].mp_access_token) || process.env.MP_ACCESS_TOKEN;
+if (!mpToken) return res.status(400).json({ error: 'Token Mercado Pago nao configurado no servidor' });
+// Buscar pagamentos por preference_id
+let aprovado = null;
+try {
+const sr1 = await axios.get('https://api.mercadopago.com/v1/payments/search', {
+headers: { 'Authorization': 'Bearer ' + mpToken },
+params: { preference_id: preference_id, sort: 'date_created', criteria: 'desc', limit: 10 }
 });
-
-
+const p1 = sr1.data && sr1.data.results ? sr1.data.results : [];
+aprovado = p1.find(p => p.status === 'approved');
+} catch(e1) { console.error('[MP-VER] search err:', e1.message); }
+if (aprovado) {
+return res.json({ pago: true, payment_id: aprovado.id, valor: aprovado.transaction_amount, status: aprovado.status });
+}
+return res.json({ pago: false });
+} catch (err) {
+console.error('[MP-VER] Erro:', err.response ? JSON.stringify(err.response.data) : err.message);
+return res.status(500).json({ error: err.message });
+}
+});
 
 initDB().then(() => {
   app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
