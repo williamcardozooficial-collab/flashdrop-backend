@@ -2484,6 +2484,37 @@ app.post('/mercadopago/webhook-pedido/:loja_id', async (req, res) => {
   // A confirmacao de pagamento e feita pelo polling no frontend
   res.status(200).json({ received: true });
 });
+// GET /mercadopago/verificar-pagamento-pedido?preference_id=xxx&loja_id=xxx
+app.get('/mercadopago/verificar-pagamento-pedido', async (req, res) => {
+  try {
+    const { preference_id, loja_id } = req.query;
+    if (!preference_id || !loja_id) return res.status(400).json({ error: 'preference_id e loja_id obrigatorios' });
+    const lojaRes = await pool.query('SELECT mp_access_token FROM users WHERE id=$1', [loja_id]);
+    if (!lojaRes.rows.length || !lojaRes.rows[0].mp_access_token) {
+      return res.status(400).json({ error: 'Loja sem token MP configurado' });
+    }
+    const mpToken = lojaRes.rows[0].mp_access_token;
+    // Buscar pagamentos por preference_id
+    let aprovado = null;
+    try {
+      const sr1 = await axios.get('https://api.mercadopago.com/v1/payments/search', {
+        headers: { 'Authorization': 'Bearer ' + mpToken },
+        params: { preference_id: preference_id, sort: 'date_created', criteria: 'desc', limit: 10 }
+      });
+      const p1 = sr1.data && sr1.data.results ? sr1.data.results : [];
+      aprovado = p1.find(p => p.status === 'approved');
+    } catch(e1) { console.error('[MP-VER] search err:', e1.message); }
+    if (aprovado) {
+      return res.json({ pago: true, payment_id: aprovado.id, valor: aprovado.transaction_amount, status: aprovado.status });
+    }
+    return res.json({ pago: false });
+  } catch (err) {
+    console.error('[MP-VER] Erro:', err.response ? JSON.stringify(err.response.data) : err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+
 
 initDB().then(() => {
   app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
