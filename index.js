@@ -2393,6 +2393,98 @@ app.post('/orders/:id/verificar-na-loja', async (req, res) => {
   }
 });
 
+
+// ══════════════════════════════════════════════════════════════════
+// MERCADO PAGO - CHECKOUT PRO (pagamento de pedido da loja)
+// ══════════════════════════════════════════════════════════════════
+
+// POST /mercadopago/checkout-pedido
+// Body: { loja_id, itens:[{nome,preco,qtd}], totalItens, taxaEntrega, totalFinal, nomeCliente }
+// Retorna: { checkout_url, preference_id }
+app.post('/mercadopago/checkout-pedido', async (req, res) => {
+  try {
+    const { loja_id, itens, totalItens, taxaEntrega, totalFinal, nomeCliente } = req.body;
+    if (!loja_id) return res.status(400).json({ error: 'loja_id obrigatorio' });
+    if (!totalFinal || parseFloat(totalFinal) <= 0) return res.status(400).json({ error: 'Valor invalido' });
+
+    // Buscar token da loja no banco
+    const lojaRes = await pool.query('SELECT mp_access_token, name FROM users WHERE id=$1', [loja_id]);
+    if (!lojaRes.rows.length) return res.status(404).json({ error: 'Loja nao encontrada' });
+    const loja = lojaRes.rows[0];
+    if (!loja.mp_access_token) return res.status(400).json({ error: 'Loja nao configurou o Mercado Pago' });
+
+    const mpToken = loja.mp_access_token;
+    const valor = parseFloat(totalFinal);
+
+    // Montar itens da preference
+    const prefItens = [];
+    if (Array.isArray(itens) && itens.length > 0) {
+      itens.forEach(function(it) {
+        prefItens.push({
+          title: it.nome || 'Produto',
+          quantity: parseInt(it.qtd) || 1,
+          unit_price: parseFloat(it.preco) || 0,
+          currency_id: 'BRL'
+        });
+      });
+    } else {
+      prefItens.push({
+        title: 'Pedido ' + (loja.name || 'FlashDrop'),
+        quantity: 1,
+        unit_price: valor,
+        currency_id: 'BRL'
+      });
+    }
+
+    const prefPayload = {
+      items: prefItens,
+      payer: { name: nomeCliente || 'Cliente' },
+      payment_methods: {
+        excluded_payment_types: [],
+        installments: 1
+      },
+      back_urls: {
+        success: 'https://flashdrop-frontend-six.vercel.app/cardapio/pagamento-sucesso',
+        failure: 'https://flashdrop-frontend-six.vercel.app/cardapio/pagamento-falha',
+        pending: 'https://flashdrop-frontend-six.vercel.app/cardapio/pagamento-pendente'
+      },
+      auto_return: 'approved',
+      notification_url: 'https://flashdrop-backend-production.up.railway.app/mercadopago/webhook-pedido/' + loja_id,
+      metadata: { loja_id: loja_id, tipo: 'pedido_cardapio' },
+      statement_descriptor: 'FlashDrop Delivery'
+    };
+
+    const mpRes = await axios.post('https://api.mercadopago.com/checkout/preferences', prefPayload, {
+      headers: {
+        'Authorization': 'Bearer ' + mpToken,
+        'Content-Type': 'application/json',
+        'X-Idempotency-Key': 'fdpedido-' + loja_id + '-' + Date.now()
+      }
+    });
+
+    const pref = mpRes.data;
+    res.json({
+      checkout_url: pref.init_point,
+      sandbox_url: pref.sandbox_init_point,
+      preference_id: pref.id
+    });
+
+  } catch(err) {
+    console.error('[MP-CHECKOUT] Erro:', err.response ? JSON.stringify(err.response.data) : err.message);
+    const errMsg = err.response && err.response.data && err.response.data.message
+      ? err.response.data.message
+      : (err.message || 'Erro ao criar checkout');
+    res.status(500).json({ error: errMsg });
+  }
+});
+
+// POST /mercadopago/webhook-pedido/:loja_id — webhook de pagamento de pedido (futuro)
+app.post('/mercadopago/webhook-pedido/:loja_id', async (req, res) => {
+  // Apenas confirma recebimento por enquanto
+  // A confirmacao de pagamento e feita pelo polling no frontend
+  res.status(200).json({ received: true });
+});
+
 initDB().then(() => {
   app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
   setInterval(checkLateArrivals, 60 * 1000);
