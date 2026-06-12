@@ -1562,7 +1562,6 @@ app.post('/loja-promocoes/calcular-desconto', async (req, res) => {
     res.json({ desconto: melhorDesconto, promo: promoAplicada });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
-);
 
 
 app.post('/distance', async (req, res) => {
