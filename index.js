@@ -1491,6 +1491,21 @@ app.get('/promotions/motoboy/:id', async (req, res) => {
 
 // ── PROMOÇÕES DA LOJA (frete grátis / desconto) ──────────────────────
 
+// ── AUTH MIDDLEWARE ────────────────────────────────────────────────
+function authMiddleware(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'Token nao fornecido' });
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'flashdrop_secret_2024');
+    req.user = decoded;
+    next();
+  } catch(e) {
+    return res.status(401).json({ error: 'Token invalido ou expirado' });
+  }
+}
+// ────────────────────────────────────────────────────────────────────
+
 app.get('/loja-promocoes', async (req, res) => {
   const { loja_id } = req.query;
   if (!loja_id) return res.status(400).json({ error: 'loja_id obrigatorio' });
