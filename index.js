@@ -309,6 +309,22 @@ try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARC
       UNIQUE(promotion_id, motoboy_id, data_ref)
     )`);
   } catch(e) {}
+
+  // ── PROMOÇÕES DA LOJA ──────────────────────────────────────────────
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS promocoes_loja (
+      id SERIAL PRIMARY KEY,
+      loja_id INTEGER NOT NULL,
+      nome VARCHAR(200) NOT NULL,
+      tipo VARCHAR(50) NOT NULL DEFAULT 'frete_gratis',
+      valor_minimo DECIMAL NOT NULL DEFAULT 0,
+      desconto_maximo DECIMAL DEFAULT NULL,
+      formas_pagamento TEXT[] DEFAULT '{}',
+      ativa BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`);
+  } catch(e) {}
+
   try {
     await pool.query(`CREATE TABLE IF NOT EXISTS produtos (
       id SERIAL PRIMARY KEY,
@@ -1471,7 +1487,82 @@ app.get('/promotions/motoboy/:id', async (req, res) => {
     });
     res.json(result);
   } catch(e) { res.status(500).json({ error: e.message }); }
+}
+
+// ── PROMOÇÕES DA LOJA (frete grátis / desconto) ──────────────────────
+
+app.get('/loja-promocoes', async (req, res) => {
+  const { loja_id } = req.query;
+  if (!loja_id) return res.status(400).json({ error: 'loja_id obrigatorio' });
+  try {
+    const result = await pool.query('SELECT * FROM promocoes_loja WHERE loja_id=$1 AND ativa=true ORDER BY created_at DESC', [loja_id]);
+    res.json(result.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
+
+app.get('/loja-promocoes/all', authMiddleware, async (req, res) => {
+  const loja_id = req.user.id;
+  try {
+    const result = await pool.query('SELECT * FROM promocoes_loja WHERE loja_id=$1 ORDER BY created_at DESC', [loja_id]);
+    res.json(result.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/loja-promocoes', authMiddleware, async (req, res) => {
+  const loja_id = req.user.id;
+  const { nome, tipo, valor_minimo, desconto_maximo, formas_pagamento } = req.body;
+  try {
+    const result = await pool.query(
+      `INSERT INTO promocoes_loja (loja_id,nome,tipo,valor_minimo,desconto_maximo,formas_pagamento,ativa) VALUES ($1,$2,$3,$4,$5,$6,true) RETURNING *`,
+      [loja_id, nome, tipo||'frete_gratis', valor_minimo||0, desconto_maximo||null, formas_pagamento||[]]
+    );
+    res.json(result.rows[0]);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/loja-promocoes/:id', authMiddleware, async (req, res) => {
+  const loja_id = req.user.id;
+  const { id } = req.params;
+  const { nome, tipo, valor_minimo, desconto_maximo, formas_pagamento, ativa } = req.body;
+  try {
+    const result = await pool.query(
+      `UPDATE promocoes_loja SET nome=$1,tipo=$2,valor_minimo=$3,desconto_maximo=$4,formas_pagamento=$5,ativa=$6 WHERE id=$7 AND loja_id=$8 RETURNING *`,
+      [nome, tipo||'frete_gratis', valor_minimo||0, desconto_maximo||null, formas_pagamento||[], ativa!==undefined?ativa:true, id, loja_id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Promocao nao encontrada' });
+    res.json(result.rows[0]);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/loja-promocoes/:id', authMiddleware, async (req, res) => {
+  const loja_id = req.user.id;
+  const { id } = req.params;
+  try {
+    await pool.query('DELETE FROM promocoes_loja WHERE id=$1 AND loja_id=$2', [id, loja_id]);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/loja-promocoes/calcular-desconto', async (req, res) => {
+  const { loja_id, subtotal, forma_pagamento, valor_frete } = req.body;
+  try {
+    const result = await pool.query('SELECT * FROM promocoes_loja WHERE loja_id=$1 AND ativa=true ORDER BY created_at DESC', [loja_id]);
+    let melhorDesconto = 0, promoAplicada = null;
+    for (const promo of result.rows) {
+      if (promo.formas_pagamento && promo.formas_pagamento.length > 0) {
+        if (!promo.formas_pagamento.includes(forma_pagamento)) continue;
+      }
+      if (parseFloat(subtotal) < parseFloat(promo.valor_minimo)) continue;
+      let desconto = parseFloat(valor_frete) || 0;
+      if (promo.desconto_maximo && parseFloat(promo.desconto_maximo) > 0) {
+        desconto = Math.min(desconto, parseFloat(promo.desconto_maximo));
+      }
+      if (desconto > melhorDesconto) { melhorDesconto = desconto; promoAplicada = promo; }
+    }
+    res.json({ desconto: melhorDesconto, promo: promoAplicada });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+);
 
 
 app.post('/distance', async (req, res) => {
