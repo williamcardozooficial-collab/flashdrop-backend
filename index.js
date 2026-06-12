@@ -1487,7 +1487,7 @@ app.get('/promotions/motoboy/:id', async (req, res) => {
     });
     res.json(result);
   } catch(e) { res.status(500).json({ error: e.message }); }
-}
+});
 
 // ── PROMOÇÕES DA LOJA (frete grátis / desconto) ──────────────────────
 
@@ -2583,7 +2583,6 @@ pixCopiaECola = pixData.qr_code || null;
 pixQrCodeBase64 = pixData.qr_code_base64 || null;
 }
 // Salvar payment_id associado ao preference_id para verificacao posterior
-window._lastPixPaymentId = pixRes.data.id;
 } catch(pixErr) {
 console.error('[MP-CHECKOUT] Erro ao gerar PIX:', pixErr.response ? JSON.stringify(pixErr.response.data) : pixErr.message);
 }
