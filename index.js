@@ -1234,9 +1234,11 @@ app.post('/withdrawals', async (req, res) => {
     const { motoboy_id, motoboy_name, loja_id, loja_name, valor, pix_key } = req.body;
     if ((!motoboy_id && !loja_id) || !valor || !pix_key) return res.status(400).json({ error: 'Dados incompletos.' });
     if (parseFloat(valor) <= 0) return res.status(400).json({ error: 'Valor invalido.' });
-    const mb = await pool.query('SELECT balance FROM users WHERE id=$1', [motoboy_id]);
-    if (mb.rows.length === 0) return res.status(404).json({ error: 'Motoboy nao encontrado.' });
-    if (parseFloat(mb.rows[0].balance) < parseFloat(valor)) return res.status(400).json({ error: 'Saldo insuficiente para o saque solicitado.' });
+    const userId = loja_id || motoboy_id;
+    const field = loja_id ? 'credit' : 'balance';
+    const mb = await pool.query('SELECT ' + field + ' FROM users WHERE id=$1', [userId]);
+    if (mb.rows.length === 0) return res.status(404).json({ error: 'Usuário não encontrado.' });
+    if (parseFloat(mb.rows[0][field]) < parseFloat(valor)) return res.status(400).json({ error: 'Saldo insuficiente para o saque solicitado.' });
     const r = await pool.query(
       'INSERT INTO withdrawals (motoboy_id, motoboy_name, loja_id, loja_name, valor, pix_key) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *',
       [motoboy_id || null, motoboy_name || null, loja_id || null, loja_name || null, valor, pix_key]
