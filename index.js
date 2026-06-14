@@ -1222,7 +1222,8 @@ app.get('/withdrawals/motoboy/:id', async (req, res) => {
   try {
     const r = await pool.query("SELECT * FROM withdrawals WHERE motoboy_id=$1 AND created_at >= NOW() - INTERVAL '7 days' ORDER BY created_at DESC", [req.params.id]);
     res.json(r.rows);
-  } catch(e) { res.status(500).json({ error: e.message });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
 
 app.get('/withdrawals/loja/:id', async (req, res) => {
   try {
