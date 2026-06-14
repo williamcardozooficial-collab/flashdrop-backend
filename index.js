@@ -1228,7 +1228,8 @@ app.get('/withdrawals/loja/:id', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM withdrawals WHERE loja_id=$1 ORDER BY created_at DESC', [req.params.id]);
     res.json(r.rows);
-  } catch(e) { res.status(500).json({ error: e.message });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
 
 // === MERCADO PAGO CONFIG ===
 app.get('/settings/mp-config', async (req, res) => {
@@ -1294,8 +1295,6 @@ app.post('/withdrawals/:id/pagar-mp', async (req, res) => {
     const mpError = e.response && e.response.data ? JSON.stringify(e.response.data) : e.message;
     res.status(500).json({ error: mpError });
   }
-}); }
-}); }
 });
 
 app.post('/withdrawals', async (req, res) => {
