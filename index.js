@@ -399,6 +399,8 @@ try {
 
   
 try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS slug VARCHAR(100) UNIQUE"); } catch(e) {}
+  try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS mp_access_token TEXT"); } catch(e) {}
+  try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS mp_auto BOOLEAN DEFAULT false"); } catch(e) {}
 try {
   const _sls = await pool.query("SELECT id, name FROM users WHERE role='loja' AND (slug IS NULL OR slug='')");
   for (const _l of _sls.rows) {
@@ -1226,7 +1228,73 @@ app.get('/withdrawals/loja/:id', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM withdrawals WHERE loja_id=$1 ORDER BY created_at DESC', [req.params.id]);
     res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message });
+
+// === MERCADO PAGO CONFIG ===
+app.get('/settings/mp-config', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT mp_access_token, mp_auto FROM settings LIMIT 1');
+    const row = r.rows[0] || {};
+    res.json({ mp_access_token: row.mp_access_token || '', mp_auto: row.mp_auto || false });
   } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/settings/mp-config', async (req, res) => {
+  try {
+    const { mp_access_token, mp_auto } = req.body;
+    await pool.query('UPDATE settings SET mp_access_token=$1, mp_auto=$2', [mp_access_token, mp_auto]);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// === PAGAR VIA MERCADO PAGO ===
+app.post('/withdrawals/:id/pagar-mp', async (req, res) => {
+  try {
+    const wRes = await pool.query('SELECT * FROM withdrawals WHERE id=$1', [req.params.id]);
+    if (wRes.rows.length === 0) return res.status(404).json({ error: 'Saque nao encontrado.' });
+    const w = wRes.rows[0];
+    if (w.status !== 'pendente') return res.status(400).json({ error: 'Este saque ja foi processado.' });
+
+    const cfgRes = await pool.query('SELECT mp_access_token FROM settings LIMIT 1');
+    const token = cfgRes.rows[0] && cfgRes.rows[0].mp_access_token;
+    if (!token) return res.status(400).json({ error: 'Access Token do Mercado Pago nao configurado.' });
+
+    // Enviar PIX via MP Payments API
+    const pixKey = w.pix_key;
+    const amount = parseFloat(w.valor);
+
+    const mpRes = await axios.post('https://api.mercadopago.com/v1/payments', {
+      transaction_amount: amount,
+      payment_method_id: 'pix',
+      payer: { email: 'pagamento@flashdrop.com.br' },
+      description: 'Pagamento de saque FlashDrop - ' + (w.loja_name || w.motoboy_name || ''),
+      point_of_interaction: { linked_to: 'subscription' }
+    }, {
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json',
+        'X-Idempotency-Key': 'saque-' + w.id + '-' + Date.now()
+      }
+    });
+
+    const paymentId = mpRes.data.id;
+    const paymentStatus = mpRes.data.status;
+
+    // Atualizar o saque como aprovado
+    if (w.loja_id) {
+      await pool.query('UPDATE users SET credit = credit - $1 WHERE id = $2', [amount, w.loja_id]);
+    } else {
+      await pool.query('UPDATE users SET balance = balance - $1 WHERE id = $2', [amount, w.motoboy_id]);
+    }
+    await pool.query("UPDATE withdrawals SET status='aprovado', obs=$1, updated_at=NOW() WHERE id=$2",
+      ['Pago via Mercado Pago. Payment ID: ' + paymentId + ' Status: ' + paymentStatus, w.id]);
+
+    res.json({ ok: true, payment_id: paymentId, status: paymentStatus });
+  } catch(e) {
+    const mpError = e.response && e.response.data ? JSON.stringify(e.response.data) : e.message;
+    res.status(500).json({ error: mpError });
+  }
+}); }
 }); }
 });
 
