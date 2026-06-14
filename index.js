@@ -1269,8 +1269,7 @@ app.post('/withdrawals/:id/pagar-mp', async (req, res) => {
       transaction_amount: amount,
       payment_method_id: 'pix',
       payer: { email: 'pagamento@flashdrop.com.br' },
-      description: 'Pagamento de saque FlashDrop - ' + (w.loja_name || w.motoboy_name || ''),
-      point_of_interaction: { linked_to: 'subscription' }
+      description: 'Pagamento de saque FlashDrop - ' + (w.loja_name || w.motoboy_name || '')
     }, {
       headers: {
         'Authorization': 'Bearer ' + token,
