@@ -1,4 +1,4 @@
-const jwt = require('jsonwebtoken'); // rebuild
+const jwt = require('jsonwebtoken'); // rebuild // v2
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
