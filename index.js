@@ -2734,40 +2734,11 @@ console.error('[MP-VER] Erro:', err.response ? JSON.stringify(err.response.data)
 return res.status(500).json({ error: err.message });
 }
 });
-
-// === RASTREAMENTO MOTOBOY ===
-// app.post('/motoboys/:id/localizacao', async (req, res) => {
-  try {
-      const motoboy_id = parseInt(req.params.id);
-          const { lat, lng, order_id } = req.body;
-              if (!lat || !lng) return res.status(400).json({ error: 'lat/lng obrigatorios' });
-                  await pool.query(
-                        `INSERT INTO motoboy_localizacao (motoboy_id, order_id, lat, lng, updated_at) VALUES ($1, $2, $3, $4, NOW()) ON CONFLICT (motoboy_id) DO UPDATE SET lat=$3, lng=$4, order_id=$2, updated_at=NOW()`,
-                              [motoboy_id, order_id || null, lat, lng]
-                                  );
-                                      res.json({ ok: true });
-                                        } catch(e) { res.status(500).json({ error: e.message }); }
-                                        });
-                                        app.get('/motoboys/localizacoes-ativas', async (req, res) => {
-                                          try {
-                                              const r = await pool.query(
-                                                    `SELECT ml.motoboy_id, ml.order_id, ml.lat, ml.lng, ml.updated_at, u.name AS nome, u.custom_id AS codigo FROM motoboy_localizacao ml JOIN users u ON u.id = ml.motoboy_id WHERE ml.updated_at > NOW() - INTERVAL '2 minutes'`
-                                                        );
-                                                            res.json(r.rows);
-                                                              } catch(e) { res.status(500).json({ error: e.message }); }
-                                                              });
-                                                              app.get('/rastrear/:order_id', async (req, res) => {
-                                                                try {
-                                                                    const order_id = parseInt(req.params.order_id);
-                                                                        const r = await pool.query(
-                                                                              `SELECT ml.lat, ml.lng, ml.updated_at, u.name AS nome_motoboy, o.status, o.nome_cliente FROM motoboy_localizacao ml JOIN users u ON u.id = ml.motoboy_id JOIN orders o ON o.id = ml.order_id WHERE ml.order_id = $1`,
-                                                                                    [order_id]
-                                                                                        );
-                                                                                            if (r.rows.length === 0) return res.status(404).json({ error: 'Rastreio nao disponivel' });
-                                                                                                res.json(r.rows[0]);
-                                                                                                  } catch(e) { res.status(500).json({ error: e.message }); }
-                                                                                                  });
-                                                                                                  initDB().then(() => {
+// ROTAS RASTREAMENTO
+app.post('/motoboys/:id/localizacao', async (req, res) => { try { const mid = parseInt(req.params.id); const { lat, lng, order_id } = req.body; if (!lat || !lng) return res.status(400).json({ error: 'lat/lng obrigatorios' }); await pool.query('INSERT INTO motoboy_localizacao (motoboy_id, order_id, lat, lng, updated_at) VALUES ($1, $2, $3, $4, NOW()) ON CONFLICT (motoboy_id) DO UPDATE SET lat=$3, lng=$4, order_id=$2, updated_at=NOW()', [mid, order_id||null, lat, lng]); res.json({ ok: true }); } catch(e) { res.status(500).json({ error: e.message }); } });
+app.get('/motoboys/localizacoes-ativas', async (req, res) => { try { const r = await pool.query("SELECT ml.motoboy_id, ml.order_id, ml.lat, ml.lng, ml.updated_at, u.name AS nome, u.custom_id AS codigo FROM motoboy_localizacao ml JOIN users u ON u.id = ml.motoboy_id WHERE ml.updated_at > NOW() - INTERVAL '2 minutes'"); res.json(r.rows); } catch(e) { res.status(500).json({ error: e.message }); } });
+app.get('/rastrear/:order_id', async (req, res) => { try { const oid = parseInt(req.params.order_id); const r = await pool.query("SELECT ml.lat, ml.lng, ml.updated_at, u.name AS nome_motoboy, o.status, o.nome_cliente FROM motoboy_localizacao ml JOIN users u ON u.id = ml.motoboy_id JOIN orders o ON o.id = ml.order_id WHERE ml.order_id = $1", [oid]); if (r.rows.length === 0) return res.status(404).json({ error: 'Rastreio nao disponivel' }); res.json(r.rows[0]); } catch(e) { res.status(500).json({ error: e.message }); } });
+initDB().then(() => {})
   app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
   setInterval(checkLateArrivals, 60 * 1000);
   setInterval(checkPendingOrdersAlert, 5 * 60 * 1000);
@@ -2779,6 +2750,5 @@ return res.status(500).json({ error: err.message });
   console.log('[JOB] Auto-offline de lojas iniciado (60s)');
   console.log('[JOB] Verificador de chegada iniciado (60s)');
   console.log('[JOB] Lancador automatico de pedidos iniciado (30s)');
-});
 
 
