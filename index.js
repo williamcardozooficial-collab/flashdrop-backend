@@ -150,7 +150,7 @@ async function initDB() {
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS obs_entrega_loja TEXT"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_code VARCHAR(4)"); } catch(e) {}
 
-  // ── MÓDULO DE INDICAÇÃO ─────────────────────────────────────────────
+  // ââ MÃDULO DE INDICAÃÃO âââââââââââââââââââââââââââââââââââââââââââââ
   try { await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code VARCHAR(20) UNIQUE`); } catch(e) {}
   try { await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS referred_by INTEGER`); } catch(e) {}
   try { await pool.query(`CREATE TABLE IF NOT EXISTS referral_settings (
@@ -222,7 +222,7 @@ try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_key TEXT 
 try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARCHAR(200) DEFAULT NULL"); } catch(e) {}
   // Limite padrao de credito na tabela de configuracoes
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS credit_limit DECIMAL DEFAULT 20.00"); } catch(e) {}
-  // ── TAXA CHUVA e TAXA NOTURNA ──
+  // ââ TAXA CHUVA e TAXA NOTURNA ââ
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_chuva DECIMAL DEFAULT 0"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_chuva_ativa BOOLEAN DEFAULT false"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_chuva_desconto_de VARCHAR(10) DEFAULT 'admin'"); } catch(e) {}
@@ -234,7 +234,7 @@ try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARC
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS wpp_link TEXT DEFAULT ''"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS app_data TEXT DEFAULT ''"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS perc_cartao_aprox DECIMAL DEFAULT 5.00"); } catch(e) {}
-  // ── TAXA EXTRA NOS PEDIDOS (armazenar taxas aplicadas) ──
+  // ââ TAXA EXTRA NOS PEDIDOS (armazenar taxas aplicadas) ââ
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS taxa_extra_chuva DECIMAL DEFAULT 0"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS taxa_extra_noturna DECIMAL DEFAULT 0"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS chuva_desconto_de VARCHAR(10) DEFAULT 'admin'"); } catch(e) {}
@@ -265,7 +265,7 @@ try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARC
     )`);
   } catch(e) {}
 
-  // ── CAIXA DA PLATAFORMA ──────────────────────────────────────
+  // ââ CAIXA DA PLATAFORMA ââââââââââââââââââââââââââââââââââââââ
   try {
     await pool.query(`CREATE TABLE IF NOT EXISTS platform_wallet (
       id INTEGER PRIMARY KEY DEFAULT 1,
@@ -287,7 +287,7 @@ try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARC
     )`);
   } catch(e) {}
 
-  // ── PROMOÇÕES DOS MOTOBOYS ────────────────────────────────────────
+  // ââ PROMOÃÃES DOS MOTOBOYS ââââââââââââââââââââââââââââââââââââââââ
   try {
     await pool.query(`CREATE TABLE IF NOT EXISTS promotions (
       id SERIAL PRIMARY KEY,
@@ -313,7 +313,7 @@ try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARC
     )`);
   } catch(e) {}
 
-  // ── PROMOÇÕES DA LOJA ──────────────────────────────────────────────
+  // ââ PROMOÃÃES DA LOJA ââââââââââââââââââââââââââââââââââââââââââââââ
   try {
     await pool.query(`CREATE TABLE IF NOT EXISTS promocoes_loja (
       id SERIAL PRIMARY KEY,
@@ -382,7 +382,7 @@ try {
       expires_at BIGINT NOT NULL,
       created_at TIMESTAMP DEFAULT NOW()
     `); } catch(e) {}
-  // ──────────────────────────────────────────────────────────────────
+  // ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
   try { await pool.query(`
     CREATE TABLE IF NOT EXISTS categorias_loja (
@@ -441,7 +441,7 @@ app.get('/users', async (req, res) => {
   res.json(r.rows);
 });
 
-// GET /lojas/vitrine — lojas ativas ordenadas por pedidos entregues nos ultimos 7 dias
+// GET /lojas/vitrine â lojas ativas ordenadas por pedidos entregues nos ultimos 7 dias
 app.get('/lojas/vitrine', async (req, res) => {
   try {
     const r = await pool.query(`
@@ -585,13 +585,13 @@ app.post('/register', async (req, res) => {
 app.post('/users/:id/approve', async (req, res) => {
   try {
         const r = await pool.query('UPDATE users SET approved=true WHERE id=$1 RETURNING id,username,name,phone,approved', [req.params.id]);
-            // Envia WhatsApp ao usuário aprovado
+            // Envia WhatsApp ao usuÃ¡rio aprovado
     try {
       const botUrl = process.env.BOT_URL;
       const botSecret = process.env.BOT_SECRET;
       const phone = r.rows[0] && r.rows[0].phone;
       if (botUrl && botSecret && phone) {
-        const msg = '🎉 Parabéns! Seu login foi aprovado com sucesso. ✅\nAgora você já pode acessar nossa plataforma através do site abaixo:\n🚀 https://flashdrop-frontend-six.vercel.app/login.html\nSeja bem-vindo(a) à Flash Drop! 💙';
+        const msg = 'ð ParabÃ©ns! Seu login foi aprovado com sucesso. â\nAgora vocÃª jÃ¡ pode acessar nossa plataforma atravÃ©s do site abaixo:\nð https://flashdrop-frontend-six.vercel.app/login.html\nSeja bem-vindo(a) Ã  Flash Drop! ð';
         await axios.post(`${botUrl}/api/send-message`, { phone, message: msg }, { headers: { 'x-bot-secret': botSecret }, timeout: 10000 });
       }
     } catch (wErr) { console.log('Erro WhatsApp aprovacao:', wErr.message); }
@@ -687,7 +687,7 @@ app.post('/orders', async (req, res) => {
   } catch(e) {}
   const deliveryCode = String(Math.floor(1000 + Math.random() * 9000));
 
-  // ── APLICAR TAXAS (CHUVA e NOTURNA) ──────────────────────────────
+  // ââ APLICAR TAXAS (CHUVA e NOTURNA) ââââââââââââââââââââââââââââââ
   let valorMotoboy = parseFloat(d.valor_motoboy) || 0;
   let valorTotal = parseFloat(d.valor_total) || 0;
   let taxa_extra_chuva = 0;
@@ -740,7 +740,7 @@ app.post('/orders', async (req, res) => {
       const lojaPhoneLine = lojaPhone ? '\nTelefone da loja: ' + lojaPhone : '';
       const msgCliente = '\u2705 Seu pedido foi recebido!\n' +
         'Pedido #' + pedido.id + ' na loja ' + pedido.loja_name + lojaPhoneLine + '\n' +
-        'Aguarde a confirmação da loja.';
+        'Aguarde a confirmaÃ§Ã£o da loja.';
       // Envia para a loja
       // Envia para o cliente
     }
@@ -831,7 +831,7 @@ app.put('/orders/:id', async (req, res) => {
         }
         lojaNome = lojaNome || order.loja_user;
         const pagLabel = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX'}[order.tipo_pagamento] || order.tipo_pagamento || '-');
-        const msgPedido = `🔔 Novo Pedido #${order.id} - Em Preparo\n\nLoja: ${lojaNome}\nPagamento: ${pagLabel}\nMotoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}\nDistancia: ${order.distancia} km\n\nPedido em preparo. Sera lancado ao sistema em breve.\nFique de olho!`;
+        const msgPedido = `ð Novo Pedido #${order.id} - Em Preparo\n\nLoja: ${lojaNome}\nPagamento: ${pagLabel}\nMotoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}\nDistancia: ${order.distancia} km\n\nPedido em preparo. Sera lancado ao sistema em breve.\nFique de olho!`;
         const groupId = process.env.TELEGRAM_GROUP_ID;
         if (groupId) bot.sendMessage(groupId, msgPedido).catch(() => {});
         motoboys.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgPedido).catch(() => {}));
@@ -870,7 +870,7 @@ app.put('/orders/:id', async (req, res) => {
     }
 
     if (fields.status === 'entregue' && order.motoboy_id) {
-      // ─────────────────────────────────────────────────────────────
+      // âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
       const valorMotoboy = parseFloat(order.valor_motoboy) || 0;
       const valorPedido = parseFloat(order.valor_pedido) || 0;
       const comissao = parseFloat(order.comissao) || 0;
@@ -888,7 +888,7 @@ app.put('/orders/:id', async (req, res) => {
         // Loja recebe valor_pedido de volta (motoboy vai repassar)
         if (valorPedido > 0) {
           await pool.query("UPDATE users SET credit = credit + $1 WHERE username=$2", [valorPedido, order.loja_user]);
-              // ── REGISTRAR EVENTO DE SALDO DA LOJA (dinheiro entregue) ──
+              // ââ REGISTRAR EVENTO DE SALDO DA LOJA (dinheiro entregue) ââ
               if (valorPedido > 0) {
                 try {
                   const lojaUserRes = await pool.query('SELECT id FROM users WHERE username=$1', [order.loja_user]);
@@ -945,7 +945,7 @@ app.put('/orders/:id', async (req, res) => {
         }
       }
 
-      // ── CAIXA DA PLATAFORMA: creditar comissão ──────────────────────
+      // ââ CAIXA DA PLATAFORMA: creditar comissÃ£o ââââââââââââââââââââââ
       if (comissao > 0) {
         try {
           await pool.query(
@@ -954,12 +954,12 @@ app.put('/orders/:id', async (req, res) => {
           );
           await pool.query(
             `INSERT INTO platform_events (tipo, valor, descricao, order_id) VALUES ('comissao', $1, $2, $3)`,
-            [comissao, 'Comissão pedido #' + req.params.id + ' (' + (order.loja_name || order.loja_user) + ')', req.params.id]
+            [comissao, 'ComissÃ£o pedido #' + req.params.id + ' (' + (order.loja_name || order.loja_user) + ')', req.params.id]
           );
         } catch(ePw) { console.error('Platform wallet error:', ePw.message); }
       }
 
-      // ── TAXA CHUVA/NOTURNA ao entregar: debitar da caixa da plataforma e creditar motoboy ──
+      // ââ TAXA CHUVA/NOTURNA ao entregar: debitar da caixa da plataforma e creditar motoboy ââ
       try {
         const tc_chuva = parseFloat(order.taxa_extra_chuva || 0);
         const tc_noturna = parseFloat(order.taxa_extra_noturna || 0);
@@ -981,7 +981,7 @@ app.put('/orders/:id', async (req, res) => {
           await pool.query('INSERT INTO motoboy_wallet_events (motoboy_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)', [order.motoboy_id, 'taxa_extra', total_extra, 'Taxa chuva/noturna corrida #' + req.params.id, req.params.id]);
         }
       } catch(eTaxa2) { console.error('[TAXA] Erro ao processar taxa entrega:', eTaxa2.message); }
-      // ── PROMOÇÕES: contabilizar entrega do motoboy ──────────────────
+      // ââ PROMOÃÃES: contabilizar entrega do motoboy ââââââââââââââââââ
       try {
         if (order.motoboy_id) {
           const todayPromos = await pool.query(
@@ -1028,19 +1028,19 @@ app.put('/orders/:id', async (req, res) => {
           }
         }
       } catch(ePromo) { console.error('[PROMO] Erro promocao:', ePromo.message); }
-      // ────────────────────────────────────────────────────────────────
-      // ────────────────────────────────────────────────────────────────
+      // ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+      // ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
     }
 
-      // ── COMISSÃO DE INDICAÇÃO POR PEDIDO (automático) ────────────────
+      // ââ COMISSÃO DE INDICAÃÃO POR PEDIDO (automÃ¡tico) ââââââââââââââââ
       try {
         const refCfg = await pool.query('SELECT * FROM referral_settings WHERE id=1');
         const refSettings = refCfg.rows[0];
         if (refSettings && refSettings.ativo && fields.status === 'entregue') {
-          const ord = order; // já disponível do UPDATE acima
+          const ord = order; // jÃ¡ disponÃ­vel do UPDATE acima
           const now = new Date();
 
-          // 1) Comissão por indicação de LOJA (por pedido entregue)
+          // 1) ComissÃ£o por indicaÃ§Ã£o de LOJA (por pedido entregue)
           if (ord.loja_user) {
             const lojaUser = await pool.query('SELECT * FROM users WHERE username=$1', [ord.loja_user]);
             if (lojaUser.rows.length > 0) {
@@ -1076,7 +1076,7 @@ app.put('/orders/:id', async (req, res) => {
             }
           }
 
-          // 2) Contabilizar pedido do MOTOBOY e pagar bônus se atingiu meta
+          // 2) Contabilizar pedido do MOTOBOY e pagar bÃ´nus se atingiu meta
           if (ord.motoboy_id) {
             const mbRef = await pool.query(
               `SELECT r.* FROM referrals r WHERE r.referred_id=$1
@@ -1089,7 +1089,7 @@ app.put('/orders/:id', async (req, res) => {
                 const updated = await pool.query('SELECT * FROM referrals WHERE id=$1', [ref.id]);
                 const upd = updated.rows[0];
                 console.log('[REFERRAL] Motoboy pedido contabilizado: ' + upd.total_pedidos_validos + '/' + upd.meta_pedidos);
-                // Se atingiu a meta — pagar bônus automaticamente
+                // Se atingiu a meta â pagar bÃ´nus automaticamente
                 if (upd && upd.total_pedidos_validos >= upd.meta_pedidos && upd.meta_pedidos > 0) {
                   const bonus = parseFloat(upd.bonus_valor || 0);
                   if (bonus > 0) {
@@ -1110,7 +1110,7 @@ app.put('/orders/:id', async (req, res) => {
                   }
                 }
               } else {
-                // Prazo expirado — marcar como expirado
+                // Prazo expirado â marcar como expirado
                 await pool.query(`UPDATE referrals SET status_ref='expirado' WHERE id=$1`, [ref.id]);
                 console.log('[REFERRAL] Indicacao motoboy expirada id=' + ref.id);
               }
@@ -1211,7 +1211,7 @@ app.put('/orders/:id', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-/* Ã¢ÂÂÃ¢ÂÂ SAQUES (WITHDRAWALS) Ã¢ÂÂÃ¢ÂÂ */
+/* ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ SAQUES (WITHDRAWALS) ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ */
 app.get('/withdrawals', async (req, res) => {
   try {
     const r = await pool.query("SELECT * FROM withdrawals WHERE created_at >= NOW() - INTERVAL '7 days' ORDER BY created_at DESC");
@@ -1335,7 +1335,7 @@ app.put('/withdrawals/:id', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-/* Ã¢ÂÂÃ¢ÂÂ DELETE PEDIDO: corrigido para nao dar estorno em pedidos a dinheiro Ã¢ÂÂÃ¢ÂÂ */
+/* ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ DELETE PEDIDO: corrigido para nao dar estorno em pedidos a dinheiro ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ */
 app.delete('/orders/:id', async (req, res) => {
   try {
     const orderRes = await pool.query('SELECT * FROM orders WHERE id=$1', [req.params.id]);
@@ -1349,7 +1349,7 @@ app.delete('/orders/:id', async (req, res) => {
         const valorTotal = parseFloat(order.valor_total) || 0;
         if (valorTotal > 0) {
           await pool.query("UPDATE users SET credit = credit + $1 WHERE username=$2", [valorTotal, order.loja_user]);
-          // ── REGISTRAR EVENTO DE SALDO DA LOJA (estorno) ──
+          // ââ REGISTRAR EVENTO DE SALDO DA LOJA (estorno) ââ
           try {
             const lojaEvRes = await pool.query('SELECT id FROM users WHERE username=$1', [order.loja_user]);
             if (lojaEvRes.rows.length > 0) {
@@ -1379,7 +1379,7 @@ app.get('/settings', async (req, res) => {
   res.json(r.rows[0]);
 });
 
-/* Ã¢ÂÂÃ¢ÂÂ AJUSTES DA PLATAFORMA (inclui credit_limit) Ã¢ÂÂÃ¢ÂÂ */
+/* ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ AJUSTES DA PLATAFORMA (inclui credit_limit) ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ */
 app.put('/settings', async (req, res) => {
   const { min_fee, price_per_km, arrancada, commission, max_per_motoboy, launch_delay_minutes, credit_limit,
           taxa_chuva, taxa_chuva_ativa, taxa_chuva_desconto_de,
@@ -1408,9 +1408,9 @@ app.put('/settings', async (req, res) => {
   res.json(r.rows[0]);
 });
 
-// ── CAIXA DA PLATAFORMA ────────────────────────────────────────────
+// ââ CAIXA DA PLATAFORMA ââââââââââââââââââââââââââââââââââââââââââââ
 
-// ── EVENTOS DE SALDO DA LOJA (últimos 7 dias) ──────────────────────────────
+// ââ EVENTOS DE SALDO DA LOJA (Ãºltimos 7 dias) ââââââââââââââââââââââââââââââ
 app.get('/loja/:id/wallet-events', async (req, res) => {
   try {
     const days = parseInt(req.query.days) || 7;
@@ -1433,7 +1433,7 @@ app.post('/loja/:id/wallet-event', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── EVENTOS DE SALDO DO MOTOBOY (últimas 24h) ──────────────────────────────
+// ââ EVENTOS DE SALDO DO MOTOBOY (Ãºltimas 24h) ââââââââââââââââââââââââââââââ
 app.get('/users/:id/wallet-events', async (req, res) => {
   try {
     const r = await pool.query(
@@ -1491,7 +1491,7 @@ app.post('/platform/withdraw', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// ────────────────────────────────────────────────────────────────────
+// ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 
 /* PROMOCOES */
@@ -1571,9 +1571,9 @@ app.get('/promotions/motoboy/:id', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── PROMOÇÕES DA LOJA (frete grátis / desconto) ──────────────────────
+// ââ PROMOÃÃES DA LOJA (frete grÃ¡tis / desconto) ââââââââââââââââââââââ
 
-// ── AUTH MIDDLEWARE ────────────────────────────────────────────────
+// ââ AUTH MIDDLEWARE ââââââââââââââââââââââââââââââââââââââââââââââââ
 function authMiddleware(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -1586,7 +1586,7 @@ function authMiddleware(req, res, next) {
     return res.status(401).json({ error: 'Token invalido ou expirado' });
   }
 }
-// ────────────────────────────────────────────────────────────────────
+// ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 app.get('/loja-promocoes', async (req, res) => {
   const { loja_id } = req.query;
@@ -1668,17 +1668,17 @@ app.post('/distance', async (req, res) => {
     const apiKey = process.env.GOOGLE_MAPS_KEY;
     if (!apiKey) return res.status(500).json({ error: 'API key nao configurada' });
 
-    // ── VALIDAR ENDEREÇO DE DESTINO VIA GEOCODING ──────────────────────
-    // Garante que o endereço tem rua e número, não apenas bairro/cidade
+    // ââ VALIDAR ENDEREÃO DE DESTINO VIA GEOCODING ââââââââââââââââââââââ
+    // Garante que o endereÃ§o tem rua e nÃºmero, nÃ£o apenas bairro/cidade
     const geoUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(destination)}&key=${apiKey}`;
     const geoResp = await axios.get(geoUrl);
     const geoData = geoResp.data;
     if (geoData.status === 'OK' && geoData.results.length > 0) {
       const result = geoData.results[0];
       const locType = result.geometry.location_type;
-      // GEOMETRIC_CENTER = apenas bairro/cidade/região (impreciso)
-      // APPROXIMATE = área aproximada
-      // ROOFTOP e RANGE_INTERPOLATED = endereço com número (aceitar)
+      // GEOMETRIC_CENTER = apenas bairro/cidade/regiÃ£o (impreciso)
+      // APPROXIMATE = Ã¡rea aproximada
+      // ROOFTOP e RANGE_INTERPOLATED = endereÃ§o com nÃºmero (aceitar)
       if (locType === 'GEOMETRIC_CENTER' || locType === 'APPROXIMATE') {
         const hasStreetNumber = result.address_components.some(c => c.types.includes('street_number'));
         if (!hasStreetNumber) {
@@ -1688,7 +1688,7 @@ app.post('/distance', async (req, res) => {
         }
       }
     }
-    // ───────────────────────────────────────────────────────────────────
+    // âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
     const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${encodeURIComponent(origin)}&destinations=${encodeURIComponent(destination)}&mode=driving&key=${apiKey}`;
     const resp = await axios.get(url);
@@ -1703,7 +1703,7 @@ app.post('/distance', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-/* Ã¢ÂÂÃ¢ÂÂ AVISOS (NOTICES) Ã¢ÂÂÃ¢ÂÂ */
+/* ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ AVISOS (NOTICES) ÃÂ¢ÃÂÃÂÃÂ¢ÃÂÃÂ */
 app.get('/notices', async (req, res) => {
   try {
     const target = req.query.target;
@@ -1829,9 +1829,9 @@ app.post('/orders/:id/launch', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// ══════════════════════════════════════════════════════════════════
-// MÓDULO DE INDICAÇÃO
-// ══════════════════════════════════════════════════════════════════
+// ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// MÃDULO DE INDICAÃÃO
+// ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 // GET /referral-settings
 app.get('/referral-settings', async (req, res) => {
@@ -1841,7 +1841,7 @@ app.get('/referral-settings', async (req, res) => {
   } catch(e) { res.status(500).json({error: e.message}); }
 });
 
-// PUT /referral-settings — admin atualiza regras
+// PUT /referral-settings â admin atualiza regras
 app.put('/referral-settings', async (req, res) => {
   try {
     const { ativo, comissao_por_pedido_loja, bonus_motoboy_meta, meta_pedidos_motoboy, prazo_meta_dias, validade_indicacao_loja_dias } = req.body;
@@ -1854,7 +1854,7 @@ app.put('/referral-settings', async (req, res) => {
   } catch(e) { res.status(500).json({error: e.message}); }
 });
 
-// GET /referrals — admin: todos os registros
+// GET /referrals â admin: todos os registros
 app.get('/referrals', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM referrals ORDER BY created_at DESC');
@@ -1862,7 +1862,7 @@ app.get('/referrals', async (req, res) => {
   } catch(e) { res.status(500).json({error: e.message}); }
 });
 
-// GET /referrals/summary — ranking de indicadores
+// GET /referrals/summary â ranking de indicadores
 app.get('/referrals/summary', async (req, res) => {
   try {
     const r = await pool.query(`
@@ -1878,7 +1878,7 @@ app.get('/referrals/summary', async (req, res) => {
   } catch(e) { res.status(500).json({error: e.message}); }
 });
 
-// GET /referrals/user/:userId — indicados e ganhos de um usuário
+// GET /referrals/user/:userId â indicados e ganhos de um usuÃ¡rio
 app.get('/referrals/user/:userId', async (req, res) => {
   try {
     const id = req.params.userId;
@@ -1889,12 +1889,12 @@ app.get('/referrals/user/:userId', async (req, res) => {
   } catch(e) { res.status(500).json({error: e.message}); }
 });
 
-// GET /referral-code/:userId — gera/retorna código único
+// GET /referral-code/:userId â gera/retorna cÃ³digo Ãºnico
 app.get('/referral-code/:userId', async (req, res) => {
   try {
     const id = req.params.userId;
     const user = await pool.query('SELECT referral_code, name FROM users WHERE id=$1', [id]);
-    if (user.rows.length === 0) return res.status(404).json({error: 'Usuário não encontrado'});
+    if (user.rows.length === 0) return res.status(404).json({error: 'UsuÃ¡rio nÃ£o encontrado'});
     let code = user.rows[0].referral_code;
     if (!code) {
       const base = (user.rows[0].name || 'USER').replace(/[^A-Za-z0-9]/g,'').substring(0,4).toUpperCase();
@@ -1905,19 +1905,19 @@ app.get('/referral-code/:userId', async (req, res) => {
   } catch(e) { res.status(500).json({error: e.message}); }
 });
 
-// POST /referrals/apply — vincula indicação ao cadastrar
+// POST /referrals/apply â vincula indicaÃ§Ã£o ao cadastrar
 app.post('/referrals/apply', async (req, res) => {
   try {
     const { referred_id, referral_code } = req.body;
     if (!referred_id || !referral_code) return res.status(400).json({error: 'Dados incompletos'});
     const refUser = await pool.query('SELECT * FROM users WHERE referral_code=$1', [referral_code.trim().toUpperCase()]);
-    if (refUser.rows.length === 0) return res.status(404).json({error: 'Código inválido'});
+    if (refUser.rows.length === 0) return res.status(404).json({error: 'CÃ³digo invÃ¡lido'});
     const referrer = refUser.rows[0];
     const newUser = await pool.query('SELECT * FROM users WHERE id=$1', [referred_id]);
-    if (newUser.rows.length === 0) return res.status(404).json({error: 'Usuário não encontrado'});
+    if (newUser.rows.length === 0) return res.status(404).json({error: 'UsuÃ¡rio nÃ£o encontrado'});
     const referred = newUser.rows[0];
     const existing = await pool.query('SELECT id FROM referrals WHERE referred_id=$1', [referred_id]);
-    if (existing.rows.length > 0) return res.status(409).json({error: 'Usuário já foi indicado'});
+    if (existing.rows.length > 0) return res.status(409).json({error: 'UsuÃ¡rio jÃ¡ foi indicado'});
     const cfg = await pool.query('SELECT * FROM referral_settings WHERE id=1');
     const settings = cfg.rows[0] || {};
     if (!settings.ativo) return res.json({ok: true, msg: 'Programa inativo'});
@@ -1941,7 +1941,7 @@ app.post('/referrals/apply', async (req, res) => {
   } catch(e) { res.status(500).json({error: e.message}); }
 });
 
-// PUT /referrals/:id — admin edita uma indicação
+// PUT /referrals/:id â admin edita uma indicaÃ§Ã£o
 app.put('/referrals/:id', async (req, res) => {
   try {
     const { referrer_id, data_fim, meta_pedidos, bonus_valor, status_ref, bonus_pago, total_pedidos_validos } = req.body;
@@ -1962,7 +1962,7 @@ app.put('/referrals/:id', async (req, res) => {
   } catch(e) { res.status(500).json({error: e.message}); }
 });
 
-// DELETE /referrals/:id — admin remove indicação
+// DELETE /referrals/:id â admin remove indicaÃ§Ã£o
 app.delete('/referrals/:id', async (req, res) => {
   try {
     await pool.query('DELETE FROM referrals WHERE id=$1', [req.params.id]);
@@ -1970,7 +1970,7 @@ app.delete('/referrals/:id', async (req, res) => {
   } catch(e) { res.status(500).json({error: e.message}); }
 });
 
-// POST /referrals/cleanup — limpa registros finalizados há mais de 20 dias
+// POST /referrals/cleanup â limpa registros finalizados hÃ¡ mais de 20 dias
 app.post('/referrals/cleanup', async (req, res) => {
   try {
     const result = await pool.query(`DELETE FROM referrals
@@ -1986,7 +1986,7 @@ app.post('/referrals/cleanup', async (req, res) => {
   } catch(e) { res.status(500).json({error: e.message}); }
 });
 
-// ── VITRINE / CARDAPIO ──────────────────────────────────────────────────
+// ââ VITRINE / CARDAPIO ââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 app.get('/vitrine/lojas', async (req, res) => {
   try {
@@ -2070,7 +2070,7 @@ app.put('/vitrine/config/:loja_id', async (req, res) => {
     } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// ─── PAGAR AO RESTAURANTE ────────────────────────────────────────────────────
+// âââ PAGAR AO RESTAURANTE ââââââââââââââââââââââââââââââââââââââââââââââââââââ
 app.get('/orders/:id/pagar-restaurante/info', async (req, res) => {
   try {
     const orderId = parseInt(req.params.id);
@@ -2364,9 +2364,9 @@ async function checkLojaAutoOffline() {
 }
 
 
-// ══════════════════════════════════════════════════════════════════
+// ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 // MERCADO PAGO - SOLICITAR SALDO (PIX)
-// ══════════════════════════════════════════════════════════════════
+// ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 // Criar tabela de recargas MP
 async function initMPTable() {
@@ -2385,7 +2385,7 @@ async function initMPTable() {
 }
 initMPTable();
 
-// POST /mercadopago/gerar-pix — gera cobranca PIX para recarga de saldo
+// POST /mercadopago/gerar-pix â gera cobranca PIX para recarga de saldo
 app.post('/mercadopago/gerar-pix', async (req, res) => {
   try {
     const { valor, userId, userName, userEmail } = req.body;
@@ -2441,7 +2441,7 @@ app.post('/mercadopago/gerar-pix', async (req, res) => {
   }
 });
 
-// GET /mercadopago/status/:paymentId — verifica status do pagamento
+// GET /mercadopago/status/:paymentId â verifica status do pagamento
 app.get('/mercadopago/status/:paymentId', async (req, res) => {
   try {
     const MP_TOKEN = process.env.MP_ACCESS_TOKEN;
@@ -2458,7 +2458,7 @@ app.get('/mercadopago/status/:paymentId', async (req, res) => {
   }
 });
 
-// POST /mercadopago/webhook — recebe notificacao do MP e credita saldo automaticamente
+// POST /mercadopago/webhook â recebe notificacao do MP e credita saldo automaticamente
 app.post('/mercadopago/webhook', async (req, res) => {
   try {
     const { type, data } = req.body;
@@ -2505,9 +2505,9 @@ app.post('/mercadopago/webhook', async (req, res) => {
   }
 });
 
-// ══════════════════════════════════════════════════════════════════
+// ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
-// GET /mercadopago/historico/:userId — retorna historico de recargas dos ultimos 7 dias
+// GET /mercadopago/historico/:userId â retorna historico de recargas dos ultimos 7 dias
 app.get('/mercadopago/historico/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
@@ -2525,7 +2525,7 @@ app.get('/mercadopago/historico/:userId', async (req, res) => {
 });
 
 
-// POST /orders/:id/verificar-na-loja — valida se motoboy esta a <= 300m da loja
+// POST /orders/:id/verificar-na-loja â valida se motoboy esta a <= 300m da loja
 app.post('/orders/:id/verificar-na-loja', async (req, res) => {
   try {
     const { lat, lng } = req.body;
@@ -2581,9 +2581,9 @@ app.post('/orders/:id/verificar-na-loja', async (req, res) => {
 });
 
 
-// ══════════════════════════════════════════════════════════════════
+// ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 // MERCADO PAGO - CHECKOUT PRO (pagamento de pedido da loja)
-// ══════════════════════════════════════════════════════════════════
+// ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 
 // POST /mercadopago/checkout-pedido
 // Body: { loja_id, itens:[{nome,preco,qtd}], totalItens, taxaEntrega, totalFinal, nomeCliente }
@@ -2700,7 +2700,7 @@ res.status(500).json({ error: errMsg });
 }
 });
 
-// POST /mercadopago/webhook-pedido/:loja_id — webhook de pagamento de pedido (futuro)
+// POST /mercadopago/webhook-pedido/:loja_id â webhook de pagamento de pedido (futuro)
 app.post('/mercadopago/webhook-pedido/:loja_id', async (req, res) => {
   // Apenas confirma recebimento por enquanto
   // A confirmacao de pagamento e feita pelo polling no frontend
@@ -2739,7 +2739,115 @@ app.post('/motoboys/:id/localizacao', async (req, res) => { try { const mid = pa
 app.get('/motoboys/localizacoes-ativas', async (req, res) => { try { const r = await pool.query("SELECT ml.motoboy_id, ml.order_id, ml.lat, ml.lng, ml.updated_at, u.name AS nome, u.custom_id AS codigo FROM motoboy_localizacao ml JOIN users u ON u.id = ml.motoboy_id WHERE ml.updated_at > NOW() - INTERVAL '2 minutes'"); res.json(r.rows); } catch(e) { res.status(500).json({ error: e.message }); } });
 app.get('/rastrear/:order_id', async (req, res) => { try { const oid = parseInt(req.params.order_id); const r = await pool.query("SELECT ml.lat, ml.lng, ml.updated_at, u.name AS nome_motoboy, o.status, o.nome_cliente FROM motoboy_localizacao ml JOIN users u ON u.id = ml.motoboy_id JOIN orders o ON o.id = ml.order_id WHERE ml.order_id = $1", [oid]); if (r.rows.length === 0) return res.status(404).json({ error: 'Rastreio nao disponivel' }); res.json(r.rows[0]); } catch(e) { res.status(500).json({ error: e.message }); } });
 initDB().then(() => {})
-  app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
+  
+// ============================================================
+// BOT iFOOD ENTREGA PROPRIA
+// ============================================================
+const puppeteer = require('puppeteer-core');
+const chromium = require('@sparticuz/chromium');
+
+let _browser = null;
+async function getBrowser() {
+  if (!_browser || !_browser.isConnected()) {
+    _browser = await puppeteer.launch({
+      args: chromium.args,
+      defaultViewport: chromium.defaultViewport,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
+    });
+  }
+  return _browser;
+}
+
+// POST /ifood/verificar-localizador
+// Body: { localizador: "12345678" }
+// Retorna: { ok: true, nomeCliente: "TAIANE" }
+app.post('/ifood/verificar-localizador', async (req, res) => {
+  const { localizador } = req.body;
+  if (!localizador || localizador.length !== 8) {
+    return res.status(400).json({ ok: false, erro: 'Localizador deve ter 8 digitos' });
+  }
+  let page;
+  try {
+    const browser = await getBrowser();
+    page = await browser.newPage();
+    await page.goto('https://confirmacao-entrega-propria.ifood.com.br/numero-pedido', { waitUntil: 'networkidle2', timeout: 30000 });
+    // Preenche os 8 campos do localizador
+    const inputs = await page.$$('input');
+    const digits = localizador.split('');
+    for (let i = 0; i < 8 && i < inputs.length; i++) {
+      await inputs[i].click();
+      await inputs[i].type(digits[i]);
+      await page.waitForTimeout(100);
+    }
+    // Clica em Continuar
+    await page.click('button[type="submit"], button:has-text("Continuar")');
+    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 });
+    // Extrai nome do cliente
+    const nomeCliente = await page.evaluate(() => {
+      const h2 = document.querySelector('h2, h1, [class*="title"], [class*="nome"]');
+      if (!h2) return null;
+      const match = h2.textContent.match(/codigo de (.+)/i) || h2.textContent.match(/QUAL O CODIGO DE (.+)/i);
+      return match ? match[1].replace('?','').trim() : h2.textContent.trim();
+    });
+    await page.close();
+    if (!nomeCliente) return res.status(404).json({ ok: false, erro: 'Localizador nao encontrado ou invalido' });
+    return res.json({ ok: true, nomeCliente });
+  } catch (err) {
+    if (page) await page.close().catch(() => {});
+    console.error('[iFood bot] verificar erro:', err.message);
+    return res.status(500).json({ ok: false, erro: 'Erro ao verificar localizador: ' + err.message });
+  }
+});
+
+// POST /ifood/confirmar-entrega
+// Body: { localizador: "12345678", codigoCliente: "1234" }
+// Retorna: { ok: true } ou { ok: false, erro: "..." }
+app.post('/ifood/confirmar-entrega', async (req, res) => {
+  const { localizador, codigoCliente } = req.body;
+  if (!localizador || localizador.length !== 8) return res.status(400).json({ ok: false, erro: 'Localizador deve ter 8 digitos' });
+  if (!codigoCliente || codigoCliente.length !== 4) return res.status(400).json({ ok: false, erro: 'Codigo do cliente deve ter 4 digitos' });
+  let page;
+  try {
+    const browser = await getBrowser();
+    page = await browser.newPage();
+    await page.goto('https://confirmacao-entrega-propria.ifood.com.br/numero-pedido', { waitUntil: 'networkidle2', timeout: 30000 });
+    // Passo 1: digita localizador
+    const inputs1 = await page.$$('input');
+    const digits1 = localizador.split('');
+    for (let i = 0; i < 8 && i < inputs1.length; i++) {
+      await inputs1[i].click();
+      await inputs1[i].type(digits1[i]);
+      await page.waitForTimeout(100);
+    }
+    await page.click('button[type="submit"], button:has-text("Continuar")');
+    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 });
+    // Passo 2: digita codigo do cliente (4 digitos)
+    const inputs2 = await page.$$('input');
+    const digits2 = codigoCliente.split('');
+    for (let i = 0; i < 4 && i < inputs2.length; i++) {
+      await inputs2[i].click();
+      await inputs2[i].type(digits2[i]);
+      await page.waitForTimeout(100);
+    }
+    await page.click('button[type="submit"], button:has-text("Confirmar")');
+    await page.waitForTimeout(3000);
+    // Verifica sucesso
+    const sucesso = await page.evaluate(() => {
+      const body = document.body.textContent;
+      return body.includes('entrega confirmada') || body.includes('Entrega confirmada') || body.includes('sucesso') || body.includes('confirmado');
+    });
+    await page.close();
+    if (sucesso) return res.json({ ok: true });
+    return res.status(400).json({ ok: false, erro: 'Codigo incorreto ou pedido nao encontrado' });
+  } catch (err) {
+    if (page) await page.close().catch(() => {});
+    console.error('[iFood bot] confirmar erro:', err.message);
+    return res.status(500).json({ ok: false, erro: 'Erro ao confirmar entrega: ' + err.message });
+  }
+});
+
+app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
   setInterval(checkLateArrivals, 60 * 1000);
   setInterval(checkPendingOrdersAlert, 5 * 60 * 1000);
   console.log('[JOB] Verificador de pedidos pendentes iniciado (5min)');
