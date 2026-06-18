@@ -238,6 +238,9 @@ try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARC
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS taxa_extra_chuva DECIMAL DEFAULT 0"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS taxa_extra_noturna DECIMAL DEFAULT 0"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS chuva_desconto_de VARCHAR(10) DEFAULT 'admin'"); } catch(e) {}
+  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS ifood_localizador VARCHAR(20)"); } catch(e) {}
+  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS ifood_numero_pedido VARCHAR(20)"); } catch(e) {}
+  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS ifood_nome_cliente VARCHAR(100)"); } catch(e) {}
 
   // Auto-generate custom_id for existing users
   try {
@@ -715,8 +718,8 @@ app.post('/orders', async (req, res) => {
   } catch(eTaxa) { console.error('[TAXA] Erro ao calcular taxas:', eTaxa.message); }
 
   const r = await pool.query(
-    `INSERT INTO orders (loja_user,loja_name,plataforma,endereco_coleta,endereco_entrega,bairro_destino,nome_cliente,telefone_cliente,cod_pedido,cobrar_cliente,tipo_pagamento,valor_pedido,valor_total,valor_motoboy,comissao,distancia,previsao,obs,status,pending_until,telefone_loja,launch_at,complemento_coleta,complemento_entrega,obs_coleta,obs_entrega_loja,delivery_code,taxa_extra_chuva,taxa_extra_noturna,chuva_desconto_de) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'novo',$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29) RETURNING *`,
-    [d.loja_user,d.loja_name,d.plataforma,d.endereco_coleta,d.endereco_entrega,d.bairro_destino,d.nome_cliente,d.telefone_cliente,d.cod_pedido,d.cobrar_cliente||'nao',d.tipo_pagamento||'dinheiro',d.valor_pedido||0,valorTotal,valorMotoboy,d.comissao,d.distancia,d.previsao,d.obs,Date.now()+15000,telefone_loja,d.launch_at||0,d.complemento_coleta||null,d.complemento_entrega||null,d.obs_coleta||null,d.obs_entrega_loja||null,deliveryCode,taxa_extra_chuva,taxa_extra_noturna,chuva_desconto_de]
+    `INSERT INTO orders (loja_user,loja_name,plataforma,endereco_coleta,endereco_entrega,bairro_destino,nome_cliente,telefone_cliente,cod_pedido,cobrar_cliente,tipo_pagamento,valor_pedido,valor_total,valor_motoboy,comissao,distancia,previsao,obs,status,pending_until,telefone_loja,launch_at,complemento_coleta,complemento_entrega,obs_coleta,obs_entrega_loja,delivery_code,taxa_extra_chuva,taxa_extra_noturna,chuva_desconto_de,ifood_localizador,ifood_numero_pedido,ifood_nome_cliente) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'novo',$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32) RETURNING *`,
+    [d.loja_user,d.loja_name,d.plataforma,d.endereco_coleta,d.endereco_entrega,d.bairro_destino,d.nome_cliente,d.telefone_cliente,d.cod_pedido,d.cobrar_cliente||'nao',d.tipo_pagamento||'dinheiro',d.valor_pedido||0,valorTotal,valorMotoboy,d.comissao,d.distancia,d.previsao,d.obs,Date.now()+15000,telefone_loja,d.launch_at||0,d.complemento_coleta||null,d.complemento_entrega||null,d.obs_coleta||null,d.obs_entrega_loja||null,deliveryCode,taxa_extra_chuva,taxa_extra_noturna,chuva_desconto_de,d.ifood_localizador||null,d.ifood_numero_pedido||null,d.ifood_nome_cliente||null]
   );
   const pedido = r.rows[0];
   // Notifica loja e cliente via WhatsApp bot
@@ -1166,7 +1169,7 @@ app.put('/orders/:id', async (req, res) => {
     } catch(eBotNaLoja) { console.error('[BOT] Erro geral WhatsApp na_loja:', eBotNaLoja.message); }
   }
   // Notificar cliente via WhatsApp quando pedido foi coletado (motoboy a caminho)
-  if (fields.status === 'coletado') {
+  if (fields.status === 'coletado' && order.tipo_pagamento !== 'ifood') {
     try {
       const botUrlColetado = process.env.BOT_URL;
       const botSecretColetado = process.env.BOT_SECRET;
@@ -1185,7 +1188,7 @@ app.put('/orders/:id', async (req, res) => {
     } catch(eBotColetado) { console.error('[BOT] Erro geral WhatsApp coletado:', eBotColetado.message); }
   }
   // Notificar cliente via WhatsApp quando motoboy chegou no cliente
-  if (fields.status === 'no_cliente') {
+  if (fields.status === 'no_cliente' && order.tipo_pagamento !== 'ifood') {
     try {
       const botUrlNoCliente = process.env.BOT_URL;
       const botSecretNoCliente = process.env.BOT_SECRET;
