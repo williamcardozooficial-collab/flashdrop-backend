@@ -402,6 +402,7 @@ try {
 
   
 try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS slug VARCHAR(100) UNIQUE"); } catch(e) {}
+  try { await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS loja_bot_phone TEXT'); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS mp_access_token TEXT"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS mp_auto BOOLEAN DEFAULT false"); } catch(e) {}
 try {
@@ -862,7 +863,32 @@ app.put('/orders/:id', async (req, res) => {
             ).catch(e => console.error('[BOT] Erro msg grupo em_preparo:', e.message));
           }
         } catch(eGroupPrep) { console.error('[BOT] Erro geral grupo em_preparo:', eGroupPrep.message); }
-    }
+
+
+      // BOT LOJA: envia confirmação de pedido para o cliente
+      try {
+        const lojaBotUrl = 'https://flashdrop-loja-bot-production.up.railway.app';
+        const lojaBotSecret = 'flashdrop-loja-bot-secret';
+        // Busca dados da loja (telefone do cliente e dados do pedido)
+        const clientePhone = order.telefone_cliente;
+        if (clientePhone) {
+          // Busca a loja_user para verificar o número registrado
+          const lojaRes = await pool.query('SELECT loja_bot_phone FROM users WHERE username=$1', [order.loja_user]);
+          const lojaPhone = lojaRes.rows[0]?.loja_bot_phone;
+          if (lojaPhone) {
+            const endereco = [order.endereco_entrega, order.complemento_entrega, order.bairro_destino].filter(Boolean).join(', ');
+            const msgPrep = '\uD83D\uDCCB Pedido confirmado! #' + order.id + '\n\n' +
+              '\uD83D\uDCCD Entrega: ' + endereco + '\n' +
+              '\uD83D\uDCB3 Pagamento: ' + order.tipo_pagamento + '\n' +
+              '\uD83D\uDCB0 Valor: R$ ' + (order.valor_pedido || order.valor_total || '0') + '\n\n' +
+              '\u23F3 Estamos preparando seu pedido!';
+            axios.post(lojaBotUrl + '/api/send-message',
+              { lojaId: String(order.loja_user), phone: clientePhone, message: msgPrep },
+              { headers: { 'x-bot-secret': lojaBotSecret } }
+            ).catch(e => console.error('[LOJA BOT] Erro em_preparo cliente:', e.message));
+          }
+        }
+      } catch(eLojaBotPrep) { console.error('[LOJA BOT] Erro geral em_preparo:', eLojaBotPrep.message); }    }
     if (fields.status === 'entregue' && prevOrderRes.rows[0] && prevOrderRes.rows[0].status === 'entregue') { return res.json(order); }
 
     // Cancelamento pelo motoboy: bloquear por 10 minutos
@@ -1211,7 +1237,29 @@ app.put('/orders/:id', async (req, res) => {
         ).catch(e => console.error('[BOT] Erro WhatsApp coletado cliente:', e.message));
       }
     } catch(eBotColetado) { console.error('[BOT] Erro geral WhatsApp coletado:', eBotColetado.message); }
-  }
+
+
+      // BOT LOJA: envia dados do pedido para o motoboy ao coletar
+      try {
+        const lojaBotUrl = 'https://flashdrop-loja-bot-production.up.railway.app';
+        const lojaBotSecret = 'flashdrop-loja-bot-secret';
+        const mbPhone = order.telefone_motoboy || order.motoboy_phone;
+        if (mbPhone) {
+          const lojaRes = await pool.query('SELECT loja_bot_phone FROM users WHERE username=$1', [order.loja_user]);
+          const lojaPhone = lojaRes.rows[0]?.loja_bot_phone;
+          if (lojaPhone) {
+            const endereco = [order.endereco_entrega, order.complemento_entrega, order.bairro_destino].filter(Boolean).join(', ');
+            const msgColetadoMb = '\uD83D\uDCCB Pedido #' + order.id + '\n\n' +
+              '\uD83D\uDCCD Entrega: ' + endereco + '\n' +
+              '\uD83D\uDCB3 Pagamento: ' + order.tipo_pagamento + '\n' +
+              '\uD83D\uDCB0 Valor: R$ ' + (order.valor_pedido || order.valor_total || '0');
+            axios.post(lojaBotUrl + '/api/send-message',
+              { lojaId: String(order.loja_user), phone: mbPhone, message: msgColetadoMb },
+              { headers: { 'x-bot-secret': lojaBotSecret } }
+            ).catch(e => console.error('[LOJA BOT] Erro coletado motoboy:', e.message));
+          }
+        }
+      } catch(eLojaBotCol) { console.error('[LOJA BOT] Erro geral coletado mb:', eLojaBotCol.message); }  }
   // Notificar cliente via WhatsApp quando motoboy chegou no cliente
   if (fields.status === 'no_cliente' && order.tipo_pagamento !== 'ifood') {
     try {
@@ -1227,7 +1275,27 @@ app.put('/orders/:id', async (req, res) => {
         ).catch(e => console.error('[BOT] Erro WhatsApp no_cliente:', e.message));
       }
     } catch(eBotNoCliente) { console.error('[BOT] Erro geral WhatsApp no_cliente:', eBotNoCliente.message); }
-  }
+
+
+      // BOT LOJA: avisa cliente que motoboy chegou
+      try {
+        const lojaBotUrl = 'https://flashdrop-loja-bot-production.up.railway.app';
+        const lojaBotSecret = 'flashdrop-loja-bot-secret';
+        const clientePhone = order.telefone_cliente;
+        if (clientePhone) {
+          const lojaRes = await pool.query('SELECT loja_bot_phone FROM users WHERE username=$1', [order.loja_user]);
+          const lojaPhone = lojaRes.rows[0]?.loja_bot_phone;
+          if (lojaPhone) {
+            const msgChegou = '\uD83D\uDEF5 O motoboy chegou!\n' +
+              'Pedido #' + order.id + '\n' +
+              'Seu entregador est\u00e1 na porta. Por favor, v\u00e1 ao encontro dele para receber seu pedido. \uD83C\uDFE0';
+            axios.post(lojaBotUrl + '/api/send-message',
+              { lojaId: String(order.loja_user), phone: clientePhone, message: msgChegou },
+              { headers: { 'x-bot-secret': lojaBotSecret } }
+            ).catch(e => console.error('[LOJA BOT] Erro chegou cliente:', e.message));
+          }
+        }
+      } catch(eLojaBotChegou) { console.error('[LOJA BOT] Erro geral chegou:', eLojaBotChegou.message); }  }
   // Notificar cliente via WhatsApp quando pedido foi entregue
   if (fields.status === 'entregue') {
     try {
