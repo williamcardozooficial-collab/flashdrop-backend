@@ -772,7 +772,7 @@ app.put('/orders/:id', async (req, res) => {
         const orderRes = await pool.query('SELECT tipo_pagamento, valor_motoboy, comissao, valor_pedido, delivery_code, motoboy_id FROM orders WHERE id=$1', [req.params.id]);
         if (orderRes.rows.length > 0) {
           const order = orderRes.rows[0];
-          const isDinheiro = order.tipo_pagamento === 'dinheiro' || order.tipo_pagamento === 'ifood';
+          const isDinheiro = order.tipo_pagamento === 'dinheiro';
 
           if (isDinheiro) {
             // Logica: custom_credit_limit define o limite individual do motoboy
@@ -878,7 +878,7 @@ app.put('/orders/:id', async (req, res) => {
         const fullOrderRes = await pool.query('SELECT * FROM orders WHERE id=$1', [req.params.id]);
         if (fullOrderRes.rows.length > 0) {
           const ord = fullOrderRes.rows[0];
-          const isDinheiro = ord.tipo_pagamento === 'dinheiro' || ord.tipo_pagamento === 'ifood';
+          const isDinheiro = ord.tipo_pagamento === 'dinheiro';
           const jaEntregue = ord.status === 'entregue';
           if (!isDinheiro && !jaEntregue && ord.loja_user && !['cardapio','cardapio_aceito'].includes(ord.plataforma)) {
             const valorTotal = parseFloat(ord.valor_total) || 0;
