@@ -2864,58 +2864,20 @@ async function getBrowser() {
 // Retorna: { ok: true, nomeCliente: "TAIANE" }
 app.post('/ifood/verificar-localizador', async (req, res) => {
   const { localizador } = req.body;
-  if (!localizador || localizador.length !== 8) {
-    return res.status(400).json({ ok: false, erro: 'Localizador deve ter 8 digitos' });
-  }
-  let page;
+  if (!localizador || localizador.length !== 8) return res.status(400).json({ ok: false, error: 'Localizador deve ter 8 digitos' });
   try {
-    const browser = await getBrowser();
-    page = await browser.newPage();
-    await page.goto('https://confirmacao-entrega-propria.ifood.com.br/numero-pedido', { waitUntil: 'networkidle2', timeout: 30000 });
-    // Preenche os 8 campos do localizador
-    const inputs = await page.$$('input');
-    const digits = localizador.split('');
-    for (let i = 0; i < 8 && i < inputs.length; i++) {
-      await inputs[i].click();
-      await inputs[i].type(digits[i]);
-      await page.waitForTimeout(100);
-    }
-    // Clica em Continuar - busca botao pelo texto
-    await page.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll('button'));
-      const btn = btns.find(b => b.textContent.includes('Continuar') || b.type === 'submit');
-      if (btn) btn.click();
-    });
-    // Aguarda navegacao ou mudanca de conteudo (localizador invalido nao navega)
-    try {
-      await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 });
-    } catch(navErr) {
-      // Timeout - verifica se esta na mesma pagina (localizador invalido)
-      const urlAtual = page.url();
-      if (urlAtual.includes('numero-pedido')) {
-        await page.close();
-        return res.status(404).json({ ok: false, erro: 'Localizador nao encontrado. Verifique os 8 digitos.' });
-      }
-    }
-    // Extrai nome do cliente
-    const resultado = await page.evaluate(() => {
-      // Extrai numero do pedido do topo (ex: "Pedido #4787 ÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ Localizador 4646 4466")
-      const texto = document.body.innerText || document.body.textContent;
-      const pedidoMatch = texto.match(/Pedido #(\d+)/i);
-      const numeroPedido = pedidoMatch ? pedidoMatch[1] : null;
-      // Extrai nome do cliente do titulo da tela (ex: "Qual o cÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ³digo de TAIANE?")
-      
-      const nomeMatch = texto.match(/Qual o c[oÃ³]digo de ([A-Z][A-Z .]+?)[\.\?]/i);
-      const nomeCliente = nomeMatch ? nomeMatch[1].trim() : null;
-      return { nomeCliente, numeroPedido };
-    });
-    await page.close();
-    if (!resultado.nomeCliente) return res.status(404).json({ ok: false, erro: 'Localizador nao encontrado ou invalido' });
-    return res.json({ ok: true, nomeCliente: resultado.nomeCliente, numeroPedidoIfood: resultado.numeroPedido });
+    const apiUrl = 'https://merchant-api.ifood.com.br/marketplace-delivery-handshake/order-available/localizers/' + localizador;
+    const resp = await axios.get(apiUrl, { timeout: 10000, headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', 'Accept': 'application/json, text/plain, */*', 'Origin': 'https://confirmacao-entrega-propria.ifood.com.br', 'Referer': 'https://confirmacao-entrega-propria.ifood.com.br/' } });
+    const data = resp.data;
+    const nomeCliente = data.customerName || data.customer_name || data.name || null;
+    const numeroPedidoIfood = data.orderId || data.order_id || data.orderNumber || null;
+    if (!nomeCliente && !numeroPedidoIfood) return res.status(404).json({ ok: false, error: 'Localizador nao encontrado ou invalido' });
+    return res.json({ ok: true, nomeCliente, numeroPedidoIfood });
   } catch (err) {
-    if (page) await page.close().catch(() => {});
-    console.error('[iFood bot] verificar erro:', err.message);
-    return res.status(500).json({ ok: false, erro: 'Erro ao verificar localizador: ' + err.message });
+    if (err.response && err.response.status === 404) return res.status(404).json({ ok: false, error: 'Localizador nao encontrado ou invalido' });
+    if (err.response && err.response.status === 422) return res.status(422).json({ ok: false, error: 'Localizador invalido ou pedido ja entregue' });
+    console.error('[iFood] verificar erro:', err.message);
+    return res.status(500).json({ ok: false, error: 'Erro ao verificar localizador: ' + err.message });
   }
 });
 
