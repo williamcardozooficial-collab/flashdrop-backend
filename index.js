@@ -8,7 +8,7 @@ require('dotenv').config();
 
 const app = express();
 app.use(cors({ origin: '*', methods: ['GET','POST','PUT','DELETE','OPTIONS'], allowedHeaders: ['Content-Type','Authorization'] }));
-app.options('*', cors());
+app.options('*', cors());h
 app.use(express.json());
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
@@ -2870,7 +2870,7 @@ app.post('/ifood/verificar-localizador', async (req, res) => {
     const resp = await axios.get(apiUrl, { timeout: 10000, headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36', 'Accept': 'application/json, text/plain, */*', 'Origin': 'https://confirmacao-entrega-propria.ifood.com.br', 'Referer': 'https://confirmacao-entrega-propria.ifood.com.br/' } });
     const data = resp.data;
     const nomeCliente = data.customerName || data.customer_name || data.name || null;
-    const numeroPedidoIfood = data.orderId || data.order_id || data.orderNumber || null;
+    const numeroPedidoIfood = data.shortId || data.short_id || data.orderNumber || null;
     if (!nomeCliente && !numeroPedidoIfood) return res.status(404).json({ ok: false, error: 'Localizador nao encontrado ou invalido' });
     return res.json({ ok: true, nomeCliente, numeroPedidoIfood });
   } catch (err) {
