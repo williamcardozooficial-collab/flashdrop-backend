@@ -1234,6 +1234,25 @@ app.put('/orders/:id', async (req, res) => {
       }
     } catch(eBotColetado) { console.error('[BOT] Erro geral WhatsApp coletado:', eBotColetado.message); }
 
+        // BOT LOJA: envia codigo de entrega ao cliente ao coletar
+        try {
+            const lojaBotUrlCol = 'https://flashdrop-loja-bot-production.up.railway.app';
+            const lojaBotSecretCol = 'flashdrop-loja-bot-secret';
+            const delivCode = order.delivery_code || '';
+            const clientePhoneCol = order.telefone_cliente;
+            if (clientePhoneCol) {
+                const msgColetadoLoja = '📦 Pedido coletado!\n\n' +
+                  'Quando o motoboy estiver próximo ao seu endereço, você receberá uma nova notificação, que ele chegou, *Fique Atento* 📲\n\n' +
+                  'Para receber o pedido, será necessário informar o código de entrega:\n\n' +
+                  '🔐 Código: *' + delivCode + '*\n\n' +
+                  '⚠️ Guarde este código em segurança e informe-o ao motoboy no momento da entrega. Sem o código, a entrega não poderá ser finalizada.';
+                axios.post(lojaBotUrlCol + '/api/send-message',
+                  { lojaId: String(order.loja_user), phone: clientePhoneCol, message: msgColetadoLoja },
+                  { headers: { 'x-bot-secret': lojaBotSecretCol } }
+                ).catch(e => console.error('[LOJA BOT] Erro coletado cliente loja:', e.message));
+            }
+        } catch(eLojaBotColCliente) { console.error('[LOJA BOT] Erro geral coletado cliente:', eLojaBotColCliente.message); }
+
 
       // BOT LOJA: envia dados do pedido para o motoboy ao coletar
       try {
