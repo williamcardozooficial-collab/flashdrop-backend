@@ -874,11 +874,11 @@ app.put('/orders/:id', async (req, res) => {
         if (clientePhone) {
           // Busca a loja_user para verificar o nÃºmero registrado
             const endereco = [order.endereco_entrega, order.complemento_entrega, order.bairro_destino].filter(Boolean).join(', ');
-            const msgPrep = '\uD83D\uDCCB Pedido confirmado! #' + order.id + '\n\n' +
-              '\uD83D\uDCCD Entrega: ' + endereco + '\n' +
-              '\uD83D\uDCB3 Pagamento: ' + order.tipo_pagamento + '\n' +
-              '\uD83D\uDCB0 Valor: R$ ' + (order.valor_pedido || order.valor_total || '0') + '\n\n' +
-              '\u23F3 Estamos preparando seu pedido!';
+            const msgPrep = '📋 Pedido confirmado! #' + order.id + '\n\n' +
+              'Seu pedido foi recebido com sucesso e já está em preparação. 🧑‍🍳🍔\n\n' +
+              '📍 Endereço de entrega: ' + endereco + '\n' +
+              '💰 Forma de pagamento: ' + order.tipo_pagamento + '\n\n' +
+              '⏳ Agora é só aguardar, em breve seu pedido ficará pronto para envio! 🎉';
             axios.post(lojaBotUrl + '/api/send-message',
               { lojaId: String(order.loja_user), phone: clientePhone, message: msgPrep },
               { headers: { 'x-bot-secret': lojaBotSecret } }
