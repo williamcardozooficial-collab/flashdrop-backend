@@ -1265,6 +1265,8 @@ app.put('/orders/:id', async (req, res) => {
               '\uD83D\uDCCD Entrega: ' + endereco + '\n' +
               '\uD83D\uDCB3 Pagamento: ' + order.tipo_pagamento + '\n' +
               '\uD83D\uDCB0 Valor: R$ ' + (order.valor_pedido || order.valor_total || '0');
+                      const obsEnt = order.obs_entrega_loja || order.observacao_entrega || '';
+                      if (obsEnt) msgColetadoMb += '\u26A0\uFE0F Obs: ' + obsEnt + '\n';
             axios.post(lojaBotUrl + '/api/send-message',
               { lojaId: String(order.loja_user), phone: mbPhone, message: msgColetadoMb },
               { headers: { 'x-bot-secret': lojaBotSecret } }
