@@ -6,7 +6,7 @@ const axios = require('axios');
 const TelegramBot = require('node-telegram-bot-api');
 require('dotenv').config();
 
-const app = express();
+const app = express();h
 app.use(cors({ origin: '*', methods: ['GET','POST','PUT','DELETE','OPTIONS'], allowedHeaders: ['Content-Type','Authorization'] }));
 app.options('*', cors());
 app.use(express.json());
@@ -1263,8 +1263,7 @@ app.put('/orders/:id', async (req, res) => {
             const endereco = [order.endereco_entrega, order.complemento_entrega, order.bairro_destino].filter(Boolean).join(', ');
             const msgColetadoMb = '\uD83D\uDCCB Pedido #' + order.id + '\n\n' +
               '\uD83D\uDCCD Entrega: ' + endereco + '\n' +
-              '\uD83D\uDCB3 Pagamento: ' + order.tipo_pagamento + '\n' +
-              '\uD83D\uDCB0 Valor: R$ ' + (order.valor_pedido || order.valor_total || '0');
+              '💳 Pagamento: ' + order.tipo_pagamento;
                       const obsEnt = order.obs_entrega_loja || order.observacao_entrega || '';
                       if (obsEnt) msgColetadoMb += '\u26A0\uFE0F Obs: ' + obsEnt + '\n';
             axios.post(lojaBotUrl + '/api/send-message',
