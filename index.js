@@ -4,7 +4,7 @@ const cors = require('cors');
 const { Pool } = require('pg');
 const axios = require('axios');
 const TelegramBot = require('node-telegram-bot-api');
-require('dotenv').config();
+require('dotenv').config();h
 
 const app = express();
 app.use(cors({ origin: '*', methods: ['GET','POST','PUT','DELETE','OPTIONS'], allowedHeaders: ['Content-Type','Authorization'] }));
@@ -595,7 +595,7 @@ app.post('/users/:id/approve', async (req, res) => {
       const botSecret = process.env.BOT_SECRET;
       const phone = r.rows[0] && r.rows[0].phone;
       if (botUrl && botSecret && phone) {
-        const msg = 'ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ ParabÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ©ns! Seu login foi aprovado com sucesso. ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ\nAgora vocÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂª jÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¡ pode acessar nossa plataforma atravÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ©s do site abaixo:\nÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ https://flashdrop-frontend-six.vercel.app/login.html\nSeja bem-vindo(a) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ  Flash Drop! ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ';
+        const msg = '\uD83C\uDF89 Parab\u00E9ns! Seu login foi aprovado com sucesso. \u2705\nAgora voc\u00EA j\u00E1 pode acessar nossa plataforma atrav\u00E9s do site abaixo:\n\uD83D\uDE80 https://flashdrop-frontend-six.vercel.app/login.html\nSeja bem-vindo(a) \u00E0 Flash Drop! \uD83D\uDC99';
         await axios.post(`${botUrl}/api/send-message`, { phone, message: msg }, { headers: { 'x-bot-secret': botSecret }, timeout: 10000 });
       }
     } catch (wErr) { console.log('Erro WhatsApp aprovacao:', wErr.message); }
@@ -835,7 +835,7 @@ app.put('/orders/:id', async (req, res) => {
         }
         lojaNome = lojaNome || order.loja_user;
         const pagLabel = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX'}[order.tipo_pagamento] || order.tipo_pagamento || '-');
-        const msgPedido = `ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ°ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ Novo Pedido #${order.id} - Em Preparo\n\nLoja: ${lojaNome}\nPagamento: ${pagLabel}\nMotoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}\nDistancia: ${order.distancia} km\n\nPedido em preparo. Sera lancado ao sistema em breve.\nFique de olho!`;
+        const msgPedido = `🚀 Novo Pedido #${order.id} - Em Preparo\n\nLoja: ${lojaNome}\nPagamento: ${pagLabel}\nMotoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}\nDistancia: ${order.distancia} km\n\nPedido em preparo. Sera lancado ao sistema em breve.\nFique de olho!`;
         const groupId = process.env.TELEGRAM_GROUP_ID;
         if (groupId) bot.sendMessage(groupId, msgPedido).catch(() => {});
         motoboys.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgPedido).catch(() => {}));
