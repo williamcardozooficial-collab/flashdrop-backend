@@ -835,7 +835,19 @@ app.put('/orders/:id', async (req, res) => {
         }
         lojaNome = lojaNome || order.loja_user;
         const pagLabel = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX'}[order.tipo_pagamento] || order.tipo_pagamento || '-');
-        const msgPedido = `🚀 Novo Pedido #${order.id} - Em Preparo\n\nLoja: ${lojaNome}\nPagamento: ${pagLabel}\nMotoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}\nDistancia: ${order.distancia} km\n\nPedido em preparo. Sera lancado ao sistema em breve.\nFique de olho!`;
+        const msgPedido = `🔥 Pedido em Preparo!
+
+Pedido #${order.id} - ${lojaNome}
+
+Distancia: ${order.distancia} km
+
+Pagamento: ${pagLabel}
+
+Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
+
+📍 Coleta: ${[order.endereco_coleta, order.complemento_coleta].filter(Boolean).join(', ')}
+
+🏠 Entrega: ${[order.endereco_entrega, order.complemento_entrega, order.bairro_destino].filter(Boolean).join(', ')}`;
         const groupId = process.env.TELEGRAM_GROUP_ID;
         if (groupId) bot.sendMessage(groupId, msgPedido).catch(() => {});
         motoboys.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgPedido).catch(() => {}));
