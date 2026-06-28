@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
 const axios = require('axios');
-const TelegramBot = require('node-telegram-bot-api');
+const TelegramBot = require('node-telegram-bot-api');h
 require('dotenv').config();
 
 const app = express();
@@ -845,7 +845,7 @@ Pagamento: ${pagLabel}
 
 Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
 
-📍 Coleta: ${[order.endereco_coleta, order.complemento_coleta].filter(Boolean).join(', ')}
+📍 Coleta: ${(() => { try { const ec = typeof order.endereco_coleta === 'string' ? JSON.parse(order.endereco_coleta) : order.endereco_coleta; return [ec.rua && ec.num ? ec.rua + ', ' + ec.num : (ec.rua || ec.num || ''), ec.comp || '', ec.bairro, ec.cidade].filter(Boolean).join(', '); } catch(e) { return String(order.endereco_coleta || ''); } })()}
 
 🏠 Entrega: ${[order.endereco_entrega, order.complemento_entrega, order.bairro_destino].filter(Boolean).join(', ')}`;
         const groupId = process.env.TELEGRAM_GROUP_ID;
