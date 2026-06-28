@@ -3,7 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
 const axios = require('axios');
-const TelegramBot = require('node-telegram-bot-api');h
+const TelegramBot = require('node-telegram-bot-api');
 require('dotenv').config();
 
 const app = express();
