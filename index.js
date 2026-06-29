@@ -869,7 +869,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
               'Distancia: ' + order.distancia + ' km\n' +
               'Pagamento: ' + pagLabelGroup + '\n' +
               'Motoboy ganha: R$ ' + parseFloat(order.valor_motoboy).toFixed(2) + '\n' +
-              '\uD83D\uDCCD Coleta: ' + [order.endereco_coleta, order.complemento_coleta].filter(Boolean).join(', ') + '\n' +
+              '\uD83D\uDCCD Coleta: ' + (() => { try { const ec = typeof order.endereco_coleta === 'string' ? JSON.parse(order.endereco_coleta) : order.endereco_coleta; return [ec.rua && ec.num ? ec.rua + ', ' + ec.num : (ec.rua || ec.num || ''), ec.comp || '', ec.bairro, ec.cidade].filter(Boolean).join(', '); } catch(e) { return String(order.endereco_coleta || ''); } })() + '\n' +
               '\uD83C\uDFE0 Entrega: ' + [order.endereco_entrega, order.complemento_entrega, order.bairro_destino].filter(Boolean).join(', ');
             axios.post(botUrlGroup + '/api/send-group-message',
               { message: msgGroup },
