@@ -2151,11 +2151,11 @@ app.post('/produtos', async (req, res) => {
 
 app.put('/produtos/:id', async (req, res) => {
   try {
-    const { nome, descricao, preco, categoria, foto_url, ativo, ordem, variacoes } = req.body;
+    const { nome, descricao, preco, categoria, foto_url, ativo, ordem, variacoes, valido_promocao } = req.body;
     const varJsonUp = variacoes !== undefined ? (variacoes && variacoes.length ? JSON.stringify(variacoes) : null) : undefined;
     const r = varJsonUp !== undefined
-      ? await pool.query('UPDATE produtos SET nome=$1, descricao=$2, preco=$3, categoria=$4, foto_url=$5, ativo=$6, ordem=$7, variacoes=$8 WHERE id=$9 RETURNING *', [nome, descricao||null, preco||0, categoria||null, foto_url||null, ativo!==false, ordem||0, varJsonUp, req.params.id])
-      : await pool.query('UPDATE produtos SET nome=$1, descricao=$2, preco=$3, categoria=$4, foto_url=$5, ativo=$6, ordem=$7 WHERE id=$8 RETURNING *', [nome, descricao||null, preco||0, categoria||null, foto_url||null, ativo!==false, ordem||0, req.params.id]);
+      ? await pool.query('UPDATE produtos SET nome=$1, descricao=$2, preco=$3, categoria=$4, foto_url=$5, ativo=$6, ordem=$7, variacoes=$8, valido_promocao=$9 WHERE id=$10 RETURNING *', [nome, descricao||null, preco||0, categoria||null, foto_url||null, ativo!==false, ordem||0, varJsonUp, valido_promocao!==false, req.params.id])
+      : await pool.query('UPDATE produtos SET nome=$1, descricao=$2, preco=$3, categoria=$4, foto_url=$5, ativo=$6, ordem=$7, valido_promocao=$8 WHERE id=$9 RETURNING *', [nome, descricao||null, preco||0, categoria||null, foto_url||null, ativo!==false, ordem||0, valido_promocao!==false, req.params.id]);
     res.json(r.rows[0]);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
