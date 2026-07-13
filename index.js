@@ -916,7 +916,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
           const ord = fullOrderRes.rows[0];
           const isDinheiro = ord.tipo_pagamento === 'dinheiro';
           const jaEntregue = ord.status === 'entregue';
-          if (!isDinheiro && !jaEntregue && ord.loja_user && !['cardapio','cardapio_aceito'].includes(ord.plataforma)) {
+          if (!isDinheiro && !jaEntregue && ord.loja_user) {
             const valorTotal = parseFloat(ord.valor_total) || 0;
             if (valorTotal > 0) {
               await pool.query('UPDATE users SET credit = credit + $1 WHERE username=$2', [valorTotal, ord.loja_user]);
@@ -1463,7 +1463,7 @@ app.delete('/orders/:id', async (req, res) => {
       // pois o saldo da loja nunca foi descontado no pedido a dinheiro
       // Apenas pedidos PIX/maquina (nao-dinheiro) geram estorno se nao foram entregues
       const isDinheiro = order.tipo_pagamento === 'dinheiro';
-      if (!isDinheiro && order.status !== 'entregue' && order.status !== 'cancelado' && order.loja_user && !['cardapio','cardapio_aceito'].includes(order.plataforma)) {
+      if (!isDinheiro && order.status !== 'entregue' && order.status !== 'cancelado' && order.loja_user) {
         const valorTotal = parseFloat(order.valor_total) || 0;
         if (valorTotal > 0) {
           await pool.query("UPDATE users SET credit = credit + $1 WHERE username=$2", [valorTotal, order.loja_user]);
