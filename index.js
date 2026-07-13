@@ -233,7 +233,7 @@ try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARC
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS app_link TEXT DEFAULT ''"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS wpp_link TEXT DEFAULT ''"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS app_data TEXT DEFAULT ''"); } catch(e) {}
-  try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS perc_cartao_aprox DECIMAL DEFAULT 5.00"); } catch(e) {}
+  try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS perc_cartao_aprox DECIMAL DEFAULT 5.00"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS historico_limpeza_dias INTEGER DEFAULT 30"); } catch(e) {}
   // ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ TAXA EXTRA NOS PEDIDOS (armazenar taxas aplicadas) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS taxa_extra_chuva DECIMAL DEFAULT 0"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS taxa_extra_noturna DECIMAL DEFAULT 0"); } catch(e) {}
@@ -2859,7 +2859,7 @@ return res.status(500).json({ error: err.message });
 app.post('/motoboys/:id/localizacao', async (req, res) => { try { const mid = parseInt(req.params.id); const { lat, lng, order_id } = req.body; if (!lat || !lng) return res.status(400).json({ error: 'lat/lng obrigatorios' }); await pool.query('INSERT INTO motoboy_localizacao (motoboy_id, order_id, lat, lng, updated_at) VALUES ($1, $2, $3, $4, NOW()) ON CONFLICT (motoboy_id) DO UPDATE SET lat=$3, lng=$4, order_id=$2, updated_at=NOW()', [mid, order_id||null, lat, lng]); res.json({ ok: true }); } catch(e) { res.status(500).json({ error: e.message }); } });
 app.get('/motoboys/localizacoes-ativas', async (req, res) => { try { const r = await pool.query("SELECT ml.motoboy_id, ml.order_id, ml.lat, ml.lng, ml.updated_at, u.name AS nome, u.custom_id AS codigo FROM motoboy_localizacao ml JOIN users u ON u.id = ml.motoboy_id WHERE ml.updated_at > NOW() - INTERVAL '2 minutes'"); res.json(r.rows); } catch(e) { res.status(500).json({ error: e.message }); } });
 app.get('/rastrear/:order_id', async (req, res) => { try { const oid = parseInt(req.params.order_id); const r = await pool.query("SELECT ml.lat, ml.lng, ml.updated_at, u.name AS nome_motoboy, o.status, o.nome_cliente FROM motoboy_localizacao ml JOIN users u ON u.id = ml.motoboy_id JOIN orders o ON o.id = ml.order_id WHERE ml.order_id = $1", [oid]); if (r.rows.length === 0) return res.status(404).json({ error: 'Rastreio nao disponivel' }); res.json(r.rows[0]); } catch(e) { res.status(500).json({ error: e.message }); } });
-initDB().then(() => {})
+initDB().then(() => {}); async function cleanupOldOrders() { try { const s = await pool.query('SELECT historico_limpeza_dias FROM settings WHERE id=1'); const dias = parseInt(s.rows[0] && s.rows[0].historico_limpeza_dias) || 30; const r = await pool.query("DELETE FROM orders WHERE status IN ('entregue','cancelado') AND created_at < NOW() - ($1 || ' days')::interval RETURNING id", [dias]); if (r.rows.length > 0) { console.log('[JOB] Limpeza automatica: ' + r.rows.length + ' pedido(s) removido(s) (prazo: ' + dias + ' dias)'); } } catch (e) { console.error('[JOB] Erro na limpeza automatica de pedidos:', e.message); } } app.put('/settings/cleanup-days', async (req, res) => { try { const dias = parseInt(req.body.historico_limpeza_dias) || 30; await pool.query('UPDATE settings SET historico_limpeza_dias=$1 WHERE id=1', [dias]); res.json({ ok: true, historico_limpeza_dias: dias }); } catch(e) { res.status(500).json({ error: e.message }); } });
   
 // ============================================================
 // BOT iFOOD ENTREGA PROPRIA
@@ -2960,7 +2960,7 @@ app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
   console.log('[JOB] Verificador de pedidos pendentes iniciado (5min)');
   setInterval(checkAndLaunchOrders, 30 * 1000);
   setInterval(expirePagamentosRestaurante, 30 * 1000);
-  setInterval(checkLojaAutoOffline, 60 * 1000);
+  setInterval(checkLojaAutoOffline, 60 * 1000); setInterval(cleanupOldOrders, 60 * 60 * 1000); cleanupOldOrders();
   checkLojaAutoOffline();
   console.log('[JOB] Auto-offline de lojas iniciado (60s)');
   console.log('[JOB] Verificador de chegada iniciado (60s)');
