@@ -701,7 +701,7 @@ app.post('/orders', async (req, res) => {
     const cfgRes = await pool.query('SELECT * FROM settings WHERE id=1');
     const cfg = cfgRes.rows[0] || {};
     if (cfg.taxa_noturna_ativa && parseFloat(cfg.taxa_noturna) > 0) {
-      const nowH = new Date().toTimeString().slice(0,5);
+      const nowH = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString().slice(11,16);
       const ini = cfg.taxa_noturna_hora_inicio || '22:00';
       const fim = cfg.taxa_noturna_hora_fim || '06:00';
       let noturno = false;
