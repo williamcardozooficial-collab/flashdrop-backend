@@ -229,7 +229,7 @@ try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARC
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_noturna DECIMAL DEFAULT 0"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_noturna_ativa BOOLEAN DEFAULT false"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_noturna_hora_inicio VARCHAR(5) DEFAULT '22:00'"); } catch(e) {}
-  try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_noturna_hora_fim VARCHAR(5) DEFAULT '06:00'"); } catch(e) {}
+  try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_noturna_hora_fim VARCHAR(5) DEFAULT '06:00'"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_cancelamento DECIMAL DEFAULT 0"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS app_link TEXT DEFAULT ''"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS wpp_link TEXT DEFAULT ''"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS app_data TEXT DEFAULT ''"); } catch(e) {}
@@ -930,7 +930,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
             }
           }
         }
-      } catch(eEstorno) { console.error('[ESTORNO] Erro ao estornar cancelamento:', eEstorno.message); }
+      } catch(eEstorno) { console.error('[ESTORNO] Erro ao estornar cancelamento:', eEstorno.message); } if (fields.status === 'cancelado' && fields.cancelado_por === 'loja') { try { const fullOrderRes2 = await pool.query('SELECT * FROM orders WHERE id=$1', [req.params.id]); if (fullOrderRes2.rows.length > 0) { const ord2 = fullOrderRes2.rows[0]; if (ord2.loja_user) { const setRes = await pool.query('SELECT taxa_cancelamento FROM settings WHERE id=1'); const taxaCanc = parseFloat(setRes.rows[0] && setRes.rows[0].taxa_cancelamento) || 0; if (taxaCanc > 0) { await pool.query('UPDATE users SET credit = credit - $1 WHERE username=$2', [taxaCanc, ord2.loja_user]); const lojaEvRes2 = await pool.query('SELECT id FROM users WHERE username=$1', [ord2.loja_user]); if (lojaEvRes2.rows.length > 0) { await pool.query('INSERT INTO loja_wallet_events (loja_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)', [lojaEvRes2.rows[0].id, 'taxa_cancelamento', taxaCanc, 'Taxa de cancelamento - pedido #' + req.params.id + ' (cobrada pelo uso de dados e recursos do sistema neste cancelamento)', req.params.id]); } } } } } catch(eTaxaCanc) { console.error('[TAXA_CANCELAMENTO] Erro:', eTaxaCanc.message); } }
     }
 
     if (fields.status === 'entregue' && order.motoboy_id) {
@@ -1503,7 +1503,7 @@ app.put('/settings', async (req, res) => {
           taxa_chuva, taxa_chuva_ativa, taxa_chuva_desconto_de,
           taxa_noturna, taxa_noturna_ativa, taxa_noturna_hora_inicio, taxa_noturna_hora_fim,
           perc_cartao_aprox,
-          app_link, wpp_link, app_data } = req.body;
+          app_link, wpp_link, app_data, taxa_cancelamento } = req.body;
   const delayVal = (launch_delay_minutes != null) ? parseInt(launch_delay_minutes) : 60;
   const creditLimitVal = (credit_limit != null) ? parseFloat(credit_limit) : 20.00;
   const r = await pool.query(
@@ -1514,14 +1514,14 @@ app.put('/settings', async (req, res) => {
       taxa_noturna=$11, taxa_noturna_ativa=$12,
       taxa_noturna_hora_inicio=$13, taxa_noturna_hora_fim=$14,
       app_link=$15, wpp_link=$16, app_data=$17,
-      perc_cartao_aprox=$18
+      perc_cartao_aprox=$18, taxa_cancelamento=$19
       WHERE id=1 RETURNING *`,
     [min_fee, price_per_km, arrancada, commission, max_per_motoboy, delayVal, creditLimitVal,
      taxa_chuva || 0, taxa_chuva_ativa || false, taxa_chuva_desconto_de || 'admin',
      taxa_noturna || 0, taxa_noturna_ativa || false,
      taxa_noturna_hora_inicio || '22:00', taxa_noturna_hora_fim || '06:00',
      app_link || '', wpp_link || '', app_data || '',
-     parseFloat(perc_cartao_aprox) || 5.00]
+     parseFloat(perc_cartao_aprox) || 5.00, parseFloat(taxa_cancelamento) || 0]
   );
   res.json(r.rows[0]);
 });
