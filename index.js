@@ -1579,7 +1579,7 @@ app.get('/platform/wallet', async (req, res) => {
 app.get('/platform/events', async (req, res) => {
   try {
     const r = await pool.query(
-      `SELECT * FROM platform_events WHERE created_at >= NOW() - INTERVAL '48 hours' ORDER BY created_at DESC LIMIT 200`
+      `SELECT * FROM (SELECT tipo, valor, descricao, created_at, 'plataforma' as origem, NULL::varchar as nome FROM platform_events WHERE created_at >= NOW() - INTERVAL '48 hours' UNION ALL SELECT lwe.tipo, lwe.valor, lwe.descricao, lwe.created_at, 'loja' as origem, u.name as nome FROM loja_wallet_events lwe LEFT JOIN users u ON u.id = lwe.loja_id WHERE lwe.created_at >= NOW() - INTERVAL '48 hours' UNION ALL SELECT mwe.tipo, mwe.valor, mwe.descricao, mwe.created_at, 'motoboy' as origem, u2.name as nome FROM motoboy_wallet_events mwe LEFT JOIN users u2 ON u2.id = mwe.motoboy_id WHERE mwe.created_at >= NOW() - INTERVAL '48 hours') combined ORDER BY created_at DESC LIMIT 300`
     );
     res.json(r.rows);
   } catch(e) { res.status(500).json({ error: e.message }); }
