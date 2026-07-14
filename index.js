@@ -347,7 +347,7 @@ try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARC
   } catch(e) {}
   try { await pool.query("ALTER TABLE produtos ADD COLUMN IF NOT EXISTS variacoes JSONB DEFAULT NULL"); } catch(e) {}try { await pool.query("ALTER TABLE produtos ADD COLUMN IF NOT EXISTS valido_promocao BOOLEAN DEFAULT true"); } catch(e) {}
 try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS loja_online BOOLEAN DEFAULT false"); } catch(e) {}
-try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS loja_horario_offline VARCHAR(5) DEFAULT NULL"); } catch(e) {}
+try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS loja_horario_offline VARCHAR(5) DEFAULT NULL"); } catch(e) {} try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS loja_fechamento_ultimo_dia VARCHAR(10) DEFAULT NULL"); } catch(e) {}
 try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS loja_formas_pagamento TEXT DEFAULT NULL"); } catch(e) {}
 try {
   await pool.query(`CREATE TABLE IF NOT EXISTS loja_wallet_events (
@@ -2467,16 +2467,16 @@ async function checkLojaAutoOffline() {
     const now = new Date();
     const brOffset = -3 * 60; // minutos
     const brTime = new Date(now.getTime() + brOffset * 60 * 1000);
-    const hhmm = brTime.toISOString().slice(11, 16); // HH:MM em horario de Brasilia
+    const hhmm = brTime.toISOString().slice(11, 16); const hoje = brTime.toISOString().slice(0,10); // HH:MM e data em horario de Brasilia
     const res = await pool.query(
-      "SELECT id, loja_horario_offline FROM users WHERE role='loja' AND loja_online=true AND loja_horario_offline IS NOT NULL"
+      "SELECT id, loja_horario_offline, loja_fechamento_ultimo_dia FROM users WHERE role='loja' AND loja_online=true AND loja_horario_offline IS NOT NULL"
     );
     for (const row of res.rows) {
       const agendado = row.loja_horario_offline;
-      if (agendado && agendado <= hhmm) {
+      if (agendado && agendado <= hhmm && row.loja_fechamento_ultimo_dia !== hoje) {
         await pool.query(
-          "UPDATE users SET loja_online=false, loja_horario_offline=NULL WHERE id=$1",
-          [row.id]
+          "UPDATE users SET loja_online=false, loja_fechamento_ultimo_dia=$2 WHERE id=$1",
+          [row.id, hoje]
         );
         console.log('[JOB] Loja id=' + row.id + ' fechada. Agendado=' + agendado + ' HoraBrasilia=' + hhmm);
       }
