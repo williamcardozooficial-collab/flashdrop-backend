@@ -2274,13 +2274,13 @@ app.post('/pagamento-restaurante/:id/responder', async (req, res) => {
     if (pag.loja_user !== loja_user) return res.status(403).json({ error: 'Nao autorizado' });
     if (pag.status !== 'pendente') return res.status(400).json({ error: 'Nao esta pendente' });
     if (Date.now() > pag.expires_at) return res.status(400).json({ error: 'Expirado' });
-    await pool.query("UPDATE pagamento_restaurante SET status=$1 WHERE id=$2", [decisao, id]);
+    await pool.query("UPDATE pagamento_restaurante SET status=$1 WHERE id=$2", [decisao, id]); if (decisao === 'recusado') { try { const lojaIdRes2 = await pool.query('SELECT id FROM users WHERE username=$1', [pag.loja_user]); if (lojaIdRes2.rows.length > 0) { await pool.query('INSERT INTO loja_wallet_events (loja_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)', [lojaIdRes2.rows[0].id, 'pagamento_motoboy_recusado', 0, 'Motoboy ' + pag.motoboy_name + ' tentou pagar R$ ' + parseFloat(pag.valor).toFixed(2) + ' em dinheiro (pedido #' + pag.order_id + ') - RECUSADO pela loja', pag.order_id]); } } catch(eWevLoja2) {} }
     if (decisao === 'aceito') {
       const valor = parseFloat(pag.valor);
       await pool.query('UPDATE users SET balance = COALESCE(balance,0) + $1 WHERE id=$2', [valor, pag.motoboy_id]);
                 // Evento: motoboy pagou a loja (credito no saldo - valor repassado)
                 try { await pool.query('INSERT INTO motoboy_wallet_events (motoboy_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)', [pag.motoboy_id, 'pagamento_loja', valor, 'Pagou a loja pedido #' + pag.order_id + ' (credito no saldo)', pag.order_id]); } catch(eWev2) {}
-      await pool.query('UPDATE users SET credit = COALESCE(credit,0) - $1 WHERE username=$2', [valor, pag.loja_user]);
+      await pool.query('UPDATE users SET credit = COALESCE(credit,0) - $1 WHERE username=$2', [valor, pag.loja_user]); try { const lojaIdRes = await pool.query('SELECT id FROM users WHERE username=$1', [pag.loja_user]); if (lojaIdRes.rows.length > 0) { await pool.query('INSERT INTO loja_wallet_events (loja_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)', [lojaIdRes.rows[0].id, 'pagamento_motoboy', valor, 'Motoboy ' + pag.motoboy_name + ' pagou R$ ' + valor.toFixed(2) + ' em dinheiro (pedido #' + pag.order_id + ') - ACEITO', pag.order_id]); } } catch(eWevLoja) {}
       const motInfo = await pool.query('SELECT telegram_id FROM users WHERE id=$1', [pag.motoboy_id]);
       if (motInfo.rows.length > 0 && motInfo.rows[0].telegram_id && bot) {
         const msg = String.fromCodePoint(9989) + ' Pagamento ACEITO! R$ ' + valor.toFixed(2) + ' creditado no seu saldo.';
