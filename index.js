@@ -233,7 +233,7 @@ try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARC
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS app_link TEXT DEFAULT ''"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS wpp_link TEXT DEFAULT ''"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS app_data TEXT DEFAULT ''"); } catch(e) {}
-  try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS perc_cartao_aprox DECIMAL DEFAULT 5.00"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS historico_limpeza_dias INTEGER DEFAULT 30"); } catch(e) {}
+  try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS perc_cartao_aprox DECIMAL DEFAULT 5.00"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS historico_limpeza_dias INTEGER DEFAULT 30"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS formas_pagamento_novo_pedido TEXT DEFAULT ''"); } catch(e) {}
   // ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ TAXA EXTRA NOS PEDIDOS (armazenar taxas aplicadas) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS taxa_extra_chuva DECIMAL DEFAULT 0"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS taxa_extra_noturna DECIMAL DEFAULT 0"); } catch(e) {}
@@ -1503,7 +1503,7 @@ app.put('/settings', async (req, res) => {
           taxa_chuva, taxa_chuva_ativa, taxa_chuva_desconto_de,
           taxa_noturna, taxa_noturna_ativa, taxa_noturna_hora_inicio, taxa_noturna_hora_fim,
           perc_cartao_aprox,
-          app_link, wpp_link, app_data, taxa_cancelamento } = req.body;
+          app_link, wpp_link, app_data, taxa_cancelamento, formas_pagamento_novo_pedido } = req.body;
   const delayVal = (launch_delay_minutes != null) ? parseInt(launch_delay_minutes) : 60;
   const creditLimitVal = (credit_limit != null) ? parseFloat(credit_limit) : 20.00;
   const r = await pool.query(
@@ -1514,14 +1514,14 @@ app.put('/settings', async (req, res) => {
       taxa_noturna=$11, taxa_noturna_ativa=$12,
       taxa_noturna_hora_inicio=$13, taxa_noturna_hora_fim=$14,
       app_link=$15, wpp_link=$16, app_data=$17,
-      perc_cartao_aprox=$18, taxa_cancelamento=$19
+      perc_cartao_aprox=$18, taxa_cancelamento=$19, formas_pagamento_novo_pedido=$20
       WHERE id=1 RETURNING *`,
     [min_fee, price_per_km, arrancada, commission, max_per_motoboy, delayVal, creditLimitVal,
      taxa_chuva || 0, taxa_chuva_ativa || false, taxa_chuva_desconto_de || 'admin',
      taxa_noturna || 0, taxa_noturna_ativa || false,
      taxa_noturna_hora_inicio || '22:00', taxa_noturna_hora_fim || '06:00',
      app_link || '', wpp_link || '', app_data || '',
-     parseFloat(perc_cartao_aprox) || 5.00, parseFloat(taxa_cancelamento) || 0]
+     parseFloat(perc_cartao_aprox) || 5.00, parseFloat(taxa_cancelamento) || 0, formas_pagamento_novo_pedido || '']
   );
   res.json(r.rows[0]);
 });
