@@ -891,7 +891,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
             const msgPrep = '📋 Pedido confirmado! #' + order.id + '\n\n' +
               'Seu pedido foi recebido com sucesso e já está em preparação. 🧑‍🍳🍔\n\n' +
               '📍 Endereço de entrega: ' + endereco + '\n' +
-              '💰 Forma de pagamento: ' + order.tipo_pagamento + '\n\n' +
+              '💰 Forma de pagamento: ' + order.tipo_pagamento + '\n' + '⏱️ Tempo estimado de preparo: 40 a 90 minutos' + '\n\n' +
               '⏳ Agora é só aguardar, em breve seu pedido ficará pronto para envio! 🎉';
             axios.post(lojaBotUrl + '/api/send-message',
               { lojaId: String(order.loja_user), phone: clientePhone, message: msgPrep },
@@ -1272,7 +1272,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
       try {
         const lojaBotUrl = 'https://flashdrop-loja-bot-production.up.railway.app';
         const lojaBotSecret = 'flashdrop-loja-bot-secret';
-        const mbPhone = order.telefone_motoboy || order.motoboy_phone;
+        const mbPhoneRes = await pool.query('SELECT phone FROM users WHERE id=$1', [order.motoboy_id]); const mbPhone = mbPhoneRes.rows.length > 0 ? mbPhoneRes.rows[0].phone : null;
         if (mbPhone) {
             const endereco = [order.endereco_entrega, order.complemento_entrega, order.bairro_destino].filter(Boolean).join(', ');
             const msgColetadoMb = '\uD83D\uDCCB Pedido #' + order.id + '\n\n' +
