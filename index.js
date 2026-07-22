@@ -811,7 +811,7 @@ app.put('/orders/:id', async (req, res) => {
     const sets = Object.keys(fields).map((k,i) => `${k}=$${i+2}`).join(',');
     const vals = Object.values(fields);
 
-    const prevOrderRes = await pool.query('SELECT motoboy_id, status, delivery_code FROM orders WHERE id=$1', [req.params.id]);
+    const prevOrderRes = await pool.query('SELECT motoboy_id, status, delivery_code, valor_total, loja_user FROM orders WHERE id=$1', [req.params.id]);
     const prevMotoboyId = prevOrderRes.rows.length > 0 ? prevOrderRes.rows[0].motoboy_id : null;
 
     // Validacao do codigo de entrega ANTES do UPDATE
@@ -823,7 +823,7 @@ app.put('/orders/:id', async (req, res) => {
     }
 
     const r = await pool.query(`UPDATE orders SET ${sets} WHERE id=$1 RETURNING *`, [req.params.id, ...vals]);
-    const order = r.rows[0];
+    const order = r.rows[0]; try { if (fields.valor_total !== undefined && prevOrderRes.rows.length > 0) { const oldValorTotal = parseFloat(prevOrderRes.rows[0].valor_total) || 0; const newValorTotal = parseFloat(fields.valor_total) || 0; const diffValor = newValorTotal - oldValorTotal; const lojaUserAjuste = order.loja_user || prevOrderRes.rows[0].loja_user; if (diffValor > 0 && lojaUserAjuste) { await pool.query('UPDATE users SET credit = credit - $1 WHERE username=$2', [diffValor, lojaUserAjuste]); const lojaEvResAjuste = await pool.query('SELECT id FROM users WHERE username=$1', [lojaUserAjuste]); if (lojaEvResAjuste.rows.length > 0) { await pool.query('INSERT INTO loja_wallet_events (loja_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)', [lojaEvResAjuste.rows[0].id, 'ajuste_pedido', diffValor, 'Ajuste de pedido #' + req.params.id + ' (valor de entrega alterado de R$ ' + oldValorTotal.toFixed(2) + ' para R$ ' + newValorTotal.toFixed(2) + ')', req.params.id]); } } } } catch (eAjustePedido) { console.error('[AJUSTE_PEDIDO] Erro:', eAjustePedido.message); }
     // Notificar motoboys quando loja coloca pedido em preparo
     if (fields.status === 'em_preparo' && bot) {
       try {
