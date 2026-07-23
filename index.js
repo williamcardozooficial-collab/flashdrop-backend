@@ -2956,8 +2956,8 @@ app.post('/ifood/confirmar-entrega', async (req, res) => {
 
 app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
   setInterval(checkLateArrivals, 60 * 1000);
-  setInterval(checkPendingOrdersAlert, 5 * 60 * 1000);
-  console.log('[JOB] Verificador de pedidos pendentes iniciado (5min)');
+  
+  
   setInterval(checkAndLaunchOrders, 30 * 1000);
   setInterval(expirePagamentosRestaurante, 30 * 1000);
   setInterval(checkLojaAutoOffline, 60 * 1000); setInterval(cleanupOldOrders, 60 * 60 * 1000); cleanupOldOrders();
