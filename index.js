@@ -229,7 +229,7 @@ try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARC
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_noturna DECIMAL DEFAULT 0"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_noturna_ativa BOOLEAN DEFAULT false"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_noturna_hora_inicio VARCHAR(5) DEFAULT '22:00'"); } catch(e) {}
-  try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_noturna_hora_fim VARCHAR(5) DEFAULT '06:00'"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_cancelamento DECIMAL DEFAULT 0"); } catch(e) {}
+  try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_noturna_hora_fim VARCHAR(5) DEFAULT '06:00'"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_noturna_horarios TEXT DEFAULT NULL"); } catch(e) {} try { const _tnh = await pool.query("SELECT taxa_noturna_horarios, taxa_noturna_hora_inicio, taxa_noturna_hora_fim FROM settings WHERE id=1"); if (_tnh.rows.length && !_tnh.rows[0].taxa_noturna_horarios) { const _ini = _tnh.rows[0].taxa_noturna_hora_inicio || '22:00'; const _fim = _tnh.rows[0].taxa_noturna_hora_fim || '06:00'; const _sched = {}; for (let _d=0; _d<7; _d++) { _sched[_d] = { inicio: _ini, fim: _fim }; } await pool.query("UPDATE settings SET taxa_noturna_horarios=$1 WHERE id=1", [JSON.stringify(_sched)]); } } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS taxa_cancelamento DECIMAL DEFAULT 0"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS app_link TEXT DEFAULT ''"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS wpp_link TEXT DEFAULT ''"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS app_data TEXT DEFAULT ''"); } catch(e) {}
@@ -701,12 +701,29 @@ app.post('/orders', async (req, res) => {
     const cfgRes = await pool.query('SELECT * FROM settings WHERE id=1');
     const cfg = cfgRes.rows[0] || {};
     if (cfg.taxa_noturna_ativa && parseFloat(cfg.taxa_noturna) > 0) {
-      const nowH = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString().slice(11,16);
-      const ini = cfg.taxa_noturna_hora_inicio || '22:00';
-      const fim = cfg.taxa_noturna_hora_fim || '06:00';
+      const brNow = new Date(Date.now() - 3 * 60 * 60 * 1000);
+      const nowH = brNow.toISOString().slice(11,16);
+      const dowHoje = brNow.getUTCDay();
+      const dowOntem = (dowHoje + 6) % 7;
+      let schedule = null;
+      try { schedule = cfg.taxa_noturna_horarios ? JSON.parse(cfg.taxa_noturna_horarios) : null; } catch(eSched) { schedule = null; }
       let noturno = false;
-      if (ini > fim) { noturno = nowH >= ini || nowH < fim; }
-      else { noturno = nowH >= ini && nowH < fim; }
+      if (schedule) {
+        const hoje = schedule[dowHoje];
+        const ontem = schedule[dowOntem];
+        if (hoje && hoje.inicio && hoje.fim) {
+          if (hoje.inicio <= hoje.fim) { if (nowH >= hoje.inicio && nowH < hoje.fim) noturno = true; }
+          else { if (nowH >= hoje.inicio) noturno = true; }
+        }
+        if (!noturno && ontem && ontem.inicio && ontem.fim && ontem.inicio > ontem.fim) {
+          if (nowH < ontem.fim) noturno = true;
+        }
+      } else {
+        const ini = cfg.taxa_noturna_hora_inicio || '22:00';
+        const fim = cfg.taxa_noturna_hora_fim || '06:00';
+        if (ini > fim) { noturno = nowH >= ini || nowH < fim; }
+        else { noturno = nowH >= ini && nowH < fim; }
+      }
       if (noturno) { taxa_extra_noturna = parseFloat(cfg.taxa_noturna); valorMotoboy += taxa_extra_noturna; }
     }
     if (cfg.taxa_chuva_ativa && parseFloat(cfg.taxa_chuva) > 0) {
@@ -1501,11 +1518,11 @@ app.get('/settings', async (req, res) => {
 app.put('/settings', async (req, res) => {
   const { min_fee, price_per_km, arrancada, commission, max_per_motoboy, launch_delay_minutes, credit_limit,
           taxa_chuva, taxa_chuva_ativa, taxa_chuva_desconto_de,
-          taxa_noturna, taxa_noturna_ativa, taxa_noturna_hora_inicio, taxa_noturna_hora_fim,
+          taxa_noturna, taxa_noturna_ativa, taxa_noturna_hora_inicio, taxa_noturna_hora_fim, taxa_noturna_horarios,
           perc_cartao_aprox,
           app_link, wpp_link, app_data, taxa_cancelamento, formas_pagamento_novo_pedido } = req.body;
-  const delayVal = (launch_delay_minutes != null) ? parseInt(launch_delay_minutes) : 60;
-  const creditLimitVal = (credit_limit != null) ? parseFloat(credit_limit) : 20.00;
+  const delayVal = (launch_delay_minutes !== null) ? parseInt(launch_delay_minutes) : 60;
+  const creditLimitVal = (credit_limit !== null) ? parseFloat(credit_limit) : 20.00;
   const r = await pool.query(
     `UPDATE settings SET
       min_fee=$1, price_per_km=$2, arrancada=$3, commission=$4, max_per_motoboy=$5,
@@ -1514,14 +1531,16 @@ app.put('/settings', async (req, res) => {
       taxa_noturna=$11, taxa_noturna_ativa=$12,
       taxa_noturna_hora_inicio=$13, taxa_noturna_hora_fim=$14,
       app_link=$15, wpp_link=$16, app_data=$17,
-      perc_cartao_aprox=$18, taxa_cancelamento=$19, formas_pagamento_novo_pedido=$20
+      perc_cartao_aprox=$18, taxa_cancelamento=$19, formas_pagamento_novo_pedido=$20,
+      taxa_noturna_horarios=$21
       WHERE id=1 RETURNING *`,
     [min_fee, price_per_km, arrancada, commission, max_per_motoboy, delayVal, creditLimitVal,
      taxa_chuva || 0, taxa_chuva_ativa || false, taxa_chuva_desconto_de || 'admin',
      taxa_noturna || 0, taxa_noturna_ativa || false,
      taxa_noturna_hora_inicio || '22:00', taxa_noturna_hora_fim || '06:00',
      app_link || '', wpp_link || '', app_data || '',
-     parseFloat(perc_cartao_aprox) || 5.00, parseFloat(taxa_cancelamento) || 0, formas_pagamento_novo_pedido || '']
+     parseFloat(perc_cartao_aprox) || 5.00, parseFloat(taxa_cancelamento) || 0, formas_pagamento_novo_pedido || '',
+     taxa_noturna_horarios ? (typeof taxa_noturna_horarios === 'string' ? taxa_noturna_horarios : JSON.stringify(taxa_noturna_horarios)) : null]
   );
   res.json(r.rows[0]);
 });
