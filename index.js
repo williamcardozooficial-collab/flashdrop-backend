@@ -724,14 +724,14 @@ app.post('/orders', async (req, res) => {
         if (ini > fim) { noturno = nowH >= ini || nowH < fim; }
         else { noturno = nowH >= ini && nowH < fim; }
       }
-      if (noturno) { taxa_extra_noturna = parseFloat(cfg.taxa_noturna); valorMotoboy += taxa_extra_noturna; }
+      if (noturno) { taxa_extra_noturna = parseFloat(cfg.taxa_noturna); }
     }
     if (cfg.taxa_chuva_ativa && parseFloat(cfg.taxa_chuva) > 0) {
       const tc = parseFloat(cfg.taxa_chuva);
       taxa_extra_chuva = tc;
       chuva_desconto_de = cfg.taxa_chuva_desconto_de || 'admin';
-      valorMotoboy += tc;
-      if (chuva_desconto_de === 'loja') { valorTotal += tc; }
+
+
     }
   } catch(eTaxa) { console.error('[TAXA] Erro ao calcular taxas:', eTaxa.message); }
 
