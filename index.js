@@ -1960,7 +1960,7 @@ app.post('/orders/:id/launch', async (req, res) => {
             'Pagamento: ' + pagLabelPend + '\n' +
             'Motoboy ganha: R$ ' + parseFloat(pedido.valor_motoboy).toFixed(2);
           axios.post(botUrlGroupL + '/api/send-group-message',
-            { message: msgGroupPend },
+            { message: msgGroupPend, mentionAll: true },
             { headers: { 'x-bot-secret': botSecretGroupL } }
           ).catch(e => console.error('[BOT] Erro msg grupo launch:', e.message));
         }
@@ -2355,7 +2355,7 @@ async function checkAndLaunchOrders() {
                 'Pagamento: ' + pagLabelAuto + '\n' +
                 'Motoboy ganha: R$ ' + parseFloat(pedido.valor_motoboy).toFixed(2);
               axios.post(botUrlGroupA + '/api/send-group-message',
-                { message: msgGroupAuto },
+                { message: msgGroupAuto, mentionAll: true },
                 { headers: { 'x-bot-secret': botSecretGroupA } }
               ).catch(e => console.error('[BOT] Erro msg grupo auto-launch:', e.message));
             }
