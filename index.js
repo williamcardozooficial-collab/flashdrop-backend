@@ -404,7 +404,7 @@ try {
 try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS slug VARCHAR(100) UNIQUE"); } catch(e) {}
   try { await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS loja_bot_phone TEXT'); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS mp_access_token TEXT"); } catch(e) {}
-  try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS mp_auto BOOLEAN DEFAULT false"); } catch(e) {}
+  try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS mp_auto BOOLEAN DEFAULT false"); } catch(e) {}  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancelado_por VARCHAR(20)"); } catch(e) {}
 try {
   const _sls = await pool.query("SELECT id, name FROM users WHERE role='loja' AND (slug IS NULL OR slug='')");
   for (const _l of _sls.rows) {
