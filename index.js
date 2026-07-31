@@ -1787,7 +1787,7 @@ app.post('/loja-promocoes/calcular-desconto', async (req, res) => {
         if (!promo.formas_pagamento.includes(forma_pagamento)) continue;
       }
       if (parseFloat(subtotal) < parseFloat(promo.valor_minimo)) continue;
-      let desconto = parseFloat(valor_frete) || 0;
+      let desconto = (promo.tipo === 'desconto_produto') ? Math.min(parseFloat(promo.desconto_maximo) || 0, parseFloat(subtotal) || 0) : (parseFloat(valor_frete) || 0);
       if (promo.desconto_maximo && parseFloat(promo.desconto_maximo) > 0) {
         desconto = Math.min(desconto, parseFloat(promo.desconto_maximo));
       }
