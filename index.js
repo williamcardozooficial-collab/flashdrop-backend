@@ -1252,12 +1252,12 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
       const botUrlColetado = process.env.BOT_URL;
       const botSecretColetado = process.env.BOT_SECRET;
       if (botUrlColetado && botSecretColetado && order.telefone_cliente) {
-        const delivCode = order.delivery_code || '----'; let lojaPhoneColetado = null; try { const lRes = await pool.query('SELECT phone FROM users WHERE username=$1', [order.loja_user]); if (lRes.rows.length > 0) lojaPhoneColetado = lRes.rows[0].phone; } catch(eLpC) {} const lojaPhoneLineColetado = lojaPhoneColetado ? ('\\n\\n📞 Qualquer dúvida, entre em contato com a loja: ' + lojaPhoneColetado) : '';
+        const delivCode = order.delivery_code || '----'; let lojaPhoneColetado = null; try { const lRes = await pool.query('SELECT phone FROM users WHERE username=$1', [order.loja_user]); if (lRes.rows.length > 0) lojaPhoneColetado = lRes.rows[0].phone; } catch(eLpC) {} const lojaPhoneLineColetado = lojaPhoneColetado ? ('\n\n📞 Qualquer dúvida, entre em contato com a loja: ' + lojaPhoneColetado) : '';
         const msgColetado = '\uD83D\uDCE6 Pedido coletado!\n\n' +
                       'Quando o motoboy estiver pr\u00f3ximo ao seu endere\u00e7o, voc\u00ea receber\u00e1 uma nova notifica\u00e7\u00e3o, que ele chegou, *Fique Atento* \uD83D\uDCF2\n\n' +
                       'Para receber o pedido, ser\u00e1 necess\u00e1rio informar o c\u00f3digo de entrega:\n\n' +
                       '\uD83D\uDD10 C\u00f3digo: *' + delivCode + '*\n\n' +
-                      '\u26A0\uFE0F Guarde este c\u00f3digo em seguran\u00e7a e informe-o ao motoboy no momento da entrega. Sem o c\u00f3digo, a entrega n\u00e3o poder\u00e1 ser finalizada.' + lojaPhoneLineColetado + '\\n\\n🤖 _Esta é uma mensagem automática, não é necessário responder._';
+                      '\u26A0\uFE0F Guarde este c\u00f3digo em seguran\u00e7a e informe-o ao motoboy no momento da entrega. Sem o c\u00f3digo, a entrega n\u00e3o poder\u00e1 ser finalizada.' + lojaPhoneLineColetado + '\n\n🤖 _Esta é uma mensagem automática, não é necessário responder._';
         axios.post(botUrlColetado + '/api/send-message',
           { phone: order.telefone_cliente, message: msgColetado },
           { headers: { 'x-bot-secret': botSecretColetado } }
@@ -1308,10 +1308,10 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
     try {
       const botUrlNoCliente = process.env.BOT_URL;
       const botSecretNoCliente = process.env.BOT_SECRET;
-      if (botUrlNoCliente && botSecretNoCliente && order.telefone_cliente) { let lojaPhoneNoCliente = null; try { const lResNc = await pool.query('SELECT phone FROM users WHERE username=$1', [order.loja_user]); if (lResNc.rows.length > 0) lojaPhoneNoCliente = lResNc.rows[0].phone; } catch(eLpNc) {} const lojaPhoneLineNoCliente = lojaPhoneNoCliente ? ('\\n\\n📞 Qualquer dúvida, entre em contato com a loja: ' + lojaPhoneNoCliente) : '';
+      if (botUrlNoCliente && botSecretNoCliente && order.telefone_cliente) { let lojaPhoneNoCliente = null; try { const lResNc = await pool.query('SELECT phone FROM users WHERE username=$1', [order.loja_user]); if (lResNc.rows.length > 0) lojaPhoneNoCliente = lResNc.rows[0].phone; } catch(eLpNc) {} const lojaPhoneLineNoCliente = lojaPhoneNoCliente ? ('\n\n📞 Qualquer dúvida, entre em contato com a loja: ' + lojaPhoneNoCliente) : '';
         const msgNoCliente = '\uD83D\uDEF5 O motoboy chegou!\n' +
           'Pedido #' + order.id + '\n' +
-          'Seu entregador est\u00e1 na porta. Por favor, v\u00e1 ao encontro dele para receber seu pedido. \uD83D\uDCE6\u2764\uFE0F' + lojaPhoneLineNoCliente + '\\n\\n🤖 _Esta é uma mensagem automática, não é necessário responder._';
+          'Seu entregador est\u00e1 na porta. Por favor, v\u00e1 ao encontro dele para receber seu pedido. \uD83D\uDCE6\u2764\uFE0F' + lojaPhoneLineNoCliente + '\n\n🤖 _Esta é uma mensagem automática, não é necessário responder._';
         axios.post(botUrlNoCliente + '/api/send-message',
           { phone: order.telefone_cliente, message: msgNoCliente },
           { headers: { 'x-bot-secret': botSecretNoCliente } }
