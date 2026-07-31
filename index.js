@@ -851,7 +851,7 @@ app.put('/orders/:id', async (req, res) => {
           if (lojaRes.rows.length > 0) lojaNome = lojaRes.rows[0].name;
         }
         lojaNome = lojaNome || order.loja_user;
-        const pagLabel = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX'}[order.tipo_pagamento] || order.tipo_pagamento || '-');
+        const pagLabel = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX',pix_direto:'PIX'}[order.tipo_pagamento] || order.tipo_pagamento || '-');
         const msgPedido = `🔥 Pedido em Preparo!
 
 Pedido #${order.id} - ${lojaNome}
@@ -880,7 +880,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
           const botSecretGroup = process.env.BOT_SECRET;
           if (botUrlGroup && botSecretGroup) {
             let lojaNomeGroup = order.loja_name || order.loja_user;
-            const pagLabelGroup = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX'}[order.tipo_pagamento] || order.tipo_pagamento || '-');
+            const pagLabelGroup = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX',pix_direto:'PIX'}[order.tipo_pagamento] || order.tipo_pagamento || '-');
             const msgGroup = '\uD83D\uDD25 Pedido em Preparo!\n' +
               'Pedido #' + order.id + ' - ' + lojaNomeGroup + '\n' +
               'Distancia: ' + order.distancia + ' km\n' +
@@ -1940,7 +1940,7 @@ app.post('/orders/:id/launch', async (req, res) => {
         if (lr.rows.length > 0) lojaNome = lr.rows[0].name;
       }
       lojaNome = lojaNome || pedido.loja_user;
-      const pagLabel = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX'}[pedido.tipo_pagamento] || pedido.tipo_pagamento || '-');
+      const pagLabel = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX',pix_direto:'PIX'}[pedido.tipo_pagamento] || pedido.tipo_pagamento || '-');
       const msgLancado = `Pedido #${pedido.id} DISPONIVEL AGORA!\n\nLoja: ${lojaNome}\nPagamento: ${pagLabel}\nMotoboy ganha: R$ ${parseFloat(pedido.valor_motoboy).toFixed(2)}\nDistancia: ${pedido.distancia} km\n\nPedido pronto! Aceite agora.`;
       const groupId = process.env.TELEGRAM_GROUP_ID;
       if (groupId) bot.sendMessage(groupId, msgLancado).catch(() => {});
@@ -1953,7 +1953,7 @@ app.post('/orders/:id/launch', async (req, res) => {
         const botSecretGroupL = process.env.BOT_SECRET;
         if (botUrlGroupL && botSecretGroupL) {
           let lojaNomePend = pedido.loja_name || pedido.loja_user;
-          const pagLabelPend = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX'}[pedido.tipo_pagamento] || pedido.tipo_pagamento || '-');
+          const pagLabelPend = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX',pix_direto:'PIX'}[pedido.tipo_pagamento] || pedido.tipo_pagamento || '-');
           const msgGroupPend = '\uD83D\uDEB4 Pedido Disponivel!\n' +
             'Pedido #' + pedido.id + ' - ' + lojaNomePend + '\n' +
             'Distancia: ' + pedido.distancia + ' km\n' +
@@ -2334,7 +2334,7 @@ async function checkAndLaunchOrders() {
           if (lr.rows.length > 0) lojaNome = lr.rows[0].name;
         }
         lojaNome = lojaNome || pedido.loja_user;
-        const pagLabel = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX'}[pedido.tipo_pagamento] || pedido.tipo_pagamento || '-');
+        const pagLabel = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX',pix_direto:'PIX'}[pedido.tipo_pagamento] || pedido.tipo_pagamento || '-');
         const msgAuto = `Pedido #${pedido.id} DISPONIVEL - Lancamento Automatico!\n\nLoja: ${lojaNome}\nPagamento: ${pagLabel}\nMotoboy ganha: R$ ${parseFloat(pedido.valor_motoboy).toFixed(2)}\nDistancia: ${pedido.distancia} km\n\nTimer expirou - pedido agora no sistema!`;
         const groupId = process.env.TELEGRAM_GROUP_ID;
         if (groupId) bot.sendMessage(groupId, msgAuto).catch(() => {});
@@ -2348,7 +2348,7 @@ async function checkAndLaunchOrders() {
             const botSecretGroupA = process.env.BOT_SECRET;
             if (botUrlGroupA && botSecretGroupA) {
               let lojaNomeAuto = pedido.loja_name || pedido.loja_user;
-              const pagLabelAuto = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX'}[pedido.tipo_pagamento] || pedido.tipo_pagamento || '-');
+              const pagLabelAuto = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX',pix_direto:'PIX'}[pedido.tipo_pagamento] || pedido.tipo_pagamento || '-');
               const msgGroupAuto = '\uD83D\uDEB4 Pedido Disponivel!\n' +
                 'Pedido #' + pedido.id + ' - ' + lojaNomeAuto + '\n' +
                 'Distancia: ' + pedido.distancia + ' km\n' +
