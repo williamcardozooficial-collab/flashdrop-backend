@@ -454,7 +454,7 @@ app.get('/lojas/vitrine', async (req, res) => {
         COUNT(o.id) FILTER (WHERE o.status='entregue' AND o.created_at >= NOW() - INTERVAL '7 days') AS pedidos_entregues_7d
       FROM users u
       LEFT JOIN orders o ON o.loja_user = u.username
-      WHERE u.role = 'loja' AND u.blocked IS NOT TRUE AND u.loja_horario_automatico = true
+      WHERE u.role = 'loja' AND u.blocked IS NOT TRUE AND (u.loja_online = true OR u.loja_horario_automatico = true)
       GROUP BY u.id
       ORDER BY u.loja_online DESC, pedidos_entregues_7d DESC, u.name ASC
     `);
