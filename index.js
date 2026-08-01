@@ -450,13 +450,13 @@ app.get('/lojas/vitrine', async (req, res) => {
   try {
     const r = await pool.query(`
       SELECT
-        u.id, u.name, u.username, u.custom_id, u.address, u.foto_url, u.loja_online, u.blocked,
+        u.id, u.name, u.username, u.custom_id, u.address, u.foto_url, u.loja_online, u.blocked, u.loja_horario_automatico, u.loja_horarios_semana,
         COUNT(o.id) FILTER (WHERE o.status='entregue' AND o.created_at >= NOW() - INTERVAL '7 days') AS pedidos_entregues_7d
       FROM users u
       LEFT JOIN orders o ON o.loja_user = u.username
-      WHERE u.role = 'loja' AND u.blocked IS NOT TRUE AND u.loja_online = true
+      WHERE u.role = 'loja' AND u.blocked IS NOT TRUE AND u.loja_horario_automatico = true
       GROUP BY u.id
-      ORDER BY pedidos_entregues_7d DESC, u.name ASC
+      ORDER BY u.loja_online DESC, pedidos_entregues_7d DESC, u.name ASC
     `);
     res.json(r.rows);
   } catch(e) { res.status(500).json({ error: e.message }); }
