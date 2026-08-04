@@ -35,7 +35,7 @@ function san(obj, ...fields) {
   fields.forEach(f => { if (out[f] !== undefined && out[f] !== null) out[f] = sanitize(String(out[f])); });
   return out;
 }
-// FIM SANITIZACAO
+function sanitizeAddress(val) { if (val === null || val === undefined) return val; if (typeof val !== 'string') return val; try { const obj = JSON.parse(val); const out = {}; Object.keys(obj).forEach(function(k){ out[k] = typeof obj[k] === 'string' ? sanitize(obj[k]) : obj[k]; }); return JSON.stringify(out); } catch (e) { return sanitize(val); } } // FIM SANITIZACAO
 
 // Gera slug do nome da loja
 function slugify(str){
@@ -480,7 +480,7 @@ app.get('/users/:id', async (req, res) => {
 app.post('/users', async (req, res) => {
   try {
     const { username, password, role, name, address, phone, vehicle, cpf, telegram_id, custom_credit_limit, custom_id } = req.body;
-    const _u = san({ username, name, address, vehicle }, 'username', 'name', 'address', 'vehicle');
+    const _u = san({ username, name, vehicle }, 'username', 'name', 'vehicle'); _u.address = sanitizeAddress(address);
     const { username: s_user, name: s_name, address: s_addr, vehicle: s_veh } = _u;
     if (phone) {
       const dupPhone = await pool.query('SELECT id FROM users WHERE phone=$1', [phone]);
@@ -515,7 +515,7 @@ app.post('/users', async (req, res) => {
 app.post('/register', async (req, res) => {
   try {
     const { username, password, role, name, address, phone, vehicle, cpf, referral_code } = req.body;
-    const _r = san({ username, name, address, vehicle }, 'username', 'name', 'address', 'vehicle');
+    const _r = san({ username, name, vehicle }, 'username', 'name', 'vehicle'); _r.address = sanitizeAddress(address);
     const { username: r_user, name: r_name, address: r_addr, vehicle: r_veh } = _r;
     if (role === 'motoboy') {
       if (!cpf) return res.status(400).json({ error: 'CPF obrigatorio para motoboy.' });
