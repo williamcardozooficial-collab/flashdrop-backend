@@ -1437,7 +1437,7 @@ app.post('/withdrawals', async (req, res) => {
   try {
     const { motoboy_id, motoboy_name, loja_id, loja_name, valor, pix_key } = req.body;
     if ((!motoboy_id && !loja_id) || !valor || !pix_key) return res.status(400).json({ error: 'Dados incompletos.' });
-    if (parseFloat(valor) <= 0) return res.status(400).json({ error: 'Valor invalido.' });
+    if (parseFloat(valor) <= 0) return res.status(400).json({ error: 'Valor invalido.' }); if (loja_id) { const horaBR = parseInt(new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Sao_Paulo', hour: '2-digit', hourCycle: 'h23' }).format(new Date())); if (horaBR < 10 || horaBR >= 22) return res.status(400).json({ error: 'Saques disponiveis apenas das 10h as 22h.' }); const hojeBR = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date()); const jaHoje = await pool.query("SELECT id FROM withdrawals WHERE loja_id=$1 AND to_char(created_at AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD') = $2", [loja_id, hojeBR]); if (jaHoje.rows.length > 0) return res.status(400).json({ error: 'Voce ja solicitou um saque hoje. Tente novamente a partir da meia-noite.' }); }
     const mb = await pool.query('SELECT balance, credit FROM users WHERE id=$1', [loja_id || motoboy_id]);
     if (mb.rows.length === 0) return res.status(404).json({ error: 'Motoboy nao encontrado.' });
     if (parseFloat(loja_id ? mb.rows[0].credit : mb.rows[0].balance) < parseFloat(valor)) return res.status(400).json({ error: 'Saldo insuficiente para o saque solicitado.' });
