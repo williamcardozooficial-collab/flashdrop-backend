@@ -828,11 +828,11 @@ app.put('/orders/:id', async (req, res) => {
     const sets = Object.keys(fields).map((k,i) => `${k}=$${i+2}`).join(',');
     const vals = Object.values(fields);
 
-    const prevOrderRes = await pool.query('SELECT motoboy_id, status, delivery_code, valor_total, loja_user FROM orders WHERE id=$1', [req.params.id]);
+    const prevOrderRes = await pool.query('SELECT motoboy_id, status, delivery_code, valor_total, loja_user, tipo_pagamento FROM orders WHERE id=$1', [req.params.id]);
     const prevMotoboyId = prevOrderRes.rows.length > 0 ? prevOrderRes.rows[0].motoboy_id : null;
 
     // Validacao do codigo de entrega ANTES do UPDATE
-    if (fields.status === 'entregue' && prevOrderRes.rows.length > 0 && prevOrderRes.rows[0].delivery_code) {
+    if (fields.status === 'entregue' && prevOrderRes.rows.length > 0 && prevOrderRes.rows[0].delivery_code && prevOrderRes.rows[0].tipo_pagamento !== 'ifood') {
       const obsInformada = (fields.observacao_entrega || '').trim();
       if (obsInformada !== String(prevOrderRes.rows[0].delivery_code)) {
         return res.status(400).json({ error: 'Codigo de entrega incorreto. Verifique o codigo com o cliente e tente novamente.' });
