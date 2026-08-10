@@ -1460,7 +1460,7 @@ app.put('/withdrawals/:id', async (req, res) => {
     await pool.query('UPDATE withdrawals SET status=$1, obs=$2, updated_at=NOW() WHERE id=$3', [status, obs || null, req.params.id]);
     if (status === 'aprovado') {
       if (w.loja_id) {
-        await pool.query('UPDATE users SET credit = credit - $1 WHERE id = $2', [w.valor, w.loja_id]);
+        await pool.query('UPDATE users SET credit = credit - $1 WHERE id = $2', [w.valor, w.loja_id]); await pool.query('INSERT INTO loja_wallet_events (loja_id, tipo, valor, descricao) VALUES ($1,$2,$3,$4)', [w.loja_id, 'saque', w.valor, 'Saque aprovado - PIX ' + (w.pix_key || '')]);
       } else {
         await pool.query('UPDATE users SET balance = balance - $1 WHERE id = $2', [w.valor, w.motoboy_id]);
       }
