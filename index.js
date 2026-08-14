@@ -1312,10 +1312,10 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
     try {
       const botUrlNoCliente = process.env.BOT_URL;
       const botSecretNoCliente = process.env.BOT_SECRET;
-      if (botUrlNoCliente && botSecretNoCliente && order.telefone_cliente) { let lojaPhoneNoCliente = null; try { const lResNc = await pool.query('SELECT phone FROM users WHERE username=$1', [order.loja_user]); if (lResNc.rows.length > 0) lojaPhoneNoCliente = lResNc.rows[0].phone; } catch(eLpNc) {} const lojaPhoneLineNoCliente = lojaPhoneNoCliente ? ('\n\n📞 Qualquer dúvida, entre em contato com a loja: ' + lojaPhoneNoCliente) : '';
+      if (botUrlNoCliente && botSecretNoCliente && order.telefone_cliente) { let lojaPhoneNoCliente = null; let lojaCustomIdNoCliente = null; try { const lResNc = await pool.query('SELECT phone, custom_id FROM users WHERE username=$1', [order.loja_user]); if (lResNc.rows.length > 0) { lojaPhoneNoCliente = lResNc.rows[0].phone; lojaCustomIdNoCliente = lResNc.rows[0].custom_id; } } catch(eLpNc) {} const lojaPhoneLineNoCliente = lojaPhoneNoCliente ? ('\n\n📞 Qualquer dúvida, entre em contato com a loja: ' + lojaPhoneNoCliente) : ''; const avaliarLinkLineNoCliente = lojaCustomIdNoCliente ? ('\n\n⭐ Depois de receber seu pedido, que tal avaliar a loja? Sua opinião ajuda outros clientes!\nhttps://flashdrop-frontend-six.vercel.app/cardapio.html?id=' + lojaCustomIdNoCliente) : '';
         const msgNoCliente = '\uD83D\uDEF5 O motoboy chegou!\n' +
           'Pedido #' + order.id + '\n' +
-          'Seu entregador est\u00e1 na porta. Por favor, v\u00e1 ao encontro dele para receber seu pedido. \uD83D\uDCE6\u2764\uFE0F' + lojaPhoneLineNoCliente + '\n\n🤖 _Esta é uma mensagem automática, não é necessário responder._';
+          'Seu entregador est\u00e1 na porta. Por favor, v\u00e1 ao encontro dele para receber seu pedido. \uD83D\uDCE6\u2764\uFE0F' + lojaPhoneLineNoCliente + avaliarLinkLineNoCliente + '\n\n🤖 _Esta é uma mensagem automática, não é necessário responder._';
         axios.post(botUrlNoCliente + '/api/send-message',
           { phone: order.telefone_cliente, message: msgNoCliente },
           { headers: { 'x-bot-secret': botSecretNoCliente } }
