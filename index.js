@@ -405,6 +405,7 @@ try {
   
 try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS slug VARCHAR(100) UNIQUE"); } catch(e) {}
   try { await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS loja_bot_phone TEXT'); } catch(e) {}
+  try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS loja_total_entregues INTEGER DEFAULT 0"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS mp_access_token TEXT"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS mp_auto BOOLEAN DEFAULT false"); } catch(e) {}  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancelado_por VARCHAR(20)"); } catch(e) {}
 try {
@@ -921,6 +922,10 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
           }
       } catch(eLojaBotPrep) { console.error('[LOJA BOT] Erro geral em_preparo:', eLojaBotPrep.message); }    }
     if (fields.status === 'entregue' && prevOrderRes.rows[0] && prevOrderRes.rows[0].status === 'entregue') { return res.json(order); }
+
+    if (fields.status === 'entregue' && order.loja_user) {
+      try { await pool.query('UPDATE users SET loja_total_entregues = loja_total_entregues + 1 WHERE username=$1', [order.loja_user]); } catch(eContadorEntregues) { console.error('[CONTADOR_ENTREGUES] Erro:', eContadorEntregues.message); }
+    }
 
     // Cancelamento pelo motoboy: bloquear por 10 minutos
     if (fields.status === 'pendente' && fields.motoboy_id === null && prevMotoboyId) {
@@ -1882,7 +1887,7 @@ app.delete('/notices/:id', async (req, res) => {
 
 app.get('/loja/slug/:slug', async (req, res) => {
   try {
-    const r = await pool.query("SELECT id,username,name,address,phone,foto_url,custom_id,slug,loja_online,loja_formas_pagamento FROM users WHERE slug=$1 AND role='loja'", [req.params.slug]);
+    const r = await pool.query("SELECT id,username,name,address,phone,foto_url,custom_id,slug,loja_online,loja_formas_pagamento,loja_total_entregues FROM users WHERE slug=$1 AND role='loja'", [req.params.slug]);
     if (!r.rows.length) return res.status(404).json({ error: 'Loja nao encontrada' });
     res.json(r.rows[0]);
   } catch(e) { res.status(500).json({ error: e.message }); }
