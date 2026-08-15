@@ -406,6 +406,7 @@ try {
 try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS slug VARCHAR(100) UNIQUE"); } catch(e) {}
   try { await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS loja_bot_phone TEXT'); } catch(e) {}
   try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS loja_total_entregues INTEGER DEFAULT 0"); } catch(e) {}
+  try { await pool.query("UPDATE users SET loja_total_entregues = sub.total FROM (SELECT loja_user, COUNT(*) as total FROM orders WHERE status='entregue' GROUP BY loja_user) sub WHERE users.username = sub.loja_user AND users.loja_total_entregues = 0"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS mp_access_token TEXT"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS mp_auto BOOLEAN DEFAULT false"); } catch(e) {}  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancelado_por VARCHAR(20)"); } catch(e) {}
 try {
