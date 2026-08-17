@@ -2034,7 +2034,7 @@ app.get('/referrals/user/:userId', async (req, res) => {
     const id = req.params.userId;
     const referred = await pool.query('SELECT * FROM referrals WHERE referrer_id=$1 ORDER BY created_at DESC', [id]);
     const earnings = await pool.query('SELECT * FROM referral_earnings WHERE referrer_id=$1 ORDER BY created_at DESC LIMIT 100', [id]);
-    const total = await pool.query('SELECT COALESCE(SUM(valor),0) AS total FROM referral_earnings WHERE referrer_id=$1', [id]);
+        const total = await pool.query("SELECT COALESCE(SUM(valor),0) AS total FROM referral_earnings WHERE referrer_id=$1 AND created_at >= NOW() - INTERVAL '30 days'", [id]);
     res.json({ referred: referred.rows, earnings: earnings.rows, total_ganhos: parseFloat(total.rows[0].total) });
   } catch(e) { res.status(500).json({error: e.message}); }
 });
