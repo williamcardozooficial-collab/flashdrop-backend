@@ -219,7 +219,7 @@ async function initDB() {
   try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS credit_mode INTEGER DEFAULT 0"); } catch(e) {}
   // custom_credit_limit: NULL = usa padrao da plataforma; valor definido = usa este individualmente
   try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_credit_limit DECIMAL DEFAULT NULL"); } catch(e) {}
-    try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS foto_url TEXT"); } catch(e) {} try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_por_entrega DECIMAL DEFAULT NULL"); } catch(e) {} try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_por_entrega_tipo VARCHAR(12) DEFAULT 'valor'"); } catch(e) {}
+    try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS foto_url TEXT"); } catch(e) {} try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_por_entrega DECIMAL DEFAULT NULL"); } catch(e) {} try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_por_entrega_tipo VARCHAR(12) DEFAULT 'valor'"); } catch(e) {} try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS max_pedidos_individual INT DEFAULT NULL"); } catch(e) {}
 try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_key TEXT DEFAULT NULL"); } catch(e) {}
 try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARCHAR(200) DEFAULT NULL"); } catch(e) {}
   // Limite padrao de credito na tabela de configuracoes
@@ -832,7 +832,7 @@ app.put('/orders/:id', async (req, res) => {
       }
     }
 
-    const sets = Object.keys(fields).map((k,i) => `${k}=$${i+2}`).join(',');
+    // === VERIFICACAO DE LIMITE DE PEDIDOS SIMULTANEOS AO ACEITAR CORRIDA === if (fields.status === 'aceito' && fields.motoboy_id) { try { const mbLimRes = await pool.query('SELECT max_pedidos_individual FROM users WHERE id=$1', [fields.motoboy_id]); const cfgLimRes = await pool.query('SELECT max_per_motoboy FROM settings WHERE id=1'); const individualMax = mbLimRes.rows[0] ? mbLimRes.rows[0].max_pedidos_individual : null; const defaultMax = parseInt(cfgLimRes.rows[0] && cfgLimRes.rows[0].max_per_motoboy) || 2; const effectiveMax = (individualMax !== null && individualMax !== undefined) ? parseInt(individualMax) : defaultMax; if (effectiveMax > 0) { const ativosRes = await pool.query("SELECT COUNT(*) FROM orders WHERE motoboy_id=$1 AND status NOT IN ('pendente','entregue','retornado','cancelado')", [fields.motoboy_id]); const ativos = parseInt(ativosRes.rows[0].count) || 0; if (ativos >= effectiveMax) { return res.status(403).json({ error: 'Voce atingiu o limite de ' + effectiveMax + ' pedido(s) simultaneo(s). Finalize uma entrega para poder aceitar outro.', limit_reached: true }); } } } catch(eLimitePedidos) { console.error('[LIMITE_PEDIDOS] Erro:', eLimitePedidos.message); } }     const sets = Object.keys(fields).map((k,i) => `${k}=$${i+2}`).join(',');
     const vals = Object.values(fields);
 
     const prevOrderRes = await pool.query('SELECT motoboy_id, status, delivery_code, valor_total, loja_user, tipo_pagamento FROM orders WHERE id=$1', [req.params.id]);
