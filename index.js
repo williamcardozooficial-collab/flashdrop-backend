@@ -888,7 +888,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
           if (botUrlGroup && botSecretGroup) {
             let lojaNomeGroup = order.loja_name || order.loja_user;
             const pagLabelGroup = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX',pix_direto:'PIX'}[order.tipo_pagamento] || order.tipo_pagamento || '-');
-            const msgGroup = '🔥 Pedido em Preparo! ⏰ Chamada as ' + (function(){ try { return new Date(parseInt(order.launch_at)).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); } catch(e){ return ''; } })() + ' = '\uD83D\uDD25 Pedido em Preparo!\n' +
+            const msgGroup = '🔥 Pedido em Preparo! ⏰ Chamada as ' + (function(){ try { return new Date(parseInt(order.launch_at)).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); } catch(e){ return ''; } })() + '\n' +
               'Pedido #' + order.id + ' - ' + lojaNomeGroup + '\n' +
               'Distancia: ' + order.distancia + ' km\n' +
               'Pagamento: ' + pagLabelGroup + '\n' +
