@@ -859,7 +859,7 @@ app.put('/orders/:id', async (req, res) => {
         }
         lojaNome = lojaNome || order.loja_user;
         const pagLabel = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX',pix_direto:'PIX'}[order.tipo_pagamento] || order.tipo_pagamento || '-');
-        const msgPedido = `🔥 Pedido em Preparo!
+        const msgPedido = `🔥 Pedido em Preparo! ⏰ Chamada as ${(() => { try { return new Date(parseInt(order.launch_at)).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); } catch(e) { return ''; } })()}
 
 Pedido #${order.id} - ${lojaNome}
 
@@ -888,7 +888,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
           if (botUrlGroup && botSecretGroup) {
             let lojaNomeGroup = order.loja_name || order.loja_user;
             const pagLabelGroup = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX',pix_direto:'PIX'}[order.tipo_pagamento] || order.tipo_pagamento || '-');
-            const msgGroup = '\uD83D\uDD25 Pedido em Preparo!\n' +
+            const msgGroup = '🔥 Pedido em Preparo! ⏰ Chamada as ' + (function(){ try { return new Date(parseInt(order.launch_at)).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); } catch(e){ return ''; } })() + ' = '\uD83D\uDD25 Pedido em Preparo!\n' +
               'Pedido #' + order.id + ' - ' + lojaNomeGroup + '\n' +
               'Distancia: ' + order.distancia + ' km\n' +
               'Pagamento: ' + pagLabelGroup + '\n' +
@@ -923,7 +923,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
             ).catch(e => console.error('[LOJA BOT] Erro em_preparo cliente:', e.message));
           }
       } catch(eLojaBotPrep) { console.error('[LOJA BOT] Erro geral em_preparo:', eLojaBotPrep.message); }    }
-    if (fields.status === 'entregue' && prevOrderRes.rows[0] && prevOrderRes.rows[0].status === 'entregue') { return res.json(order); }
+    if (fields.launch_at !== undefined && fields.status === undefined && bot) { try { const motoboysHT = await pool.query("SELECT telegram_id FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL"); let lojaNomeHT = order.loja_name || order.loja_user; const horaNovaHT = new Date(parseInt(order.launch_at)).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); const msgHorarioHT = `🔄 Horario Atualizado! Pedido #${order.id} - ${lojaNomeHT} - A loja alterou. Motoboy sera chamado as ${horaNovaHT}`; const groupIdHT = process.env.TELEGRAM_GROUP_ID; if (groupIdHT) bot.sendMessage(groupIdHT, msgHorarioHT).catch(() => {}); motoboysHT.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgHorarioHT).catch(() => {})); } catch(eHorarioBot) { console.error('[HORARIO] Erro:', eHorarioBot.message); } } if (fields.status === 'entregue' && prevOrderRes.rows[0] && prevOrderRes.rows[0].status === 'entregue') { return res.json(order); }
 
     if (fields.status === 'entregue' && order.loja_user) {
       try { await pool.query('UPDATE users SET loja_total_entregues = loja_total_entregues + 1 WHERE username=$1', [order.loja_user]); } catch(eContadorEntregues) { console.error('[CONTADOR_ENTREGUES] Erro:', eContadorEntregues.message); }
