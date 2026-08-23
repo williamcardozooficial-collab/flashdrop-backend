@@ -407,7 +407,7 @@ try {
 try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS slug VARCHAR(100) UNIQUE"); } catch(e) {}
   try { await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS loja_bot_phone TEXT'); } catch(e) {}
   try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS loja_total_entregues INTEGER DEFAULT 0"); } catch(e) {}
-  try { await pool.query("UPDATE users SET loja_total_entregues = sub.total FROM (SELECT loja_user, COUNT(*) as total FROM orders WHERE status='entregue' GROUP BY loja_user) sub WHERE users.username = sub.loja_user AND users.loja_total_entregues = 0"); } catch(e) {}
+  try { await pool.query("UPDATE users SET loja_total_entregues = sub.total FROM (SELECT loja_user, COUNT(*) as total FROM orders WHERE status='entregue' GROUP BY loja_user) sub WHERE users.username = sub.loja_user AND users.loja_total_entregues = 0"); } catch(e) {} try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS motoboy_total_entregas INTEGER DEFAULT 0"); } catch(e) {} try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS motoboy_total_valor DECIMAL DEFAULT 0"); } catch(e) {} try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS motoboy_total_km DECIMAL DEFAULT 0"); } catch(e) {} try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS motoboy_ultima_entrega_at BIGINT DEFAULT NULL"); } catch(e) {} try { await pool.query("UPDATE users SET motoboy_total_entregas = sub.total, motoboy_total_valor = sub.valor, motoboy_total_km = sub.km, motoboy_ultima_entrega_at = sub.ultimo FROM (SELECT motoboy_id, COUNT(*) as total, SUM(COALESCE(valor_motoboy,0)) as valor, SUM(COALESCE(distancia,0)) as km, MAX(EXTRACT(EPOCH FROM created_at)*1000) as ultimo FROM orders WHERE status='entregue' AND motoboy_id IS NOT NULL GROUP BY motoboy_id) sub WHERE users.id = sub.motoboy_id AND users.motoboy_total_entregas = 0"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS mp_access_token TEXT"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS mp_auto BOOLEAN DEFAULT false"); } catch(e) {}  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS cancelado_por VARCHAR(20)"); } catch(e) {}
 try {
@@ -929,7 +929,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
       try { await pool.query('UPDATE users SET loja_total_entregues = loja_total_entregues + 1 WHERE username=$1', [order.loja_user]); } catch(eContadorEntregues) { console.error('[CONTADOR_ENTREGUES] Erro:', eContadorEntregues.message); }
     }
 
-    // Cancelamento pelo motoboy: bloquear por 10 minutos
+    if (fields.status === 'entregue' && order.motoboy_id) { try { await pool.query('UPDATE users SET motoboy_total_entregas = motoboy_total_entregas + 1, motoboy_total_valor = motoboy_total_valor + $1, motoboy_total_km = motoboy_total_km + $2, motoboy_ultima_entrega_at = $3 WHERE id=$4', [parseFloat(order.valor_motoboy)||0, parseFloat(order.distancia)||0, Date.now(), order.motoboy_id]); } catch(eContadorMotoboy) { console.error('[CONTADOR_MOTOBOY] Erro:', eContadorMotoboy.message); } } // Cancelamento pelo motoboy: bloquear por 10 minutos
     if (fields.status === 'pendente' && fields.motoboy_id === null && prevMotoboyId) {
       const BLOCK_MS = 10 * 60 * 1000;
       const blockedUntil = Date.now() + BLOCK_MS;
