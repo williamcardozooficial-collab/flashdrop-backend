@@ -794,18 +794,18 @@ app.put('/orders/:id', async (req, res) => {
         }
 
         // Verifica limite de credito apenas para corridas em dinheiro
-        const orderRes = await pool.query('SELECT tipo_pagamento, valor_motoboy, comissao, valor_pedido, delivery_code, motoboy_id FROM orders WHERE id=$1', [req.params.id]);
+        const orderRes = await pool.query('SELECT tipo_pagamento, valor_motoboy, comissao, valor_pedido, delivery_code, motoboy_id, loja_user FROM orders WHERE id=$1', [req.params.id]);
         if (orderRes.rows.length > 0) {
           const order = orderRes.rows[0];
           const isDinheiro = order.tipo_pagamento === 'dinheiro';
 
           if (isDinheiro) {
-            // Logica: custom_credit_limit define o limite individual do motoboy
+            // Logica: custom_credit_limit define o limite individual do motoboy let lojaCredDisp = 0; try { if (order.loja_user) { const lcRes = await pool.query('SELECT limite, COALESCE(devido,0) as devido FROM loja_motoboy_credito WHERE loja_user=$1 AND motoboy_id=$2', [order.loja_user, fields.motoboy_id]); if (lcRes.rows.length > 0) { const lcLimite = parseFloat(lcRes.rows[0].limite) || 0; const lcDevido = parseFloat(lcRes.rows[0].devido) || 0; lojaCredDisp = Math.max(0, Math.round((lcLimite - lcDevido) * 100) / 100); } } } catch(eLcAccept) {}
             // null ou 0 = bloqueado por padrao (admin precisa definir um valor > 0 para liberar)
             const individualLimit = mb.custom_credit_limit !== null ? parseFloat(mb.custom_credit_limit) : 0;
             const balance = parseFloat(mb.balance || 0);
 
-            if (individualLimit <= 0) {
+            if ((individualLimit + lojaCredDisp) <= 0) {
               // Limite nao definido ou zerado: motoboy bloqueado para corridas em dinheiro
               return res.status(403).json({
                 error: 'Voce nao possui saldo suficiente para pegar este pedido. Procure manter saldo na plataforma para poder aceitar pedidos em dinheiro.',
@@ -820,7 +820,7 @@ app.put('/orders/:id', async (req, res) => {
             const debitoEstimado = valorPedidoOrd + comissaoOrd;
             const saldoAposAceitar = balance - debitoEstimado;
 
-            if (balance <= -individualLimit || saldoAposAceitar < -individualLimit) {
+            if (balance <= -(individualLimit + lojaCredDisp) || saldoAposAceitar < -(individualLimit + lojaCredDisp)) {
               // Saldo atual ja ultrapassou OU aceitar este pedido vai ultrapassar o limite
               return res.status(403).json({
                 error: 'Voce nao possui saldo suficiente para pegar este pedido. Procure manter saldo na plataforma para poder aceitar pedidos em dinheiro.',
