@@ -43,7 +43,7 @@ function slugify(str){
 }
 
 // Telegram Bot
-const bot = process.env.TELEGRAM_BOT_TOKEN ? new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, {polling: true}) : null;
+const bot = process.env.TELEGRAM_BOT_TOKEN ? new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, {polling: true}) : null; async function sendPushToOnlineMotoboys(titulo, corpo, dataExtra) { try { const rPush = await pool.query("SELECT push_token FROM users WHERE role='motoboy' AND online=true AND push_token IS NOT NULL"); if (!rPush.rows.length) return; const mensagens = rPush.rows.map(row => ({ to: row.push_token, sound: 'default', title: titulo, body: corpo, data: dataExtra || {}, priority: 'high', channelId: 'default' })); for (let i = 0; i < mensagens.length; i += 90) { const chunk = mensagens.slice(i, i + 90); await axios.post('https://exp.host/--/api/v2/push/send', chunk, { headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'Accept-Encoding': 'gzip, deflate' } }).catch(function(eChunk) { console.error('[PUSH] Erro chunk:', eChunk.message); }); } } catch(ePush) { console.error('[PUSH] Erro ao enviar push:', ePush.message); } }
 const ADMIN_ID = 738230199;
 
 // Bot Commands
@@ -221,7 +221,7 @@ async function initDB() {
   try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_credit_limit DECIMAL DEFAULT NULL"); } catch(e) {}
     try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS foto_url TEXT"); } catch(e) {} try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_por_entrega DECIMAL DEFAULT NULL"); } catch(e) {} try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_por_entrega_tipo VARCHAR(12) DEFAULT 'valor'"); } catch(e) {} try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS max_pedidos_individual INT DEFAULT NULL"); } catch(e) {}
 try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_key TEXT DEFAULT NULL"); } catch(e) {}
-try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARCHAR(200) DEFAULT NULL"); } catch(e) {} try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS online_since BIGINT DEFAULT NULL"); } catch(e) {}
+try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARCHAR(200) DEFAULT NULL"); } catch(e) {} try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS online_since BIGINT DEFAULT NULL"); } catch(e) {} try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS push_token TEXT DEFAULT NULL"); } catch(e) {}
   // Limite padrao de credito na tabela de configuracoes
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS credit_limit DECIMAL DEFAULT 20.00"); } catch(e) {}
   // ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ TAXA CHUVA e TAXA NOTURNA ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ
@@ -1935,7 +1935,7 @@ async function checkLateArrivals() {
         const msgRepost = `Pedido #${order.id} disponivel novamente!\n\nLoja: ${lojaRepostNome}\nMotoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}\nDistancia: ${order.distancia} km\n\nMotoboy anterior nao chegou no prazo.`;
         if (groupId) bot.sendMessage(groupId, msgRepost).catch(() => {});
         const motoboys = await pool.query("SELECT telegram_id FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL");
-        motoboys.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgRepost).catch(() => {}));
+        motoboys.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgRepost).catch(() => {})); sendPushToOnlineMotoboys('🛵 Pedido disponível novamente!', 'Pedido #' + order.id + ' - ' + lojaRepostNome + ' - R$ ' + parseFloat(order.valor_motoboy).toFixed(2), { orderId: order.id });
       }
     }
   } catch(e) { console.error('[JOB] Erro ao verificar chegadas:', e.message); }
@@ -1958,7 +1958,7 @@ app.post('/orders/:id/launch', async (req, res) => {
       const groupId = process.env.TELEGRAM_GROUP_ID;
       if (groupId) bot.sendMessage(groupId, msgLancado).catch(() => {});
       const motoboys = await pool.query("SELECT telegram_id FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL");
-      motoboys.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgLancado).catch(() => {}));
+      motoboys.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgLancado).catch(() => {})); sendPushToOnlineMotoboys('🛵 Pedido disponível agora!', 'Pedido #' + pedido.id + ' - ' + lojaNome + ' - R$ ' + parseFloat(pedido.valor_motoboy).toFixed(2), { orderId: pedido.id });
     }
       // Notificar grupo WhatsApp quando pedido fica disponivel (pendente - launch manual)
       try {
@@ -2352,7 +2352,7 @@ async function checkAndLaunchOrders() {
         const groupId = process.env.TELEGRAM_GROUP_ID;
         if (groupId) bot.sendMessage(groupId, msgAuto).catch(() => {});
         const motoboys = await pool.query("SELECT telegram_id FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL");
-        motoboys.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgAuto).catch(() => {}));
+        motoboys.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgAuto).catch(() => {})); sendPushToOnlineMotoboys('🛵 Pedido disponível!', 'Pedido #' + pedido.id + ' - ' + lojaNome + ' - R$ ' + parseFloat(pedido.valor_motoboy).toFixed(2), { orderId: pedido.id });
       }
       console.log(`[JOB] Pedido #${pedido.id} lancado automaticamente.`);
           // Notificar grupo WhatsApp quando pedido fica disponivel (pendente - auto-launch)
@@ -3028,7 +3028,7 @@ app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
   
   setInterval(checkAndLaunchOrders, 30 * 1000);
   setInterval(expirePagamentosRestaurante, 30 * 1000);
-  setInterval(checkLojaAutoOffline, 60 * 1000); setInterval(cleanupOldOrders, 60 * 60 * 1000); cleanupOldOrders(); setInterval(checkLojaHorarioSemanal, 60 * 1000); checkLojaHorarioSemanal(); console.log('[JOB] Horario semanal automatico de lojas iniciado (60s)'); async function checkMotoboyAutoOffline() { try { const cutoff = Date.now() - 60 * 60 * 1000; const r = await pool.query("SELECT id FROM users WHERE role='motoboy' AND online=true AND online_since IS NOT NULL AND online_since <= $1", [cutoff]); for (const row of r.rows) { const ativosRes = await pool.query("SELECT COUNT(*) FROM orders WHERE motoboy_id=$1 AND status NOT IN ('pendente','entregue','retornado','cancelado')", [row.id]); const ativos = parseInt(ativosRes.rows[0].count) || 0; if (ativos === 0) { await pool.query('UPDATE users SET online=false, online_since=NULL WHERE id=$1', [row.id]); console.log('[JOB] Motoboy id=' + row.id + ' colocado offline automaticamente (60min sem atividade).'); } } } catch(e) { console.error('[JOB] checkMotoboyAutoOffline:', e.message); } } setInterval(checkMotoboyAutoOffline, 2 * 60 * 1000); checkMotoboyAutoOffline(); console.log('[JOB] Auto-offline de motoboys iniciado (60min, checagem a cada 2min)');
+  setInterval(checkLojaAutoOffline, 60 * 1000); setInterval(cleanupOldOrders, 60 * 60 * 1000); cleanupOldOrders(); setInterval(checkLojaHorarioSemanal, 60 * 1000); checkLojaHorarioSemanal(); console.log('[JOB] Horario semanal automatico de lojas iniciado (60s)'); async function checkMotoboyAutoOffline() { try { const cutoff = Date.now() - 180 * 60 * 1000; const r = await pool.query("SELECT id FROM users WHERE role='motoboy' AND online=true AND online_since IS NOT NULL AND online_since <= $1", [cutoff]); for (const row of r.rows) { const ativosRes = await pool.query("SELECT COUNT(*) FROM orders WHERE motoboy_id=$1 AND status NOT IN ('pendente','entregue','retornado','cancelado')", [row.id]); const ativos = parseInt(ativosRes.rows[0].count) || 0; if (ativos === 0) { await pool.query('UPDATE users SET online=false, online_since=NULL WHERE id=$1', [row.id]); console.log('[JOB] Motoboy id=' + row.id + ' colocado offline automaticamente (180min sem atividade).'); } } } catch(e) { console.error('[JOB] checkMotoboyAutoOffline:', e.message); } } setInterval(checkMotoboyAutoOffline, 2 * 60 * 1000); checkMotoboyAutoOffline(); console.log('[JOB] Auto-offline de motoboys iniciado (180min, checagem a cada 2min)');
   checkLojaAutoOffline();
   console.log('[JOB] Auto-offline de lojas iniciado (60s)');
   console.log('[JOB] Verificador de chegada iniciado (60s)');
