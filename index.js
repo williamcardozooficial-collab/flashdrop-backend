@@ -221,7 +221,7 @@ async function initDB() {
   try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_credit_limit DECIMAL DEFAULT NULL"); } catch(e) {}
     try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS foto_url TEXT"); } catch(e) {} try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_por_entrega DECIMAL DEFAULT NULL"); } catch(e) {} try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_por_entrega_tipo VARCHAR(12) DEFAULT 'valor'"); } catch(e) {} try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS max_pedidos_individual INT DEFAULT NULL"); } catch(e) {}
 try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_key TEXT DEFAULT NULL"); } catch(e) {}
-try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARCHAR(200) DEFAULT NULL"); } catch(e) {}
+try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARCHAR(200) DEFAULT NULL"); } catch(e) {} try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS online_since BIGINT DEFAULT NULL"); } catch(e) {}
   // Limite padrao de credito na tabela de configuracoes
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS credit_limit DECIMAL DEFAULT 20.00"); } catch(e) {}
   // ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ TAXA CHUVA e TAXA NOTURNA ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ
@@ -608,7 +608,7 @@ app.post('/users/:id/approve', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put('/users/:id', async (req, res) => {
+app.put('/users/:id', async (req, res) => { if (req.body && req.body.online === true) { req.body.online_since = Date.now(); } else if (req.body && req.body.online === false) { req.body.online_since = null; }
   const fields = req.body;
   const sets = Object.keys(fields).map((k,i) => `${k}=$${i+2}`).join(',');
   const vals = Object.values(fields);
@@ -3028,7 +3028,7 @@ app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
   
   setInterval(checkAndLaunchOrders, 30 * 1000);
   setInterval(expirePagamentosRestaurante, 30 * 1000);
-  setInterval(checkLojaAutoOffline, 60 * 1000); setInterval(cleanupOldOrders, 60 * 60 * 1000); cleanupOldOrders(); setInterval(checkLojaHorarioSemanal, 60 * 1000); checkLojaHorarioSemanal(); console.log('[JOB] Horario semanal automatico de lojas iniciado (60s)');
+  setInterval(checkLojaAutoOffline, 60 * 1000); setInterval(cleanupOldOrders, 60 * 60 * 1000); cleanupOldOrders(); setInterval(checkLojaHorarioSemanal, 60 * 1000); checkLojaHorarioSemanal(); console.log('[JOB] Horario semanal automatico de lojas iniciado (60s)'); async function checkMotoboyAutoOffline() { try { const cutoff = Date.now() - 60 * 60 * 1000; const r = await pool.query("SELECT id FROM users WHERE role='motoboy' AND online=true AND online_since IS NOT NULL AND online_since <= $1", [cutoff]); for (const row of r.rows) { const ativosRes = await pool.query("SELECT COUNT(*) FROM orders WHERE motoboy_id=$1 AND status NOT IN ('pendente','entregue','retornado','cancelado')", [row.id]); const ativos = parseInt(ativosRes.rows[0].count) || 0; if (ativos === 0) { await pool.query('UPDATE users SET online=false, online_since=NULL WHERE id=$1', [row.id]); console.log('[JOB] Motoboy id=' + row.id + ' colocado offline automaticamente (60min sem atividade).'); } } } catch(e) { console.error('[JOB] checkMotoboyAutoOffline:', e.message); } } setInterval(checkMotoboyAutoOffline, 2 * 60 * 1000); checkMotoboyAutoOffline(); console.log('[JOB] Auto-offline de motoboys iniciado (60min, checagem a cada 2min)');
   checkLojaAutoOffline();
   console.log('[JOB] Auto-offline de lojas iniciado (60s)');
   console.log('[JOB] Verificador de chegada iniciado (60s)');
