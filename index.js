@@ -2730,7 +2730,7 @@ async function calcularLimiteEmprestimo(lojaId) { const r = await pool.query('SE
     const apiKey = process.env.GOOGLE_MAPS_KEY;
     if (!apiKey) return res.status(500).json({ error: 'API key nao configurada.' });
 
-    const enderecoCompleto = endereco_coleta + (complemento_coleta ? ', ' + complemento_coleta : '') + ', Caxias do Sul, RS';
+    let enderecoColetaFmt = endereco_coleta; try { const _ecObj = typeof endereco_coleta === 'string' ? JSON.parse(endereco_coleta) : endereco_coleta; if (_ecObj && typeof _ecObj === 'object') { enderecoColetaFmt = [_ecObj.rua && _ecObj.num ? _ecObj.rua + ', ' + _ecObj.num : (_ecObj.rua || _ecObj.num || ''), _ecObj.bairro, _ecObj.cidade].filter(Boolean).join(', '); } } catch(_eEc) {} const enderecoCompleto = enderecoColetaFmt + (complemento_coleta ? ', ' + complemento_coleta : '') + ', Caxias do Sul, RS';
     const geoUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(enderecoCompleto)}&key=${apiKey}`;
     const geoResp = await axios.get(geoUrl);
     const geoData = geoResp.data;
