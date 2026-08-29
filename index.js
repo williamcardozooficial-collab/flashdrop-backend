@@ -600,7 +600,7 @@ app.post('/users/:id/approve', async (req, res) => {
       const botSecret = process.env.BOT_SECRET;
       const phone = r.rows[0] && r.rows[0].phone; const username = r.rows[0] && r.rows[0].username; const password = r.rows[0] && r.rows[0].password; const role = r.rows[0] && r.rows[0].role;
       if (botUrl && botSecret && phone) {
-        const msg = '\uD83C\uDF89 Parab\u00E9ns! Seu login foi aprovado com sucesso. \u2705\nAgora voc\u00EA j\u00E1 pode acessar nossa plataforma atrav\u00E9s do site abaixo:\n\uD83D\uDE80 ' + (role === "loja" ? "https://flashdrop-frontend-six.vercel.app/login.html" : "https://play.google.com/store/apps/details?id=com.flashdrop.motoboy&pcampaignid=web_share") + '\n\nSeu login \u00E9 "' + username + '"\n\nSua senha \u00E9 "' + password + '"\n\nSeja bem-vindo(a) \u00E0 Flash Drop! \uD83D\uDC99';
+        const msg = '\uD83C\uDF89 Parab\u00E9ns! Seu login foi aprovado com sucesso. \u2705\nAgora voc\u00EA j\u00E1 pode acessar nossa plataforma atrav\u00E9s do site abaixo:\n\uD83D\uDE80 ' + (role === "loja" ? "https://flashdrop-frontend-six.vercel.app/login.html" : "https://play.google.com/store/apps/details?id=com.flashdrop.motoboy&pcampaignid=web_share") + '\n\nSeu login \u00E9 "' + username + '"\n\nSua senha \u00E9 "' + password + '"\n\nSeja bem-vindo(a) \u00E0 Flash Drop! ' + (role === "loja" ? "" : "\n\n\uD83D\uDCF2 Entre no nosso grupo do WhatsApp para ficar por dentro dos pedidos:\nhttps://chat.whatsapp.com/G5S1jN9dBzT1Zses0kC8hG?s=cl&p=a&mlu=4\n\n") + '\uD83D\uDC99';
         await axios.post(`${botUrl}/api/send-message`, { phone, message: msg }, { headers: { 'x-bot-secret': botSecret }, timeout: 10000 });
       }
     } catch (wErr) { console.log('Erro WhatsApp aprovacao:', wErr.message); }
