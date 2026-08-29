@@ -593,14 +593,14 @@ app.post('/register', async (req, res) => {
 
 app.post('/users/:id/approve', async (req, res) => {
   try {
-        const r = await pool.query('UPDATE users SET approved=true WHERE id=$1 RETURNING id,username,name,phone,approved', [req.params.id]);
+        const r = await pool.query('UPDATE users SET approved=true WHERE id=$1 RETURNING id,username,password,name,phone,approved', [req.params.id]);
             // Envia WhatsApp ao usuÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¡rio aprovado
     try {
       const botUrl = process.env.BOT_URL;
       const botSecret = process.env.BOT_SECRET;
-      const phone = r.rows[0] && r.rows[0].phone;
+      const phone = r.rows[0] && r.rows[0].phone; const username = r.rows[0] && r.rows[0].username; const password = r.rows[0] && r.rows[0].password;
       if (botUrl && botSecret && phone) {
-        const msg = '\uD83C\uDF89 Parab\u00E9ns! Seu login foi aprovado com sucesso. \u2705\nAgora voc\u00EA j\u00E1 pode acessar nossa plataforma atrav\u00E9s do site abaixo:\n\uD83D\uDE80 https://flashdrop-frontend-six.vercel.app/login.html\nSeja bem-vindo(a) \u00E0 Flash Drop! \uD83D\uDC99';
+        const msg = '\uD83C\uDF89 Parab\u00E9ns! Seu login foi aprovado com sucesso. \u2705\nAgora voc\u00EA j\u00E1 pode acessar nossa plataforma atrav\u00E9s do site abaixo:\n\uD83D\uDE80 https://play.google.com/store/apps/details?id=com.flashdrop.motoboy&pcampaignid=web_share\n\n\nSeu login \u00E9 "' + username + '"\n\nSua senha \u00E9 "' + password + '"\n\nSeja bem-vindo(a) \u00E0 Flash Drop! \uD83D\uDC99';
         await axios.post(`${botUrl}/api/send-message`, { phone, message: msg }, { headers: { 'x-bot-secret': botSecret }, timeout: 10000 });
       }
     } catch (wErr) { console.log('Erro WhatsApp aprovacao:', wErr.message); }
