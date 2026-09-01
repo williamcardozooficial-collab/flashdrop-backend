@@ -1056,7 +1056,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
         const tc_chuva = parseFloat(order.taxa_extra_chuva || 0);
         const tc_noturna = parseFloat(order.taxa_extra_noturna || 0);
         const total_extra = tc_chuva + tc_noturna;
-        if (total_extra > 0) {
+        if (false && total_extra > 0) { /* desabilitado: taxa chuva/noturna ja embutida no valor_total/comissao desde a criacao do pedido - repasse extra duplicava o valor e causava perda de comissao do admin */
           const fromAdmin = (order.chuva_desconto_de || 'admin') === 'admin';
           if (fromAdmin && tc_chuva > 0) {
             await pool.query(`UPDATE platform_wallet SET balance = balance - $1, total_sacado = total_sacado + $1, updated_at=NOW() WHERE id=1`, [tc_chuva]);
