@@ -944,7 +944,11 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
           const ord = fullOrderRes.rows[0];
           const isDinheiro = ord.tipo_pagamento === 'dinheiro';
           const jaEntregue = ord.status === 'entregue';
-          if (!isDinheiro && !jaEntregue && ord.loja_user) {
+          // Pedidos vindos do cardapio virtual só debitam a loja quando ela ACEITA
+          // (ver 'debito_cardapio' no painel). Se a loja recusou antes de aceitar,
+          // plataforma continua 'cardapio' e nada foi descontado - nao deve gerar estorno.
+          const naoFoiDebitadoAinda = ord.plataforma === 'cardapio';
+          if (!isDinheiro && !jaEntregue && !naoFoiDebitadoAinda && ord.loja_user) {
             const valorTotal = parseFloat(ord.valor_total) || 0;
             if (valorTotal > 0) {
               await pool.query('UPDATE users SET credit = credit + $1 WHERE username=$2', [valorTotal, ord.loja_user]);
