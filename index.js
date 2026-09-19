@@ -1947,7 +1947,10 @@ async function checkLateArrivals() {
           if (lrRes.rows.length > 0) lojaRepostNome = lrRes.rows[0].name;
         }
         lojaRepostNome = lojaRepostNome || order.loja_user;
-        const msgRepost = `Pedido #${order.id} disponivel novamente!\n\nLoja: ${lojaRepostNome}\nMotoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}\nDistancia: ${order.distancia} km\n\nMotoboy anterior nao chegou no prazo.`;
+        const fmtHoraBR = function(d) { try { return new Date(d).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); } catch(e) { return '-'; } };
+        const horaAceitoRepost = order.t_aceito ? fmtHoraBR(order.t_aceito) : '-';
+        const horaExpirouRepost = order.t_aceito ? fmtHoraBR(new Date(order.t_aceito).getTime() + ARRIVE_TIMEOUT_MS) : '-';
+        const msgRepost = `Pedido #${order.id} disponivel novamente!\n\nLoja: ${lojaRepostNome}\nMotoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}\nDistancia: ${order.distancia} km\n\nPrazo: 15 minutos\nAceito as: ${horaAceitoRepost}\nExpirou as: ${horaExpirouRepost}\n\nMotoboy anterior nao chegou no prazo.`;
         if (groupId) bot.sendMessage(groupId, msgRepost).catch(() => {});
         const motoboys = await pool.query("SELECT telegram_id FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL");
         motoboys.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgRepost).catch(() => {})); sendPushToOnlineMotoboys('🛵 Pedido disponível novamente!', 'Pedido #' + order.id + ' - ' + lojaRepostNome + ' - R$ ' + parseFloat(order.valor_motoboy).toFixed(2), { orderId: order.id });
@@ -1960,6 +1963,9 @@ async function checkLateArrivals() {
               'Pedido #' + order.id + ' - ' + lojaRepostNome + '\n' +
               'Distancia: ' + order.distancia + ' km\n' +
               'Motoboy ganha: R$ ' + parseFloat(order.valor_motoboy).toFixed(2) + '\n\n' +
+              'Prazo: 15 minutos\n' +
+              'Aceito as: ' + horaAceitoRepost + '\n' +
+              'Expirou as: ' + horaExpirouRepost + '\n\n' +
               'Motoboy anterior nao chegou no prazo.';
             axios.post(botUrlGroupRepost + '/api/send-group-message',
               { message: msgGroupRepost, mentionAll: true },
