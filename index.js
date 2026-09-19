@@ -1951,6 +1951,22 @@ async function checkLateArrivals() {
         if (groupId) bot.sendMessage(groupId, msgRepost).catch(() => {});
         const motoboys = await pool.query("SELECT telegram_id FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL");
         motoboys.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgRepost).catch(() => {})); sendPushToOnlineMotoboys('🛵 Pedido disponível novamente!', 'Pedido #' + order.id + ' - ' + lojaRepostNome + ' - R$ ' + parseFloat(order.valor_motoboy).toFixed(2), { orderId: order.id });
+        // Notificar grupo WhatsApp tambem (motoboy anterior nao chegou no prazo)
+        try {
+          const botUrlGroupRepost = process.env.BOT_URL;
+          const botSecretGroupRepost = process.env.BOT_SECRET;
+          if (botUrlGroupRepost && botSecretGroupRepost) {
+            const msgGroupRepost = '🚴 Pedido Disponivel Novamente!\n' +
+              'Pedido #' + order.id + ' - ' + lojaRepostNome + '\n' +
+              'Distancia: ' + order.distancia + ' km\n' +
+              'Motoboy ganha: R$ ' + parseFloat(order.valor_motoboy).toFixed(2) + '\n\n' +
+              'Motoboy anterior nao chegou no prazo.';
+            axios.post(botUrlGroupRepost + '/api/send-group-message',
+              { message: msgGroupRepost, mentionAll: true },
+              { headers: { 'x-bot-secret': botSecretGroupRepost } }
+            ).catch(e => console.error('[BOT] Erro msg grupo repost:', e.message));
+          }
+        } catch (eGroupRepost) { console.error('[BOT] Erro geral msg grupo repost:', eGroupRepost.message); }
       }
     }
   } catch(e) { console.error('[JOB] Erro ao verificar chegadas:', e.message); }
