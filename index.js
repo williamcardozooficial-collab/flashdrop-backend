@@ -1947,7 +1947,7 @@ async function checkLateArrivals() {
           if (lrRes.rows.length > 0) lojaRepostNome = lrRes.rows[0].name;
         }
         lojaRepostNome = lojaRepostNome || order.loja_user;
-        const fmtHoraBR = function(d) { try { return new Date(d).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); } catch(e) { return '-'; } };
+        const fmtHoraBR = function(d) { try { return new Date(d).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit', second:'2-digit'}); } catch(e) { return '-'; } };
         const horaAceitoRepost = order.t_aceito ? fmtHoraBR(order.t_aceito) : '-';
         const horaExpirouRepost = order.t_aceito ? fmtHoraBR(new Date(order.t_aceito).getTime() + ARRIVE_TIMEOUT_MS) : '-';
         const msgRepost = `Pedido #${order.id} disponivel novamente!\n\nLoja: ${lojaRepostNome}\nMotoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}\nDistancia: ${order.distancia} km\n\nPrazo: 15 minutos\nAceito as: ${horaAceitoRepost}\nExpirou as: ${horaExpirouRepost}\n\nMotoboy anterior nao chegou no prazo.`;
