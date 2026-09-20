@@ -132,6 +132,7 @@ async function initDB() {
     );
     INSERT INTO settings (id) VALUES (1) ON CONFLICT DO NOTHING;
     INSERT INTO users (username,password,role,name) VALUES ('admin','admin123','admin','Administrador') ON CONFLICT DO NOTHING;
+    INSERT INTO users (username,password,role,name,approved) VALUES ('FlashDropFinanceiro','financeiro123','financeiro','Financeiro',true) ON CONFLICT DO NOTHING;
   `);
 
   // Migrations
@@ -153,6 +154,8 @@ async function initDB() {
     try { await pool.query("CREATE TABLE IF NOT EXISTS avaliacoes (id SERIAL PRIMARY KEY, order_id INTEGER UNIQUE, loja_user VARCHAR(50), cod_pedido VARCHAR(50), nota INTEGER NOT NULL, comentario TEXT, created_at TIMESTAMP DEFAULT NOW())"); } catch(e) {}
     try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS price_per_km_acima DECIMAL DEFAULT 0"); } catch(e) {}
     try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS km_limite_faixa DECIMAL DEFAULT 0"); } catch(e) {}
+    try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS desconto_promocao DECIMAL DEFAULT 0"); } catch(e) {}
+    try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS nome_promocao VARCHAR(200)"); } catch(e) {}
 
   // ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ MÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂDULO DE INDICAÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂO ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ
   try { await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code VARCHAR(20) UNIQUE`); } catch(e) {}
@@ -745,8 +748,8 @@ app.post('/orders', async (req, res) => {
   } catch(eTaxa) { console.error('[TAXA] Erro ao calcular taxas:', eTaxa.message); }
 
   const r = await pool.query(
-    `INSERT INTO orders (loja_user,loja_name,plataforma,endereco_coleta,endereco_entrega,bairro_destino,nome_cliente,telefone_cliente,cod_pedido,cobrar_cliente,tipo_pagamento,valor_pedido,valor_total,valor_motoboy,comissao,distancia,previsao,obs,status,pending_until,telefone_loja,launch_at,complemento_coleta,complemento_entrega,obs_coleta,obs_entrega_loja,delivery_code,taxa_extra_chuva,taxa_extra_noturna,chuva_desconto_de,ifood_localizador,ifood_numero_pedido,ifood_nome_cliente,cpf_cliente) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'novo',$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33) RETURNING *`,
-    [d.loja_user,d.loja_name,d.plataforma,d.endereco_coleta,d.endereco_entrega,d.bairro_destino,d.nome_cliente,d.telefone_cliente,d.cod_pedido,d.cobrar_cliente||'nao',d.tipo_pagamento||'dinheiro',d.valor_pedido||0,valorTotal,valorMotoboy,d.comissao,d.distancia,d.previsao,d.obs,Date.now()+15000,telefone_loja,d.launch_at||0,d.complemento_coleta||null,d.complemento_entrega||null,d.obs_coleta||null,d.obs_entrega_loja||null,deliveryCode,taxa_extra_chuva,taxa_extra_noturna,chuva_desconto_de,d.ifood_localizador||null,d.ifood_numero_pedido||null,d.ifood_nome_cliente||null,d.cpf_cliente||null]
+    `INSERT INTO orders (loja_user,loja_name,plataforma,endereco_coleta,endereco_entrega,bairro_destino,nome_cliente,telefone_cliente,cod_pedido,cobrar_cliente,tipo_pagamento,valor_pedido,valor_total,valor_motoboy,comissao,distancia,previsao,obs,status,pending_until,telefone_loja,launch_at,complemento_coleta,complemento_entrega,obs_coleta,obs_entrega_loja,delivery_code,taxa_extra_chuva,taxa_extra_noturna,chuva_desconto_de,ifood_localizador,ifood_numero_pedido,ifood_nome_cliente,cpf_cliente,desconto_promocao,nome_promocao) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'novo',$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35) RETURNING *`,
+    [d.loja_user,d.loja_name,d.plataforma,d.endereco_coleta,d.endereco_entrega,d.bairro_destino,d.nome_cliente,d.telefone_cliente,d.cod_pedido,d.cobrar_cliente||'nao',d.tipo_pagamento||'dinheiro',d.valor_pedido||0,valorTotal,valorMotoboy,d.comissao,d.distancia,d.previsao,d.obs,Date.now()+15000,telefone_loja,d.launch_at||0,d.complemento_coleta||null,d.complemento_entrega||null,d.obs_coleta||null,d.obs_entrega_loja||null,deliveryCode,taxa_extra_chuva,taxa_extra_noturna,chuva_desconto_de,d.ifood_localizador||null,d.ifood_numero_pedido||null,d.ifood_nome_cliente||null,d.cpf_cliente||null,d.desconto_promocao||0,d.nome_promocao||null]
   );
   const pedido = r.rows[0];
   // Notifica loja e cliente via WhatsApp bot
@@ -3057,6 +3060,119 @@ app.post('/ifood/confirmar-entrega', async (req, res) => {
     console.error('[iFood bot] confirmar erro:', err.message);
     return res.status(500).json({ ok: false, erro: 'Erro ao confirmar entrega: ' + err.message });
   }
+});
+
+// ===== MODULO FINANCEIRO (perfil financeiro - relatorios detalhados) =====
+function getFinanceiroRange(req) {
+  const hoje = new Date();
+  const padraoFim = hoje.toISOString().slice(0, 10);
+  const padraoInicio = new Date(hoje.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const inicioStr = (req.query.inicio || padraoInicio).slice(0, 10);
+  const fimStr = (req.query.fim || padraoFim).slice(0, 10);
+  return { inicio: inicioStr + ' 00:00:00', fim: fimStr + ' 23:59:59', inicioStr, fimStr };
+}
+
+// Resumo geral do periodo: depositos, saques, vendas, comissao admin, bonus pagos, coleta de dinheiro/cartao pelos motoboys, saldo da plataforma
+app.get('/financeiro/resumo', async (req, res) => {
+  try {
+    const { inicio, fim, inicioStr, fimStr } = getFinanceiroRange(req);
+    const depositosLojas = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM loja_wallet_events WHERE tipo='recarga_mp' AND created_at BETWEEN $1 AND $2", [inicio, fim]);
+    const saquesLojas = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM withdrawals WHERE loja_id IS NOT NULL AND status='aprovado' AND updated_at BETWEEN $1 AND $2", [inicio, fim]);
+    const saquesMotoboys = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM withdrawals WHERE motoboy_id IS NOT NULL AND status='aprovado' AND updated_at BETWEEN $1 AND $2", [inicio, fim]);
+    const pedidosEntregues = await pool.query("SELECT COALESCE(SUM(valor_total),0) AS total, COALESCE(SUM(valor_pedido),0) AS total_produtos, COALESCE(SUM(valor_motoboy),0) AS total_motoboy, COUNT(*) AS qtd FROM orders WHERE status='entregue' AND created_at BETWEEN $1 AND $2", [inicio, fim]);
+    const vendasPromocao = await pool.query("SELECT COALESCE(SUM(valor_pedido),0) AS total_vendido, COALESCE(SUM(desconto_promocao),0) AS total_desconto, COUNT(*) AS qtd FROM orders WHERE status='entregue' AND nome_promocao IS NOT NULL AND created_at BETWEEN $1 AND $2", [inicio, fim]);
+    const receitaComissao = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM platform_events WHERE tipo='comissao' AND created_at BETWEEN $1 AND $2", [inicio, fim]);
+    const taxasChuvaNoturna = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM platform_events WHERE tipo IN ('taxa_chuva_admin','taxa_noturna') AND created_at BETWEEN $1 AND $2", [inicio, fim]);
+    const bonusIndicacao = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM referral_earnings WHERE created_at BETWEEN $1 AND $2", [inicio, fim]);
+    const bonusPromocaoMotoboy = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM motoboy_wallet_events WHERE tipo='bonus_promo' AND created_at BETWEEN $1 AND $2", [inicio, fim]);
+    const dinheiroColetado = await pool.query("SELECT COALESCE(SUM(valor_pedido),0) AS total, COUNT(*) AS qtd FROM orders WHERE status='entregue' AND tipo_pagamento='dinheiro' AND created_at BETWEEN $1 AND $2", [inicio, fim]);
+    const cartaoAproxColetado = await pool.query("SELECT COALESCE(SUM(valor_pedido),0) AS total, COUNT(*) AS qtd FROM orders WHERE status='entregue' AND tipo_pagamento='cartao_aproximacao' AND created_at BETWEEN $1 AND $2", [inicio, fim]);
+    const maquinaLoja = await pool.query("SELECT COALESCE(SUM(valor_pedido),0) AS total, COUNT(*) AS qtd FROM orders WHERE status='entregue' AND tipo_pagamento='maquina' AND created_at BETWEEN $1 AND $2", [inicio, fim]);
+    const saldoPlataforma = await pool.query('SELECT * FROM platform_wallet WHERE id=1');
+
+    res.json({
+      periodo: { inicio: inicioStr, fim: fimStr },
+      depositos_lojas: depositosLojas.rows[0],
+      saques_lojas: saquesLojas.rows[0],
+      saques_motoboys: saquesMotoboys.rows[0],
+      pedidos_entregues: pedidosEntregues.rows[0],
+      vendas_com_promocao: vendasPromocao.rows[0],
+      receita_comissao_admin: receitaComissao.rows[0],
+      custo_taxas_chuva_noturna_admin: taxasChuvaNoturna.rows[0],
+      bonus_indicacao_pago_motoboys: bonusIndicacao.rows[0],
+      bonus_promocao_pago_motoboys: bonusPromocaoMotoboy.rows[0],
+      dinheiro_coletado_motoboys: dinheiroColetado.rows[0],
+      cartao_aproximacao_coletado_motoboys: cartaoAproxColetado.rows[0],
+      maquina_loja_nao_rastreavel: maquinaLoja.rows[0],
+      saldo_plataforma: saldoPlataforma.rows[0] || { balance: 0, total_ganho: 0, total_sacado: 0 }
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Detalhamento por loja: depositos, saques, pedidos, vendas com promocao, saldo atual
+app.get('/financeiro/lojas', async (req, res) => {
+  try {
+    const { inicio, fim } = getFinanceiroRange(req);
+    const lojas = await pool.query("SELECT id, username, name, credit FROM users WHERE role='loja' ORDER BY name ASC");
+    const resultado = [];
+    for (const loja of lojas.rows) {
+      const deposito = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM loja_wallet_events WHERE loja_id=$1 AND tipo='recarga_mp' AND created_at BETWEEN $2 AND $3", [loja.id, inicio, fim]);
+      const saque = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM withdrawals WHERE loja_id=$1 AND status='aprovado' AND updated_at BETWEEN $2 AND $3", [loja.id, inicio, fim]);
+      const pedidos = await pool.query("SELECT COALESCE(SUM(valor_total),0) AS total, COALESCE(SUM(valor_pedido),0) AS total_produtos, COUNT(*) AS qtd FROM orders WHERE loja_user=$1 AND status='entregue' AND created_at BETWEEN $2 AND $3", [loja.username, inicio, fim]);
+      const promocao = await pool.query("SELECT COALESCE(SUM(valor_pedido),0) AS total_vendido, COALESCE(SUM(desconto_promocao),0) AS total_desconto, COUNT(*) AS qtd FROM orders WHERE loja_user=$1 AND status='entregue' AND nome_promocao IS NOT NULL AND created_at BETWEEN $2 AND $3", [loja.username, inicio, fim]);
+      resultado.push({
+        id: loja.id, username: loja.username, name: loja.name,
+        saldo_atual: loja.credit,
+        deposito: deposito.rows[0],
+        saque: saque.rows[0],
+        pedidos: pedidos.rows[0],
+        vendas_com_promocao: promocao.rows[0]
+      });
+    }
+    res.json(resultado);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Detalhamento por motoboy: ganhos, dinheiro coletado, cartao aproximacao coletado, bonus indicacao/promocao, saques, saldo atual
+app.get('/financeiro/motoboys', async (req, res) => {
+  try {
+    const { inicio, fim } = getFinanceiroRange(req);
+    const motoboys = await pool.query("SELECT id, username, name, balance FROM users WHERE role='motoboy' ORDER BY name ASC");
+    const resultado = [];
+    for (const mb of motoboys.rows) {
+      const ganhoCorrida = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM motoboy_wallet_events WHERE motoboy_id=$1 AND tipo='corrida' AND created_at BETWEEN $2 AND $3", [mb.id, inicio, fim]);
+      const dinheiro = await pool.query("SELECT COALESCE(SUM(valor_pedido),0) AS total, COUNT(*) AS qtd FROM orders WHERE motoboy_id=$1 AND status='entregue' AND tipo_pagamento='dinheiro' AND created_at BETWEEN $2 AND $3", [mb.id, inicio, fim]);
+      const cartaoAprox = await pool.query("SELECT COALESCE(SUM(valor_pedido),0) AS total, COUNT(*) AS qtd FROM orders WHERE motoboy_id=$1 AND status='entregue' AND tipo_pagamento='cartao_aproximacao' AND created_at BETWEEN $2 AND $3", [mb.id, inicio, fim]);
+      const bonusIndicacao = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM referral_earnings WHERE referrer_id=$1 AND created_at BETWEEN $2 AND $3", [mb.id, inicio, fim]);
+      const bonusPromocao = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM motoboy_wallet_events WHERE motoboy_id=$1 AND tipo='bonus_promo' AND created_at BETWEEN $2 AND $3", [mb.id, inicio, fim]);
+      const saque = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM withdrawals WHERE motoboy_id=$1 AND status='aprovado' AND updated_at BETWEEN $2 AND $3", [mb.id, inicio, fim]);
+      resultado.push({
+        id: mb.id, username: mb.username, name: mb.name,
+        saldo_atual: mb.balance,
+        ganho_corridas: ganhoCorrida.rows[0],
+        dinheiro_coletado: dinheiro.rows[0],
+        cartao_aproximacao_coletado: cartaoAprox.rows[0],
+        bonus_indicacao: bonusIndicacao.rows[0],
+        bonus_promocao: bonusPromocao.rows[0],
+        saque: saque.rows[0]
+      });
+    }
+    res.json(resultado);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Listagem detalhada de pedidos no periodo, com filtro opcional por loja ou motoboy
+app.get('/financeiro/pedidos', async (req, res) => {
+  try {
+    const { inicio, fim } = getFinanceiroRange(req);
+    const params = [inicio, fim];
+    let sql = "SELECT id, loja_user, loja_name, motoboy_id, motoboy_name, tipo_pagamento, valor_pedido, valor_total, valor_motoboy, comissao, distancia, nome_promocao, desconto_promocao, status, created_at FROM orders WHERE created_at BETWEEN $1 AND $2";
+    if (req.query.loja_user) { params.push(req.query.loja_user); sql += ` AND loja_user=$${params.length}`; }
+    if (req.query.motoboy_id) { params.push(req.query.motoboy_id); sql += ` AND motoboy_id=$${params.length}`; }
+    sql += ' ORDER BY created_at DESC LIMIT 2000';
+    const r = await pool.query(sql, params);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
