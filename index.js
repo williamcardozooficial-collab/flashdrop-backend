@@ -1061,7 +1061,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
           );
           await pool.query(
             `INSERT INTO platform_events (tipo, valor, descricao, order_id) VALUES ('comissao', $1, $2, $3)`,
-            [comissao, 'ComissÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ£o pedido #' + req.params.id + ' (' + (order.loja_name || order.loja_user) + ')', req.params.id]
+            [comissao, 'Comissão pedido #' + req.params.id + ' (' + (order.loja_name || order.loja_user) + ')', req.params.id]
           );
         } catch(ePw) { console.error('Platform wallet error:', ePw.message); }
       }
