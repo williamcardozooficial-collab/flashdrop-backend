@@ -3179,6 +3179,27 @@ app.get('/financeiro/pedidos', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Extrato completo (caixa): todos os eventos financeiros (plataforma, lojas e motoboys) no periodo selecionado, sem limite de 48h
+app.get('/financeiro/eventos', async (req, res) => {
+  try {
+    const { inicio, fim } = getFinanceiroRange(req);
+    const r = await pool.query(
+      `SELECT * FROM (
+        SELECT tipo, valor, descricao, created_at, order_id, 'plataforma' as origem, NULL::varchar as nome
+          FROM platform_events WHERE created_at BETWEEN $1 AND $2
+        UNION ALL
+        SELECT lwe.tipo, lwe.valor, lwe.descricao, lwe.created_at, lwe.order_id, 'loja' as origem, u.name as nome
+          FROM loja_wallet_events lwe LEFT JOIN users u ON u.id = lwe.loja_id WHERE lwe.created_at BETWEEN $1 AND $2
+        UNION ALL
+        SELECT mwe.tipo, mwe.valor, mwe.descricao, mwe.created_at, mwe.order_id, 'motoboy' as origem, u2.name as nome
+          FROM motoboy_wallet_events mwe LEFT JOIN users u2 ON u2.id = mwe.motoboy_id WHERE mwe.created_at BETWEEN $1 AND $2
+      ) combined ORDER BY created_at DESC LIMIT 3000`,
+      [inicio, fim]
+    );
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
   setInterval(checkLateArrivals, 60 * 1000);
   
