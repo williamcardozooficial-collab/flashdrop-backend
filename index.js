@@ -617,7 +617,7 @@ app.post('/users/:id/approve', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put('/users/:id', async (req, res) => { if (req.body && req.body.online === true) { req.body.online_since = Date.now(); } else if (req.body && req.body.online === false) { req.body.online_since = null; }
+app.put('/users/:id', async (req, res) => { if (req.body && req.body.online === true) { req.body.online_since = Date.now(); req.body.ultimo_login = Date.now(); } else if (req.body && req.body.online === false) { req.body.online_since = null; }
   const fields = req.body;
   const sets = Object.keys(fields).map((k,i) => `${k}=$${i+2}`).join(',');
   const vals = Object.values(fields);
