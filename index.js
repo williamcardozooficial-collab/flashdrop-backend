@@ -409,6 +409,7 @@ try {
   try { await pool.query(`ALTER TABLE categorias_loja ADD COLUMN IF NOT EXISTS ordem INTEGER DEFAULT 0`); } catch(e) {}
 
   
+try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS ultimo_login BIGINT DEFAULT NULL"); } catch(e) {}
 try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS slug VARCHAR(100) UNIQUE"); } catch(e) {}
   try { await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS loja_bot_phone TEXT'); } catch(e) {}
   try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS loja_total_entregues INTEGER DEFAULT 0"); } catch(e) {}
@@ -443,6 +444,8 @@ const loginHandler = async (req, res) => {
   if (r.rows[0].blocked) return res.status(403).json({ error: 'Conta bloqueada.' });
   if (r.rows[0].approved === false) return res.status(403).json({ error: 'Cadastro aguardando aprovacao do administrador.' });
   const user = r.rows[0];
+  const agora = Date.now();
+  try { await pool.query('UPDATE users SET ultimo_login=$1 WHERE id=$2', [agora, user.id]); user.ultimo_login = agora; } catch(e) {}
   const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, process.env.JWT_SECRET || 'flashdrop_secret_2024', { expiresIn: '90d' });
   res.json({ ...user, token });
 };
