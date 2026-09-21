@@ -439,7 +439,9 @@ app.get('/debug/time', (req, res) => {
 });
 
 const loginHandler = async (req, res) => {
-  const { username, password } = req.body;
+  let { username, password } = req.body;
+  if (typeof username === 'string') username = username.trim();
+  if (typeof password === 'string') password = password.trim();
   const r = await pool.query('SELECT * FROM users WHERE username=$1 AND password=$2', [username, password]);
   if (r.rows.length === 0) return res.status(401).json({ error: 'Usuario ou senha invalidos.' });
   if (r.rows[0].blocked) return res.status(403).json({ error: 'Conta bloqueada.' });
