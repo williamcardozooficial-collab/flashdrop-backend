@@ -225,6 +225,7 @@ async function initDB() {
   // custom_credit_limit: NULL = usa padrao da plataforma; valor definido = usa este individualmente
   try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_credit_limit DECIMAL DEFAULT NULL"); } catch(e) {}
     try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS foto_url TEXT"); } catch(e) {} try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_por_entrega DECIMAL DEFAULT NULL"); } catch(e) {} try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_por_entrega_tipo VARCHAR(12) DEFAULT 'valor'"); } catch(e) {} try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS max_pedidos_individual INT DEFAULT NULL"); } catch(e) {}
+try { await pool.query(`CREATE TABLE IF NOT EXISTS caixa_saque_config (id SERIAL PRIMARY KEY, motoboy_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, percentual DECIMAL NOT NULL, ordem INTEGER DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())`); } catch(e) {}
 try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_key TEXT DEFAULT NULL"); } catch(e) {}
 try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARCHAR(200) DEFAULT NULL"); } catch(e) {} try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS online_since BIGINT DEFAULT NULL"); } catch(e) {} try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS push_token TEXT DEFAULT NULL"); } catch(e) {}
   // Limite padrao de credito na tabela de configuracoes
@@ -1638,6 +1639,26 @@ app.get('/platform/events', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+app.get('/platform/saque-config', async (req, res) => {
+  try {
+    const r = await pool.query(`SELECT c.motoboy_id, c.percentual, u.name, u.username FROM caixa_saque_config c LEFT JOIN users u ON u.id = c.motoboy_id ORDER BY c.ordem ASC, c.id ASC`);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/platform/saque-config', async (req, res) => {
+  try {
+    const lista = Array.isArray(req.body.split) ? req.body.split.filter(function(s){ return s && s.motoboy_id && parseFloat(s.percentual) > 0; }) : [];
+    const total = lista.reduce(function(s, x){ return s + parseFloat(x.percentual); }, 0);
+    if (total > 100.001) return res.status(400).json({ error: 'A soma dos percentuais nao pode passar de 100%.' });
+    await pool.query('DELETE FROM caixa_saque_config');
+    for (let i = 0; i < lista.length; i++) {
+      await pool.query('INSERT INTO caixa_saque_config (motoboy_id, percentual, ordem) VALUES ($1,$2,$3)', [lista[i].motoboy_id, parseFloat(lista[i].percentual), i]);
+    }
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/platform/withdraw', async (req, res) => {
   try {
     const { valor, motivo } = req.body;
@@ -1649,13 +1670,33 @@ app.post('/platform/withdraw', async (req, res) => {
       return res.status(400).json({ error: 'Saldo insuficiente na caixa.' });
     }
     const v = parseFloat(valor);
+    let lista = Array.isArray(req.body.split) ? req.body.split.filter(function(s){ return s && s.motoboy_id && parseFloat(s.percentual) > 0; }) : null;
+    if (!lista) {
+      const cfgRes = await pool.query('SELECT motoboy_id, percentual FROM caixa_saque_config ORDER BY ordem ASC, id ASC');
+      lista = cfgRes.rows;
+    }
+    const totalPerc = lista.reduce(function(s, x){ return s + parseFloat(x.percentual); }, 0);
+    if (totalPerc > 100.001) return res.status(400).json({ error: 'A soma dos percentuais nao pode passar de 100%.' });
     await pool.query(
       `UPDATE platform_wallet SET balance = balance - $1, total_sacado = total_sacado + $1, updated_at=NOW() WHERE id=1`,
       [v]
     );
+    let destinoDesc = '';
+    for (const item of lista) {
+      const valorMotoboy = Math.round(v * parseFloat(item.percentual) / 100 * 100) / 100;
+      if (valorMotoboy <= 0) continue;
+      await pool.query('UPDATE users SET balance = balance + $1 WHERE id=$2', [valorMotoboy, item.motoboy_id]);
+      const mbRes = await pool.query('SELECT name FROM users WHERE id=$1', [item.motoboy_id]);
+      const mbName = mbRes.rows[0] ? mbRes.rows[0].name : ('motoboy #' + item.motoboy_id);
+      await pool.query(
+        'INSERT INTO motoboy_wallet_events (motoboy_id, tipo, valor, descricao) VALUES ($1,$2,$3,$4)',
+        [item.motoboy_id, 'saque_caixa_admin', valorMotoboy, 'Retirada do caixa: ' + motivo.trim() + ' (' + item.percentual + '%)']
+      );
+      destinoDesc += (destinoDesc ? ', ' : '') + mbName + ' ' + item.percentual + '%';
+    }
     await pool.query(
       `INSERT INTO platform_events (tipo, valor, descricao) VALUES ('saque', $1, $2)`,
-      [v, 'Saque: ' + motivo.trim()]
+      [v, 'Saque: ' + motivo.trim() + (destinoDesc ? ' -> ' + destinoDesc : '')]
     );
     const updated = await pool.query('SELECT * FROM platform_wallet WHERE id=1');
     res.json({ ok: true, wallet: updated.rows[0] });
