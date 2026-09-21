@@ -3192,6 +3192,7 @@ app.get('/financeiro/motoboys', async (req, res) => {
       const bonusIndicacao = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM referral_earnings WHERE referrer_id=$1 AND created_at BETWEEN $2 AND $3", [mb.id, inicio, fim]);
       const bonusPromocao = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM motoboy_wallet_events WHERE motoboy_id=$1 AND tipo='bonus_promo' AND created_at BETWEEN $2 AND $3", [mb.id, inicio, fim]);
       const bonusEntrega = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM motoboy_wallet_events WHERE motoboy_id=$1 AND tipo='bonus_entrega' AND created_at BETWEEN $2 AND $3", [mb.id, inicio, fim]);
+      const lucroSistema = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM motoboy_wallet_events WHERE motoboy_id=$1 AND tipo='saque_caixa_admin' AND created_at BETWEEN $2 AND $3", [mb.id, inicio, fim]);
       const saque = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM withdrawals WHERE motoboy_id=$1 AND status='aprovado' AND updated_at BETWEEN $2 AND $3", [mb.id, inicio, fim]);
       resultado.push({
         id: mb.id, username: mb.username, name: mb.name,
@@ -3202,6 +3203,7 @@ app.get('/financeiro/motoboys', async (req, res) => {
         bonus_indicacao: bonusIndicacao.rows[0],
         bonus_promocao: bonusPromocao.rows[0],
         bonus_por_entrega: bonusEntrega.rows[0],
+        lucro_sistema: lucroSistema.rows[0],
         saque: saque.rows[0]
       });
     }
