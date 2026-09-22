@@ -171,6 +171,8 @@ async function initDB() {
     updated_at TIMESTAMP DEFAULT NOW()
   )`); } catch(e) {}
   try { await pool.query(`INSERT INTO referral_settings (id) VALUES (1) ON CONFLICT DO NOTHING`); } catch(e) {}
+  try { await pool.query(`ALTER TABLE referral_settings ADD COLUMN IF NOT EXISTS comissao_tipo_loja VARCHAR(20) DEFAULT 'fixo'`); } catch(e) {}
+  try { await pool.query(`ALTER TABLE referral_settings ADD COLUMN IF NOT EXISTS comissao_percentual_loja DECIMAL DEFAULT 0`); } catch(e) {}
   try { await pool.query(`CREATE TABLE IF NOT EXISTS referrals (
     id SERIAL PRIMARY KEY,
     referrer_id INTEGER NOT NULL,
@@ -573,12 +575,11 @@ app.post('/register', async (req, res) => {
           const refSettings = await pool.query('SELECT * FROM referral_settings WHERE id=1');
           const sets = refSettings.rows[0];
           if (sets && sets.ativo) {
-            let refType = 'motoboy';
             let metaPed = sets.meta_pedidos_motoboy || 100;
-            let prazoD = sets.prazo_meta_dias || 30;
             let bonusVal = sets.bonus_motoboy_meta || 150;
             let dataFim = new Date();
-            dataFim.setDate(dataFim.getDate() + prazoD);
+            const diasValidade = newUserRole === 'loja' ? (sets.validade_indicacao_loja_dias || 90) : (sets.prazo_meta_dias || 30);
+            dataFim.setDate(dataFim.getDate() + diasValidade);
             await pool.query(
               'INSERT INTO referrals (referrer_id, referrer_name, referred_id, referred_name, referred_role, status_ref, meta_pedidos, bonus_valor, data_inicio, data_fim) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW(),$9)',
               [referrer.id, referrer.name, newUserId, r.rows[0].name, newUserRole, 'ativo', metaPed, bonusVal, dataFim.toISOString()]
@@ -631,6 +632,47 @@ app.delete('/users/:id', async (req, res) => {
   try {
     await pool.query('DELETE FROM users WHERE id=$1', [req.params.id]);
     res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// PUT /users/:id/referrer - admin define ou remove manualmente quem indicou uma loja/motoboy ja cadastrado
+app.put('/users/:id/referrer', async (req, res) => {
+  try {
+    const userId = parseInt(req.params.id);
+    const referrerIdRaw = req.body ? req.body.referrer_id : null;
+    const userRes = await pool.query('SELECT * FROM users WHERE id=$1', [userId]);
+    if (!userRes.rows.length) return res.status(404).json({ error: 'Usuario nao encontrado.' });
+    const target = userRes.rows[0];
+
+    if (!referrerIdRaw) {
+      await pool.query('UPDATE users SET referred_by=NULL WHERE id=$1', [userId]);
+      await pool.query("UPDATE referrals SET status_ref='cancelado' WHERE referred_id=$1 AND status_ref='ativo'", [userId]);
+      return res.json({ ok: true, removed: true });
+    }
+
+    const refId = parseInt(referrerIdRaw);
+    if (refId === userId) return res.status(400).json({ error: 'Um usuario nao pode indicar a si mesmo.' });
+    const referrerRes = await pool.query('SELECT * FROM users WHERE id=$1', [refId]);
+    if (!referrerRes.rows.length) return res.status(404).json({ error: 'Indicador nao encontrado.' });
+    const referrer = referrerRes.rows[0];
+
+    await pool.query("UPDATE referrals SET status_ref='cancelado' WHERE referred_id=$1 AND status_ref='ativo'", [userId]);
+
+    const refSettings = await pool.query('SELECT * FROM referral_settings WHERE id=1');
+    const sets = refSettings.rows[0] || {};
+    const metaPed = sets.meta_pedidos_motoboy || 100;
+    const bonusVal = sets.bonus_motoboy_meta || 150;
+    const diasValidade = target.role === 'loja' ? (sets.validade_indicacao_loja_dias || 90) : (sets.prazo_meta_dias || 30);
+    const dataFim = new Date();
+    dataFim.setDate(dataFim.getDate() + diasValidade);
+
+    await pool.query(
+      'INSERT INTO referrals (referrer_id, referrer_name, referred_id, referred_name, referred_role, status_ref, meta_pedidos, bonus_valor, data_inicio, data_fim) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW(),$9)',
+      [referrer.id, referrer.name, userId, target.name, target.role, 'ativo', metaPed, bonusVal, dataFim.toISOString()]
+    );
+    await pool.query('UPDATE users SET referred_by=$1 WHERE id=$2', [refId, userId]);
+
+    res.json({ ok: true, referrer: { id: referrer.id, name: referrer.name } });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1159,14 +1201,16 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
             if (lojaUser.rows.length > 0) {
               const loja = lojaUser.rows[0];
               const lojaRef = await pool.query(
-                `SELECT r.*, rs.comissao_por_pedido_loja FROM referrals r
+                `SELECT r.*, rs.comissao_por_pedido_loja, rs.comissao_tipo_loja, rs.comissao_percentual_loja FROM referrals r
                  JOIN referral_settings rs ON rs.id=1
                  WHERE r.referred_id=$1 AND r.referred_role='loja'
                    AND r.status_ref='ativo'
                    AND (r.data_fim IS NULL OR r.data_fim > NOW())`, [loja.id]);
               if (lojaRef.rows.length > 0) {
                 const ref = lojaRef.rows[0];
-                const comLoja = parseFloat(ref.comissao_por_pedido_loja || 0);
+                const comLoja = ref.comissao_tipo_loja === 'percentual'
+                  ? Math.round((parseFloat(ord.valor_pedido || 0) * parseFloat(ref.comissao_percentual_loja || 0) / 100) * 100) / 100
+                  : parseFloat(ref.comissao_por_pedido_loja || 0);
                 if (comLoja > 0) {
                   await pool.query('UPDATE users SET balance = balance + $1 WHERE id=$2', [comLoja, ref.referrer_id]);
                   await pool.query(`UPDATE platform_wallet SET balance = balance - $1, total_sacado = total_sacado + $1, updated_at=NOW() WHERE id=1`, [comLoja]);
@@ -2083,12 +2127,14 @@ app.get('/referral-settings', async (req, res) => {
 // PUT /referral-settings ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ admin atualiza regras
 app.put('/referral-settings', async (req, res) => {
   try {
-    const { ativo, comissao_por_pedido_loja, bonus_motoboy_meta, meta_pedidos_motoboy, prazo_meta_dias, validade_indicacao_loja_dias } = req.body;
+    const { ativo, comissao_por_pedido_loja, bonus_motoboy_meta, meta_pedidos_motoboy, prazo_meta_dias, validade_indicacao_loja_dias, comissao_tipo_loja, comissao_percentual_loja } = req.body;
+    const tipo = comissao_tipo_loja === 'percentual' ? 'percentual' : 'fixo';
     await pool.query(`UPDATE referral_settings SET
       ativo=$1, comissao_por_pedido_loja=$2, bonus_motoboy_meta=$3,
       meta_pedidos_motoboy=$4, prazo_meta_dias=$5, validade_indicacao_loja_dias=$6,
+      comissao_tipo_loja=$7, comissao_percentual_loja=$8,
       updated_at=NOW() WHERE id=1`,
-      [ativo, comissao_por_pedido_loja, bonus_motoboy_meta, meta_pedidos_motoboy, prazo_meta_dias, validade_indicacao_loja_dias]);
+      [ativo, comissao_por_pedido_loja, bonus_motoboy_meta, meta_pedidos_motoboy, prazo_meta_dias, validade_indicacao_loja_dias, tipo, comissao_percentual_loja || 0]);
     res.json({ok: true});
   } catch(e) { res.status(500).json({error: e.message}); }
 });
