@@ -3269,6 +3269,30 @@ app.get('/financeiro/lojas', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Resumo financeiro de UMA loja especifica (usado pela propria loja para gerar seu relatorio, sem expor dados de outras lojas)
+app.get('/financeiro/loja-relatorio', async (req, res) => {
+  try {
+    const { inicio, fim } = getFinanceiroRange(req);
+    const lojaUser = req.query.loja_user;
+    if (!lojaUser) return res.status(400).json({ error: 'loja_user obrigatorio' });
+    const lojaR = await pool.query("SELECT id, username, name, credit FROM users WHERE role='loja' AND username=$1", [lojaUser]);
+    if (!lojaR.rows.length) return res.status(404).json({ error: 'Loja nao encontrada' });
+    const loja = lojaR.rows[0];
+    const deposito = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM loja_wallet_events WHERE loja_id=$1 AND tipo='recarga_mp' AND created_at BETWEEN $2 AND $3", [loja.id, inicio, fim]);
+    const saque = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM withdrawals WHERE loja_id=$1 AND status='aprovado' AND updated_at BETWEEN $2 AND $3", [loja.id, inicio, fim]);
+    const pedidos = await pool.query("SELECT COALESCE(SUM(valor_total),0) AS total, COALESCE(SUM(valor_pedido),0) AS total_produtos, COUNT(*) AS qtd FROM orders WHERE loja_user=$1 AND status='entregue' AND created_at BETWEEN $2 AND $3", [loja.username, inicio, fim]);
+    const promocao = await pool.query("SELECT COALESCE(SUM(valor_pedido),0) AS total_vendido, COALESCE(SUM(desconto_promocao),0) AS total_desconto, COUNT(*) AS qtd FROM orders WHERE loja_user=$1 AND status='entregue' AND nome_promocao IS NOT NULL AND created_at BETWEEN $2 AND $3", [loja.username, inicio, fim]);
+    res.json({
+      id: loja.id, username: loja.username, name: loja.name,
+      saldo_atual: loja.credit,
+      deposito: deposito.rows[0],
+      saque: saque.rows[0],
+      pedidos: pedidos.rows[0],
+      vendas_com_promocao: promocao.rows[0]
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Detalhamento por motoboy: ganhos, dinheiro coletado, cartao aproximacao coletado, bonus indicacao/promocao, saques, saldo atual
 app.get('/financeiro/motoboys', async (req, res) => {
   try {
