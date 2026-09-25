@@ -93,6 +93,18 @@ async function atribuirCustomIdUnico(userId, role) {
   throw new Error('Nao foi possivel gerar um ID unico para o usuario ' + userId + ' apos varias tentativas.');
 }
 
+// Regra: uma loja so pode ficar online se ja tiver foto/logo de perfil e pelo menos 3 produtos ativos no cardapio.
+async function verificarPerfilLojaCompleto(lojaId) {
+  const uRes = await pool.query('SELECT foto_url FROM users WHERE id=$1', [lojaId]);
+  const fotoOk = !!(uRes.rows[0] && uRes.rows[0].foto_url && String(uRes.rows[0].foto_url).trim());
+  const prodRes = await pool.query('SELECT COUNT(*) FROM produtos WHERE loja_id=$1 AND ativo=true', [lojaId]);
+  const qtdProdutos = parseInt(prodRes.rows[0].count, 10) || 0;
+  const faltando = [];
+  if (!fotoOk) faltando.push('adicionar uma foto/logo no perfil');
+  if (qtdProdutos < 3) faltando.push('cadastrar pelo menos 3 produtos no cardápio (tem ' + qtdProdutos + ')');
+  return { ok: faltando.length === 0, faltando, qtdProdutos, fotoOk };
+}
+
 async function initDB() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
@@ -632,12 +644,23 @@ app.post('/users/:id/approve', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put('/users/:id', async (req, res) => { if (req.body && req.body.online === true) { req.body.online_since = Date.now(); req.body.ultimo_login = Date.now(); } else if (req.body && req.body.online === false) { req.body.online_since = null; }
-  const fields = req.body;
-  const sets = Object.keys(fields).map((k,i) => `${k}=$${i+2}`).join(',');
-  const vals = Object.values(fields);
-  const r = await pool.query(`UPDATE users SET ${sets} WHERE id=$1 RETURNING *`, [req.params.id, ...vals]);
-  res.json(r.rows[0]);
+app.put('/users/:id', async (req, res) => {
+  try {
+    if (req.body && req.body.online === true) { req.body.online_since = Date.now(); req.body.ultimo_login = Date.now(); } else if (req.body && req.body.online === false) { req.body.online_since = null; }
+
+    if (req.body && req.body.loja_online === true) {
+      const check = await verificarPerfilLojaCompleto(req.params.id);
+      if (!check.ok) {
+        return res.status(400).json({ error: 'Para ficar online, sua loja precisa ' + check.faltando.join(' e ') + '.' });
+      }
+    }
+
+    const fields = req.body;
+    const sets = Object.keys(fields).map((k,i) => `${k}=$${i+2}`).join(',');
+    const vals = Object.values(fields);
+    const r = await pool.query(`UPDATE users SET ${sets} WHERE id=$1 RETURNING *`, [req.params.id, ...vals]);
+    res.json(r.rows[0]);
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 app.delete('/users/:id', async (req, res) => {
@@ -2689,6 +2712,13 @@ async function checkLojaHorarioSemanal() {
         }
       }
       if (deveAbrir !== !!row.loja_online) {
+        if (deveAbrir) {
+          const check = await verificarPerfilLojaCompleto(row.id);
+          if (!check.ok) {
+            console.log('[JOB] Loja id=' + row.id + ' horario diz abrir mas perfil incompleto (' + check.faltando.join('; ') + ') - mantida OFFLINE');
+            continue;
+          }
+        }
         await pool.query("UPDATE users SET loja_online=$2 WHERE id=$1", [row.id, deveAbrir]);
         console.log('[JOB] Loja id=' + row.id + ' horario semanal -> ' + (deveAbrir ? 'ONLINE' : 'OFFLINE') + ' HoraBrasilia=' + nowH);
       }
