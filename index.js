@@ -67,6 +67,32 @@ if (bot) {
   });
 }
 
+// Gera e atribui um custom_id (M0000 para motoboy, L000000 para loja) garantido unico.
+// Usa o MAIOR numero ja usado (nao a contagem) para nao reaproveitar numero de conta excluida,
+// e tenta de novo em caso de colisao (corrida de duas pessoas se cadastrando ao mesmo tempo).
+async function atribuirCustomIdUnico(userId, role) {
+  let prefix, digits;
+  if (role === 'motoboy') { prefix = 'M'; digits = 4; }
+  else if (role === 'loja') { prefix = 'L'; digits = 6; }
+  else return null;
+  const maxRes = await pool.query(
+    "SELECT COALESCE(MAX(CAST(SUBSTRING(custom_id FROM LENGTH($1)+1) AS INTEGER)), 0) AS maxnum FROM users WHERE role=$2 AND custom_id ~ ('^' || $1 || '[0-9]+$')",
+    [prefix, role]
+  );
+  let next = parseInt(maxRes.rows[0].maxnum, 10) + 1;
+  for (let tentativa = 0; tentativa < 30; tentativa++) {
+    const candidato = prefix + String(next).padStart(digits, '0');
+    try {
+      await pool.query('UPDATE users SET custom_id=$1 WHERE id=$2', [candidato, userId]);
+      return candidato;
+    } catch (e) {
+      if (e.code === '23505') { next++; continue; } // ja existe (colisao) - tenta o proximo numero
+      throw e;
+    }
+  }
+  throw new Error('Nao foi possivel gerar um ID unico para o usuario ' + userId + ' apos varias tentativas.');
+}
+
 async function initDB() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
@@ -219,6 +245,8 @@ async function initDB() {
   try { await pool.query("ALTER TABLE withdrawals ADD COLUMN IF NOT EXISTS loja_name VARCHAR(200)"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS launch_at BIGINT DEFAULT 0"); } catch(e) {}
   try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS custom_id VARCHAR(20)"); } catch(e) {}
+  // Garante que o ID (M0000/L000000) nunca se repita entre usuarios - so cria quando nao ha duplicata pendente
+  try { await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_custom_id_unico ON users(custom_id) WHERE custom_id IS NOT NULL"); } catch(e) { console.log('custom_id unique index (pendente ate remover duplicatas existentes):', e.message); }
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS notified_admin BOOLEAN DEFAULT false"); } catch(e) {}
 
   // === CREDIT LIMIT MIGRATIONS ===
@@ -255,16 +283,9 @@ try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARC
 
   // Auto-generate custom_id for existing users
   try {
-    const existingUsers = await pool.query("SELECT id, role FROM users WHERE custom_id IS NULL OR custom_id = ''");
+    const existingUsers = await pool.query("SELECT id, role FROM users WHERE (custom_id IS NULL OR custom_id = '') AND role IN ('motoboy','loja')");
     for (const u of existingUsers.rows) {
-      let prefix, digits;
-      if (u.role === 'motoboy') { prefix = 'M'; digits = 4; }
-      else if (u.role === 'loja') { prefix = 'L'; digits = 6; }
-      else continue;
-      const countRes = await pool.query("SELECT COUNT(*) FROM users WHERE role=$1 AND custom_id IS NOT NULL", [u.role]);
-      const count = parseInt(countRes.rows[0].count) + 1;
-      const newId = prefix + String(count).padStart(digits, '0');
-      await pool.query("UPDATE users SET custom_id=$1 WHERE id=$2", [newId, u.id]);
+      await atribuirCustomIdUnico(u.id, u.role);
     }
   } catch(e) { console.log('custom_id migration:', e.message); }
 
@@ -513,18 +534,17 @@ app.post('/users', async (req, res) => {
       'INSERT INTO users (username,password,role,name,address,phone,vehicle,cpf,approved,telegram_id,custom_credit_limit) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *',
       [s_user, password, role, s_name, s_addr, phone, s_veh, cpf || null, approved, telegram_id || null, custom_credit_limit || null]
     );
-    let prefix2, digits2;
-    if (role === 'motoboy') { prefix2 = 'M'; digits2 = 4; }
-    else if (role === 'loja') { prefix2 = 'L'; digits2 = 6; }
     if (custom_id && custom_id.trim()) {
-      await pool.query('UPDATE users SET custom_id=$1 WHERE id=$2', [custom_id.trim().toUpperCase(), r.rows[0].id]);
-      r.rows[0].custom_id = custom_id.trim().toUpperCase();
-    } else if (prefix2) {
-      const cntRes = await pool.query("SELECT COUNT(*) FROM users WHERE role=$1 AND custom_id IS NOT NULL", [role]);
-      const cnt = parseInt(cntRes.rows[0].count) + 1;
-      const newCid = prefix2 + String(cnt).padStart(digits2, '0');
-      await pool.query("UPDATE users SET custom_id=$1 WHERE id=$2", [newCid, r.rows[0].id]);
-      r.rows[0].custom_id = newCid;
+      try {
+        await pool.query('UPDATE users SET custom_id=$1 WHERE id=$2', [custom_id.trim().toUpperCase(), r.rows[0].id]);
+        r.rows[0].custom_id = custom_id.trim().toUpperCase();
+      } catch (eCid) {
+        if (eCid.code === '23505') return res.status(400).json({ error: 'Esse ID (' + custom_id.trim().toUpperCase() + ') ja esta em uso por outro usuario.' });
+        throw eCid;
+      }
+    } else {
+      const newCid = await atribuirCustomIdUnico(r.rows[0].id, role);
+      if (newCid) r.rows[0].custom_id = newCid;
     }
     res.json(r.rows[0]);
   } catch(e) { res.status(500).json({ error: e.message }); }
@@ -554,16 +574,8 @@ app.post('/register', async (req, res) => {
       [r_user, password, role || 'motoboy', r_name, r_addr, phone, r_veh, cpf || null]
     );
     const regRole = role || 'motoboy';
-    let rpfx, rdigs;
-    if (regRole === 'motoboy') { rpfx = 'M'; rdigs = 4; }
-    else if (regRole === 'loja') { rpfx = 'L'; rdigs = 6; }
-    if (rpfx) {
-      const rcnt = await pool.query("SELECT COUNT(*) FROM users WHERE role=$1 AND custom_id IS NOT NULL", [regRole]);
-      const rn = parseInt(rcnt.rows[0].count) + 1;
-      const rcid = rpfx + String(rn).padStart(rdigs, '0');
-      await pool.query("UPDATE users SET custom_id=$1 WHERE id=$2", [rcid, r.rows[0].id]);
-      r.rows[0].custom_id = rcid;
-    }
+    const rcid = await atribuirCustomIdUnico(r.rows[0].id, regRole);
+    if (rcid) r.rows[0].custom_id = rcid;
         // Processar referral_code se fornecido
     if (referral_code && referral_code.trim()) {
       try {
