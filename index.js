@@ -293,6 +293,12 @@ try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARC
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS ifood_numero_pedido VARCHAR(20)"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS ifood_nome_cliente VARCHAR(100)"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS ifood_confirmado_em TIMESTAMP"); } catch(e) {}
+  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS coleta_lat DOUBLE PRECISION"); } catch(e) {}
+  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS coleta_lng DOUBLE PRECISION"); } catch(e) {}
+  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS entrega_lat DOUBLE PRECISION"); } catch(e) {}
+  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS entrega_lng DOUBLE PRECISION"); } catch(e) {}
+  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS chegada_loja_auto BOOLEAN DEFAULT false"); } catch(e) {}
+  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS chegada_cliente_auto BOOLEAN DEFAULT false"); } catch(e) {}
 
   // Auto-generate custom_id for existing users
   try {
@@ -832,8 +838,8 @@ app.post('/orders', async (req, res) => {
   } catch(eTaxa) { console.error('[TAXA] Erro ao calcular taxas:', eTaxa.message); }
 
   const r = await pool.query(
-    `INSERT INTO orders (loja_user,loja_name,plataforma,endereco_coleta,endereco_entrega,bairro_destino,nome_cliente,telefone_cliente,cod_pedido,cobrar_cliente,tipo_pagamento,valor_pedido,valor_total,valor_motoboy,comissao,distancia,previsao,obs,status,pending_until,telefone_loja,launch_at,complemento_coleta,complemento_entrega,obs_coleta,obs_entrega_loja,delivery_code,taxa_extra_chuva,taxa_extra_noturna,chuva_desconto_de,ifood_localizador,ifood_numero_pedido,ifood_nome_cliente,cpf_cliente,desconto_promocao,nome_promocao) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'novo',$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35) RETURNING *`,
-    [d.loja_user,d.loja_name,d.plataforma,d.endereco_coleta,d.endereco_entrega,d.bairro_destino,d.nome_cliente,d.telefone_cliente,d.cod_pedido,d.cobrar_cliente||'nao',d.tipo_pagamento||'dinheiro',d.valor_pedido||0,valorTotal,valorMotoboy,d.comissao,d.distancia,d.previsao,d.obs,Date.now()+15000,telefone_loja,d.launch_at||0,d.complemento_coleta||null,d.complemento_entrega||null,d.obs_coleta||null,d.obs_entrega_loja||null,deliveryCode,taxa_extra_chuva,taxa_extra_noturna,chuva_desconto_de,d.ifood_localizador||null,d.ifood_numero_pedido||null,d.ifood_nome_cliente||null,d.cpf_cliente||null,d.desconto_promocao||0,d.nome_promocao||null]
+    `INSERT INTO orders (loja_user,loja_name,plataforma,endereco_coleta,endereco_entrega,bairro_destino,nome_cliente,telefone_cliente,cod_pedido,cobrar_cliente,tipo_pagamento,valor_pedido,valor_total,valor_motoboy,comissao,distancia,previsao,obs,status,pending_until,telefone_loja,launch_at,complemento_coleta,complemento_entrega,obs_coleta,obs_entrega_loja,delivery_code,taxa_extra_chuva,taxa_extra_noturna,chuva_desconto_de,ifood_localizador,ifood_numero_pedido,ifood_nome_cliente,cpf_cliente,desconto_promocao,nome_promocao,coleta_lat,coleta_lng,entrega_lat,entrega_lng) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'novo',$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39) RETURNING *`,
+    [d.loja_user,d.loja_name,d.plataforma,d.endereco_coleta,d.endereco_entrega,d.bairro_destino,d.nome_cliente,d.telefone_cliente,d.cod_pedido,d.cobrar_cliente||'nao',d.tipo_pagamento||'dinheiro',d.valor_pedido||0,valorTotal,valorMotoboy,d.comissao,d.distancia,d.previsao,d.obs,Date.now()+15000,telefone_loja,d.launch_at||0,d.complemento_coleta||null,d.complemento_entrega||null,d.obs_coleta||null,d.obs_entrega_loja||null,deliveryCode,taxa_extra_chuva,taxa_extra_noturna,chuva_desconto_de,d.ifood_localizador||null,d.ifood_numero_pedido||null,d.ifood_nome_cliente||null,d.cpf_cliente||null,d.desconto_promocao||0,d.nome_promocao||null,(d.coleta_lat!==undefined&&d.coleta_lat!==null&&d.coleta_lat!=='')?parseFloat(d.coleta_lat):null,(d.coleta_lng!==undefined&&d.coleta_lng!==null&&d.coleta_lng!=='')?parseFloat(d.coleta_lng):null,(d.entrega_lat!==undefined&&d.entrega_lat!==null&&d.entrega_lat!=='')?parseFloat(d.entrega_lat):null,(d.entrega_lng!==undefined&&d.entrega_lng!==null&&d.entrega_lng!=='')?parseFloat(d.entrega_lng):null]
   );
   const pedido = r.rows[0];
   // Notifica loja e cliente via WhatsApp bot
@@ -3111,7 +3117,68 @@ return res.status(500).json({ error: err.message });
 }
 });
 // ROTAS RASTREAMENTO
-app.post('/motoboys/:id/localizacao', async (req, res) => { try { const mid = parseInt(req.params.id); const { lat, lng, order_id } = req.body; if (!lat || !lng) return res.status(400).json({ error: 'lat/lng obrigatorios' }); await pool.query('INSERT INTO motoboy_localizacao (motoboy_id, order_id, lat, lng, updated_at) VALUES ($1, $2, $3, $4, NOW()) ON CONFLICT (motoboy_id) DO UPDATE SET lat=$3, lng=$4, order_id=$2, updated_at=NOW()', [mid, order_id||null, lat, lng]); res.json({ ok: true }); } catch(e) { res.status(500).json({ error: e.message }); } });
+
+// Calcula distancia em metros entre duas coordenadas (formula de haversine)
+function haversineMetros(lat1, lon1, lat2, lon2) {
+  const R = 6371000; // raio da Terra em metros
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+const RAIO_CHEGADA_AUTO = 50; // metros - raio para chegada automatica (coleta e entrega)
+
+// Verifica se o motoboy chegou perto do ponto de coleta ou de entrega do pedido
+// e, se sim, avanca o status automaticamente chamando a mesma rota PUT /orders/:id
+// usada pelo botao manual (mesma logica, mesmas notificacoes). Nunca deve derrubar
+// o ping de localizacao caso algo de errado aqui - por isso tudo fica em try/catch
+// e e chamado sem travar a resposta do ping.
+async function verificarChegadaAutomatica(orderId, lat, lng) {
+  try {
+    const latN = parseFloat(lat), lngN = parseFloat(lng);
+    if (isNaN(latN) || isNaN(lngN)) return;
+    const oRes = await pool.query('SELECT status, coleta_lat, coleta_lng, entrega_lat, entrega_lng FROM orders WHERE id=$1', [orderId]);
+    if (!oRes.rows.length) return;
+    const ord = oRes.rows[0];
+
+    if (ord.status === 'aceito' && ord.coleta_lat !== null && ord.coleta_lat !== undefined && ord.coleta_lng !== null && ord.coleta_lng !== undefined) {
+      const dist = haversineMetros(latN, lngN, parseFloat(ord.coleta_lat), parseFloat(ord.coleta_lng));
+      if (dist <= RAIO_CHEGADA_AUTO) {
+        try {
+          await axios.put(`http://localhost:${PORT}/orders/${orderId}`, { status: 'na_loja', t_na_loja: new Date().toISOString(), chegada_loja_auto: true });
+          console.log('[CHEGADA-AUTO] Pedido #' + orderId + ' -> na_loja automatico (' + Math.round(dist) + 'm)');
+        } catch (ePut) { console.error('[CHEGADA-AUTO] Erro ao avancar na_loja:', ePut.message); }
+      }
+    } else if (ord.status === 'coletado' && ord.entrega_lat !== null && ord.entrega_lat !== undefined && ord.entrega_lng !== null && ord.entrega_lng !== undefined) {
+      const dist = haversineMetros(latN, lngN, parseFloat(ord.entrega_lat), parseFloat(ord.entrega_lng));
+      if (dist <= RAIO_CHEGADA_AUTO) {
+        try {
+          await axios.put(`http://localhost:${PORT}/orders/${orderId}`, { status: 'no_cliente', t_no_cliente: new Date().toISOString(), chegada_cliente_auto: true });
+          console.log('[CHEGADA-AUTO] Pedido #' + orderId + ' -> no_cliente automatico (' + Math.round(dist) + 'm)');
+        } catch (ePut) { console.error('[CHEGADA-AUTO] Erro ao avancar no_cliente:', ePut.message); }
+      }
+    }
+  } catch (e) { console.error('[CHEGADA-AUTO] Erro geral:', e.message); }
+}
+
+app.post('/motoboys/:id/localizacao', async (req, res) => { try { const mid = parseInt(req.params.id); const { lat, lng, order_id } = req.body; if (!lat || !lng) return res.status(400).json({ error: 'lat/lng obrigatorios' }); await pool.query('INSERT INTO motoboy_localizacao (motoboy_id, order_id, lat, lng, updated_at) VALUES ($1, $2, $3, $4, NOW()) ON CONFLICT (motoboy_id) DO UPDATE SET lat=$3, lng=$4, order_id=$2, updated_at=NOW()', [mid, order_id||null, lat, lng]); res.json({ ok: true }); if (order_id) { verificarChegadaAutomatica(order_id, lat, lng); } } catch(e) { res.status(500).json({ error: e.message }); } });
+
+// GET /orders/mapa-ativos - pontos de coleta/entrega dos pedidos ativos, para exibir no mapa do admin
+app.get('/orders/mapa-ativos', async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT id, loja_name, nome_cliente, status, coleta_lat, coleta_lng, entrega_lat, entrega_lng
+       FROM orders
+       WHERE status NOT IN ('entregue','cancelado','retornado')
+         AND (coleta_lat IS NOT NULL OR entrega_lat IS NOT NULL)
+       ORDER BY id DESC LIMIT 200`
+    );
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.get('/motoboys/localizacoes-ativas', async (req, res) => { try { const r = await pool.query("SELECT ml.motoboy_id, ml.order_id, ml.lat, ml.lng, ml.updated_at, u.name AS nome, u.custom_id AS codigo FROM motoboy_localizacao ml JOIN users u ON u.id = ml.motoboy_id WHERE ml.updated_at > NOW() - INTERVAL '2 minutes'"); res.json(r.rows); } catch(e) { res.status(500).json({ error: e.message }); } });
 app.get('/rastrear/:order_id', async (req, res) => { try { const oid = parseInt(req.params.order_id); const r = await pool.query("SELECT ml.lat, ml.lng, ml.updated_at, u.name AS nome_motoboy, o.status, o.nome_cliente FROM motoboy_localizacao ml JOIN users u ON u.id = ml.motoboy_id JOIN orders o ON o.id = ml.order_id WHERE ml.order_id = $1", [oid]); if (r.rows.length === 0) return res.status(404).json({ error: 'Rastreio nao disponivel' }); res.json(r.rows[0]); } catch(e) { res.status(500).json({ error: e.message }); } });
 initDB().then(() => {}); async function cleanupOldOrders() { try { const s = await pool.query('SELECT historico_limpeza_dias FROM settings WHERE id=1'); const dias = parseInt(s.rows[0] && s.rows[0].historico_limpeza_dias) || 30; const r = await pool.query("DELETE FROM orders WHERE status IN ('entregue','cancelado') AND created_at < NOW() - ($1 || ' days')::interval RETURNING id", [dias]); if (r.rows.length > 0) { console.log('[JOB] Limpeza automatica: ' + r.rows.length + ' pedido(s) removido(s) (prazo: ' + dias + ' dias)'); } } catch (e) { console.error('[JOB] Erro na limpeza automatica de pedidos:', e.message); } } app.put('/settings/cleanup-days', async (req, res) => { try { const dias = parseInt(req.body.historico_limpeza_dias) || 30; await pool.query('UPDATE settings SET historico_limpeza_dias=$1 WHERE id=1', [dias]); res.json({ ok: true, historico_limpeza_dias: dias }); } catch(e) { res.status(500).json({ error: e.message }); } });
