@@ -183,6 +183,7 @@ async function initDB() {
     INSERT INTO settings (id) VALUES (1) ON CONFLICT DO NOTHING;
     INSERT INTO users (username,password,role,name) VALUES ('admin','admin123','admin','Administrador') ON CONFLICT DO NOTHING;
     INSERT INTO users (username,password,role,name,approved) VALUES ('FlashDropFinanceiro','financeiro123','financeiro','Financeiro',true) ON CONFLICT DO NOTHING;
+    INSERT INTO users (username,password,role,name,approved,blocked) VALUES ('flashdrop_entrega_direta','${'x' + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)}','loja','FlashDrop - Entrega Direta',true,true) ON CONFLICT DO NOTHING;
   `);
 
   // Migrations
@@ -312,6 +313,8 @@ try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARC
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS chegada_loja_auto BOOLEAN DEFAULT false"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS chegada_cliente_auto BOOLEAN DEFAULT false"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS t_em_preparo TIMESTAMP"); } catch(e) {}
+  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS nome_coleta VARCHAR(100)"); } catch(e) {}
+  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS telefone_coleta VARCHAR(30)"); } catch(e) {}
 
   // Auto-generate custom_id for existing users
   try {
@@ -496,6 +499,14 @@ try { await pool.query(`CREATE TABLE IF NOT EXISTS clientes_loja (id SERIAL PRIM
 }
 
 app.get('/health', (req, res) => res.json({ ok: true }));
+// Conta interna usada pela pagina publica de entrega avulsa (sem loja/cadastro)
+app.get('/orders/loja-entrega-direta', async (req, res) => {
+  try {
+    const r = await pool.query("SELECT id, username, name FROM users WHERE username='flashdrop_entrega_direta'");
+    if (!r.rows.length) return res.status(404).json({ error: 'Conta de entrega direta nao encontrada.' });
+    res.json(r.rows[0]);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
 app.get('/debug/time', (req, res) => {
   const now = new Date();
   const brOffset = -3 * 60;
@@ -862,8 +873,8 @@ app.post('/orders', async (req, res) => {
   } catch(eTaxa) { console.error('[TAXA] Erro ao calcular taxas:', eTaxa.message); }
 
   const r = await pool.query(
-    `INSERT INTO orders (loja_user,loja_name,plataforma,endereco_coleta,endereco_entrega,bairro_destino,nome_cliente,telefone_cliente,cod_pedido,cobrar_cliente,tipo_pagamento,valor_pedido,valor_total,valor_motoboy,comissao,distancia,previsao,obs,status,pending_until,telefone_loja,launch_at,complemento_coleta,complemento_entrega,obs_coleta,obs_entrega_loja,delivery_code,taxa_extra_chuva,taxa_extra_noturna,chuva_desconto_de,ifood_localizador,ifood_numero_pedido,ifood_nome_cliente,cpf_cliente,desconto_promocao,nome_promocao,coleta_lat,coleta_lng,entrega_lat,entrega_lng) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'novo',$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39) RETURNING *`,
-    [d.loja_user,d.loja_name,d.plataforma,d.endereco_coleta,d.endereco_entrega,d.bairro_destino,d.nome_cliente,d.telefone_cliente,d.cod_pedido,d.cobrar_cliente||'nao',d.tipo_pagamento||'dinheiro',d.valor_pedido||0,valorTotal,valorMotoboy,d.comissao,d.distancia,d.previsao,d.obs,Date.now()+15000,telefone_loja,d.launch_at||0,d.complemento_coleta||null,d.complemento_entrega||null,d.obs_coleta||null,d.obs_entrega_loja||null,deliveryCode,taxa_extra_chuva,taxa_extra_noturna,chuva_desconto_de,d.ifood_localizador||null,d.ifood_numero_pedido||null,d.ifood_nome_cliente||null,d.cpf_cliente||null,d.desconto_promocao||0,d.nome_promocao||null,(d.coleta_lat!==undefined&&d.coleta_lat!==null&&d.coleta_lat!=='')?parseFloat(d.coleta_lat):null,(d.coleta_lng!==undefined&&d.coleta_lng!==null&&d.coleta_lng!=='')?parseFloat(d.coleta_lng):null,(d.entrega_lat!==undefined&&d.entrega_lat!==null&&d.entrega_lat!=='')?parseFloat(d.entrega_lat):null,(d.entrega_lng!==undefined&&d.entrega_lng!==null&&d.entrega_lng!=='')?parseFloat(d.entrega_lng):null]
+    `INSERT INTO orders (loja_user,loja_name,plataforma,endereco_coleta,endereco_entrega,bairro_destino,nome_cliente,telefone_cliente,cod_pedido,cobrar_cliente,tipo_pagamento,valor_pedido,valor_total,valor_motoboy,comissao,distancia,previsao,obs,status,pending_until,telefone_loja,launch_at,complemento_coleta,complemento_entrega,obs_coleta,obs_entrega_loja,delivery_code,taxa_extra_chuva,taxa_extra_noturna,chuva_desconto_de,ifood_localizador,ifood_numero_pedido,ifood_nome_cliente,cpf_cliente,desconto_promocao,nome_promocao,coleta_lat,coleta_lng,entrega_lat,entrega_lng,nome_coleta,telefone_coleta) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'novo',$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41) RETURNING *`,
+    [d.loja_user,d.loja_name,d.plataforma,d.endereco_coleta,d.endereco_entrega,d.bairro_destino,d.nome_cliente,d.telefone_cliente,d.cod_pedido,d.cobrar_cliente||'nao',d.tipo_pagamento||'dinheiro',d.valor_pedido||0,valorTotal,valorMotoboy,d.comissao,d.distancia,d.previsao,d.obs,Date.now()+15000,telefone_loja,d.launch_at||0,d.complemento_coleta||null,d.complemento_entrega||null,d.obs_coleta||null,d.obs_entrega_loja||null,deliveryCode,taxa_extra_chuva,taxa_extra_noturna,chuva_desconto_de,d.ifood_localizador||null,d.ifood_numero_pedido||null,d.ifood_nome_cliente||null,d.cpf_cliente||null,d.desconto_promocao||0,d.nome_promocao||null,(d.coleta_lat!==undefined&&d.coleta_lat!==null&&d.coleta_lat!=='')?parseFloat(d.coleta_lat):null,(d.coleta_lng!==undefined&&d.coleta_lng!==null&&d.coleta_lng!=='')?parseFloat(d.coleta_lng):null,(d.entrega_lat!==undefined&&d.entrega_lat!==null&&d.entrega_lat!=='')?parseFloat(d.entrega_lat):null,(d.entrega_lng!==undefined&&d.entrega_lng!==null&&d.entrega_lng!=='')?parseFloat(d.entrega_lng):null,d.nome_coleta||null,d.telefone_coleta||null]
   );
   const pedido = r.rows[0];
   // Notifica loja e cliente via WhatsApp bot
@@ -892,6 +903,24 @@ app.post('/orders', async (req, res) => {
       // Envia para o cliente
     }
   } catch(eBotPedido) { console.error('[BOT] Erro geral pedido:', eBotPedido.message); }
+  // Notifica quem esta na coleta (entrega avulsa/direta) que o pedido foi criado
+  if (pedido.telefone_coleta) {
+    try {
+      const botUrlColCriado = process.env.BOT_URL;
+      const botSecretColCriado = process.env.BOT_SECRET;
+      if (botUrlColCriado && botSecretColCriado) {
+        const msgColCriado = '📦 Pedido de coleta criado!\n\n' +
+          'Pedido #' + pedido.id + '\n' +
+          '📍 Coleta: ' + (pedido.endereco_coleta || '-') + '\n' +
+          '🏠 Entrega: ' + (pedido.endereco_entrega || '-') + '\n\n' +
+          '⏳ Aguardando um motoboy aceitar a corrida. Voce sera avisado por aqui.';
+        axios.post(botUrlColCriado + '/api/send-message',
+          { phone: pedido.telefone_coleta, message: msgColCriado },
+          { headers: { 'x-bot-secret': botSecretColCriado } }
+        ).catch(e => console.error('[BOT] Erro WhatsApp coleta criado:', e.message));
+      }
+    } catch(eBotColCriado) { console.error('[BOT] Erro geral WhatsApp coleta criado:', eBotColCriado.message); }
+  }
   res.json(pedido);
 });
 
@@ -1373,6 +1402,26 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
       const botSecretAceito = process.env.BOT_SECRET;
     } catch(eBotAceito) { console.error('[BOT] Erro geral WhatsApp aceito:', eBotAceito.message); }
   }
+  // Notificar quem esta na coleta (entrega avulsa/direta) que um motoboy aceitou, com nome e telefone dele
+  if (fields.status === 'aceito' && order.telefone_coleta && fields.motoboy_id) {
+    try {
+      const botUrlColAceito = process.env.BOT_URL;
+      const botSecretColAceito = process.env.BOT_SECRET;
+      if (botUrlColAceito && botSecretColAceito) {
+        const mbColRes = await pool.query('SELECT phone FROM users WHERE id=$1', [fields.motoboy_id]);
+        const mbColPhone = mbColRes.rows.length > 0 ? mbColRes.rows[0].phone : null;
+        const mbColNome = fields.motoboy_name || order.motoboy_name || 'Motoboy';
+        const msgColAceito = '🛵 Motoboy a caminho da coleta!\n\n' +
+          'Pedido #' + order.id + '\n' +
+          'Motoboy: ' + mbColNome + (mbColPhone ? ('\n📞 Telefone: ' + mbColPhone) : '') + '\n\n' +
+          'Ele esta indo ate o endereco de coleta buscar a encomenda.';
+        axios.post(botUrlColAceito + '/api/send-message',
+          { phone: order.telefone_coleta, message: msgColAceito },
+          { headers: { 'x-bot-secret': botSecretColAceito } }
+        ).catch(e => console.error('[BOT] Erro WhatsApp coleta aceito:', e.message));
+      }
+    } catch(eBotColAceito) { console.error('[BOT] Erro geral WhatsApp coleta aceito:', eBotColAceito.message); }
+  }
   // Notificar motoboy via WhatsApp quando aceita pedido cartao_aproximacao
   if (fields.status === 'aceito' && order.tipo_pagamento === 'cartao_aproximacao' && fields.motoboy_id) {
     try {
@@ -1404,6 +1453,17 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
       if (botUrlNaLoja && botSecretNaLoja) {
         // Mensagem para o cliente
         // Mensagem para a loja avisando que motoboy chegou
+        // Entrega avulsa/direta: avisa quem esta na coleta que o motoboy chegou
+        if (order.telefone_coleta) {
+          const mbNaLojaNome = order.motoboy_name || 'O motoboy';
+          const msgColNaLoja = '📍 ' + mbNaLojaNome + ' chegou no local de coleta!\n\n' +
+            'Pedido #' + order.id + '\n' +
+            'Ele esta te aguardando para retirar a encomenda.';
+          axios.post(botUrlNaLoja + '/api/send-message',
+            { phone: order.telefone_coleta, message: msgColNaLoja },
+            { headers: { 'x-bot-secret': botSecretNaLoja } }
+          ).catch(e => console.error('[BOT] Erro WhatsApp coleta na_loja:', e.message));
+        }
       }
     } catch(eBotNaLoja) { console.error('[BOT] Erro geral WhatsApp na_loja:', eBotNaLoja.message); }
   }
