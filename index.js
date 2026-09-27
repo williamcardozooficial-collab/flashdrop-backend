@@ -3182,13 +3182,25 @@ app.post('/ifood/confirmar-entrega', async (req, res) => {
     });
     await page.waitForTimeout(3000);
     // Verifica sucesso
-    const sucesso = await page.evaluate(() => {
-      const body = document.body.textContent;
-      return body.includes('entrega confirmada') || body.includes('Entrega confirmada') || body.includes('sucesso') || body.includes('confirmado');
+    // Obs: palavras genericas como "sucesso"/"confirmado" tambem aparecem em
+    // mensagens de ERRO do proprio site do iFood (ex: "pedido ja foi confirmado
+    // anteriormente", "nao foi possivel confirmar"). Por isso, so aceitamos essas
+    // palavras genericas quando NAO houver nenhum indicio de erro na pagina -
+    // caso contrario um erro do iFood poderia ser lido como sucesso e o pedido
+    // seria finalizado no FlashDrop sem a entrega ter sido confirmada de verdade.
+    const resultadoPagina = await page.evaluate(() => {
+      const bodyRaw = document.body.textContent || '';
+      const body = bodyRaw.toLowerCase();
+      const frasesErro = ['nao foi possivel', 'não foi possível', 'invalido', 'inválido', 'incorreto', 'incorreta', 'nao encontrado', 'não encontrado', 'ja foi confirmado', 'já foi confirmado', 'expirou', 'expirado', 'tente novamente', 'erro ao'];
+      const temErro = frasesErro.some(f => body.includes(f));
+      const fraseForteSucesso = body.includes('entrega confirmada');
+      const fraseFracaSucesso = body.includes('sucesso') || body.includes('confirmado');
+      return { temErro, fraseForteSucesso, fraseFracaSucesso };
     });
     await page.close();
+    const sucesso = resultadoPagina.fraseForteSucesso || (resultadoPagina.fraseFracaSucesso && !resultadoPagina.temErro);
     if (sucesso) return res.json({ ok: true });
-    return res.status(400).json({ ok: false, erro: 'Codigo incorreto ou pedido nao encontrado' });
+    return res.status(400).json({ ok: false, erro: 'Nao foi possivel confirmar a entrega no iFood. Verifique o localizador e o codigo do cliente e tente novamente.' });
   } catch (err) {
     if (page) await page.close().catch(() => {});
     console.error('[iFood bot] confirmar erro:', err.message);
