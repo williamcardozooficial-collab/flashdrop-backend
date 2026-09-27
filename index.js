@@ -13,6 +13,18 @@ app.use(express.json());
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
 
+// Registra um evento de aceite/cancelamento/timeout de motoboy num pedido, para
+// manter o historico completo mesmo quando motoboy_id/motoboy_name do pedido
+// sao sobrescritos por um novo motoboy. Nunca deve derrubar o fluxo principal.
+async function registrarEventoMotoboyPedido(orderId, motoboyId, motoboyName, evento, descricao) {
+  try {
+    await pool.query(
+      'INSERT INTO pedido_motoboy_eventos (order_id, motoboy_id, motoboy_name, evento, descricao) VALUES ($1,$2,$3,$4,$5)',
+      [orderId, motoboyId || null, motoboyName || null, evento, descricao || null]
+    );
+  } catch (e) { console.error('[PEDIDO_MOTOBOY_EVENTOS] Erro ao registrar:', e.message); }
+}
+
 // SANITIZACAO DE INPUT - protecao XSS e SQL Injection
 function sanitize(val) {
   if (val === null || val === undefined) return val;
@@ -299,6 +311,7 @@ try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARC
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS entrega_lng DOUBLE PRECISION"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS chegada_loja_auto BOOLEAN DEFAULT false"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS chegada_cliente_auto BOOLEAN DEFAULT false"); } catch(e) {}
+  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS t_em_preparo TIMESTAMP"); } catch(e) {}
 
   // Auto-generate custom_id for existing users
   try {
@@ -337,6 +350,17 @@ try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARC
       valor DECIMAL NOT NULL,
       descricao TEXT,
       order_id INTEGER,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`);
+  } catch(e) {}
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS pedido_motoboy_eventos (
+      id SERIAL PRIMARY KEY,
+      order_id INTEGER NOT NULL,
+      motoboy_id INTEGER,
+      motoboy_name VARCHAR(100),
+      evento VARCHAR(30) NOT NULL,
+      descricao TEXT,
       created_at TIMESTAMP DEFAULT NOW()
     )`);
   } catch(e) {}
@@ -874,6 +898,7 @@ app.post('/orders', async (req, res) => {
 app.put('/orders/:id', async (req, res) => {
   try {
     const fields = req.body;
+    if (fields.status === 'em_preparo' && !fields.t_em_preparo) { fields.t_em_preparo = new Date().toISOString(); }
 
     // === VERIFICACAO DE LIMITE DE CREDITO AO ACEITAR CORRIDA EM DINHEIRO ===
     if (fields.status === 'em_preparo' && fields.motoboy_id) {
@@ -930,8 +955,9 @@ app.put('/orders/:id', async (req, res) => {
     /* VERIFICACAO DE LIMITE DE PEDIDOS SIMULTANEOS AO ACEITAR CORRIDA */ if (fields.status === 'aceito' && fields.motoboy_id) { try { const mbLimRes = await pool.query('SELECT max_pedidos_individual FROM users WHERE id=$1', [fields.motoboy_id]); const cfgLimRes = await pool.query('SELECT max_per_motoboy FROM settings WHERE id=1'); const individualMax = mbLimRes.rows[0] ? mbLimRes.rows[0].max_pedidos_individual : null; const defaultMax = parseInt(cfgLimRes.rows[0] && cfgLimRes.rows[0].max_per_motoboy) || 2; const effectiveMax = (individualMax !== null && individualMax !== undefined) ? parseInt(individualMax) : defaultMax; if (effectiveMax > 0) { const ativosRes = await pool.query("SELECT COUNT(*) FROM orders WHERE motoboy_id=$1 AND status NOT IN ('pendente','entregue','retornado','cancelado')", [fields.motoboy_id]); const ativos = parseInt(ativosRes.rows[0].count) || 0; if (ativos >= effectiveMax) { return res.status(403).json({ error: 'Voce atingiu o limite de ' + effectiveMax + ' pedido(s) simultaneo(s). Finalize uma entrega para poder aceitar outro.', limit_reached: true }); } } } catch(eLimitePedidos) { console.error('[LIMITE_PEDIDOS] Erro:', eLimitePedidos.message); } }     const sets = Object.keys(fields).map((k,i) => `${k}=$${i+2}`).join(',');
     const vals = Object.values(fields);
 
-    const prevOrderRes = await pool.query('SELECT motoboy_id, status, delivery_code, valor_total, loja_user, tipo_pagamento, ifood_confirmado_em FROM orders WHERE id=$1', [req.params.id]);
+    const prevOrderRes = await pool.query('SELECT motoboy_id, motoboy_name, status, delivery_code, valor_total, loja_user, tipo_pagamento, ifood_confirmado_em FROM orders WHERE id=$1', [req.params.id]);
     const prevMotoboyId = prevOrderRes.rows.length > 0 ? prevOrderRes.rows[0].motoboy_id : null;
+    const prevMotoboyName = prevOrderRes.rows.length > 0 ? prevOrderRes.rows[0].motoboy_name : null;
 
     // Validacao do codigo de entrega ANTES do UPDATE
     if (fields.status === 'entregue' && prevOrderRes.rows.length > 0 && prevOrderRes.rows[0].delivery_code && prevOrderRes.rows[0].tipo_pagamento !== 'ifood') {
@@ -954,7 +980,11 @@ app.put('/orders/:id', async (req, res) => {
     }
 
     const r = await pool.query(`UPDATE orders SET ${sets} WHERE id=$1 RETURNING *`, [req.params.id, ...vals]);
-    const order = r.rows[0]; try { if (fields.valor_total !== undefined && prevOrderRes.rows.length > 0) { const oldValorTotal = parseFloat(prevOrderRes.rows[0].valor_total) || 0; const newValorTotal = parseFloat(fields.valor_total) || 0; const diffValor = newValorTotal - oldValorTotal; const lojaUserAjuste = order.loja_user || prevOrderRes.rows[0].loja_user; if (diffValor > 0 && lojaUserAjuste) { await pool.query('UPDATE users SET credit = credit - $1 WHERE username=$2', [diffValor, lojaUserAjuste]); const lojaEvResAjuste = await pool.query('SELECT id FROM users WHERE username=$1', [lojaUserAjuste]); if (lojaEvResAjuste.rows.length > 0) { await pool.query('INSERT INTO loja_wallet_events (loja_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)', [lojaEvResAjuste.rows[0].id, 'ajuste_pedido', diffValor, 'Ajuste de pedido #' + req.params.id + ' (valor de entrega alterado de R$ ' + oldValorTotal.toFixed(2) + ' para R$ ' + newValorTotal.toFixed(2) + ')', req.params.id]); } } } } catch (eAjustePedido) { console.error('[AJUSTE_PEDIDO] Erro:', eAjustePedido.message); }
+    const order = r.rows[0];
+    if (fields.status === 'aceito' && fields.motoboy_id) {
+      registrarEventoMotoboyPedido(order.id, fields.motoboy_id, fields.motoboy_name || order.motoboy_name, 'aceito', null);
+    }
+    try { if (fields.valor_total !== undefined && prevOrderRes.rows.length > 0) { const oldValorTotal = parseFloat(prevOrderRes.rows[0].valor_total) || 0; const newValorTotal = parseFloat(fields.valor_total) || 0; const diffValor = newValorTotal - oldValorTotal; const lojaUserAjuste = order.loja_user || prevOrderRes.rows[0].loja_user; if (diffValor > 0 && lojaUserAjuste) { await pool.query('UPDATE users SET credit = credit - $1 WHERE username=$2', [diffValor, lojaUserAjuste]); const lojaEvResAjuste = await pool.query('SELECT id FROM users WHERE username=$1', [lojaUserAjuste]); if (lojaEvResAjuste.rows.length > 0) { await pool.query('INSERT INTO loja_wallet_events (loja_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)', [lojaEvResAjuste.rows[0].id, 'ajuste_pedido', diffValor, 'Ajuste de pedido #' + req.params.id + ' (valor de entrega alterado de R$ ' + oldValorTotal.toFixed(2) + ' para R$ ' + newValorTotal.toFixed(2) + ')', req.params.id]); } } } } catch (eAjustePedido) { console.error('[AJUSTE_PEDIDO] Erro:', eAjustePedido.message); }
     // Notificar motoboys quando loja coloca pedido em preparo
     if (fields.status === 'em_preparo' && bot) {
       try {
@@ -1047,6 +1077,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
       const BLOCK_MS = 10 * 60 * 1000;
       const blockedUntil = Date.now() + BLOCK_MS;
       await pool.query('UPDATE users SET blocked_until=$1 WHERE id=$2', [blockedUntil, prevMotoboyId]);
+      registrarEventoMotoboyPedido(order.id, prevMotoboyId, prevMotoboyName, 'cancelado', 'Motoboy cancelou o pedido (bloqueado 10 min)');
     }
 
     // Estorno para a loja quando loja cancela o pedido (nao-dinheiro e nao-entregue)
@@ -2086,6 +2117,7 @@ async function checkLateArrivals() {
         "UPDATE orders SET status='pendente', motoboy_id=NULL, motoboy_name=NULL, t_aceito=NULL, pending_until=$1 WHERE id=$2",
         [Date.now() + 15000, order.id]
       );
+      registrarEventoMotoboyPedido(order.id, order.motoboy_id, order.motoboy_name, 'timeout', 'Motoboy nao chegou na loja em 15 minutos, pedido voltou pro sistema');
       if (bot) {
         const groupId = process.env.TELEGRAM_GROUP_ID;
         let lojaRepostNome = order.loja_name;
@@ -3180,6 +3212,19 @@ app.get('/orders/mapa-ativos', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/motoboys/localizacoes-ativas', async (req, res) => { try { const r = await pool.query("SELECT ml.motoboy_id, ml.order_id, ml.lat, ml.lng, ml.updated_at, u.name AS nome, u.custom_id AS codigo FROM motoboy_localizacao ml JOIN users u ON u.id = ml.motoboy_id WHERE ml.updated_at > NOW() - INTERVAL '2 minutes'"); res.json(r.rows); } catch(e) { res.status(500).json({ error: e.message }); } });
+
+// GET /orders/motoboy-eventos - historico de aceites/cancelamentos/timeouts de motoboy por pedido,
+// usado no admin pra mostrar todos os motoboys que passaram por um pedido (nao so o atual)
+app.get('/orders/motoboy-eventos', async (req, res) => {
+  try {
+    const r = await pool.query(
+      `SELECT order_id, motoboy_id, motoboy_name, evento, descricao, created_at
+       FROM pedido_motoboy_eventos
+       ORDER BY created_at DESC LIMIT 3000`
+    );
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.get('/rastrear/:order_id', async (req, res) => { try { const oid = parseInt(req.params.order_id); const r = await pool.query("SELECT ml.lat, ml.lng, ml.updated_at, u.name AS nome_motoboy, o.status, o.nome_cliente FROM motoboy_localizacao ml JOIN users u ON u.id = ml.motoboy_id JOIN orders o ON o.id = ml.order_id WHERE ml.order_id = $1", [oid]); if (r.rows.length === 0) return res.status(404).json({ error: 'Rastreio nao disponivel' }); res.json(r.rows[0]); } catch(e) { res.status(500).json({ error: e.message }); } });
 initDB().then(() => {}); async function cleanupOldOrders() { try { const s = await pool.query('SELECT historico_limpeza_dias FROM settings WHERE id=1'); const dias = parseInt(s.rows[0] && s.rows[0].historico_limpeza_dias) || 30; const r = await pool.query("DELETE FROM orders WHERE status IN ('entregue','cancelado') AND created_at < NOW() - ($1 || ' days')::interval RETURNING id", [dias]); if (r.rows.length > 0) { console.log('[JOB] Limpeza automatica: ' + r.rows.length + ' pedido(s) removido(s) (prazo: ' + dias + ' dias)'); } } catch (e) { console.error('[JOB] Erro na limpeza automatica de pedidos:', e.message); } } app.put('/settings/cleanup-days', async (req, res) => { try { const dias = parseInt(req.body.historico_limpeza_dias) || 30; await pool.query('UPDATE settings SET historico_limpeza_dias=$1 WHERE id=1', [dias]); res.json({ ok: true, historico_limpeza_dias: dias }); } catch(e) { res.status(500).json({ error: e.message }); } });
   
