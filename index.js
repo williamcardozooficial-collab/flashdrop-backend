@@ -292,6 +292,7 @@ try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARC
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS ifood_localizador VARCHAR(20)"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS ifood_numero_pedido VARCHAR(20)"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS ifood_nome_cliente VARCHAR(100)"); } catch(e) {}
+  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS ifood_confirmado_em TIMESTAMP"); } catch(e) {}
 
   // Auto-generate custom_id for existing users
   try {
@@ -923,7 +924,7 @@ app.put('/orders/:id', async (req, res) => {
     /* VERIFICACAO DE LIMITE DE PEDIDOS SIMULTANEOS AO ACEITAR CORRIDA */ if (fields.status === 'aceito' && fields.motoboy_id) { try { const mbLimRes = await pool.query('SELECT max_pedidos_individual FROM users WHERE id=$1', [fields.motoboy_id]); const cfgLimRes = await pool.query('SELECT max_per_motoboy FROM settings WHERE id=1'); const individualMax = mbLimRes.rows[0] ? mbLimRes.rows[0].max_pedidos_individual : null; const defaultMax = parseInt(cfgLimRes.rows[0] && cfgLimRes.rows[0].max_per_motoboy) || 2; const effectiveMax = (individualMax !== null && individualMax !== undefined) ? parseInt(individualMax) : defaultMax; if (effectiveMax > 0) { const ativosRes = await pool.query("SELECT COUNT(*) FROM orders WHERE motoboy_id=$1 AND status NOT IN ('pendente','entregue','retornado','cancelado')", [fields.motoboy_id]); const ativos = parseInt(ativosRes.rows[0].count) || 0; if (ativos >= effectiveMax) { return res.status(403).json({ error: 'Voce atingiu o limite de ' + effectiveMax + ' pedido(s) simultaneo(s). Finalize uma entrega para poder aceitar outro.', limit_reached: true }); } } } catch(eLimitePedidos) { console.error('[LIMITE_PEDIDOS] Erro:', eLimitePedidos.message); } }     const sets = Object.keys(fields).map((k,i) => `${k}=$${i+2}`).join(',');
     const vals = Object.values(fields);
 
-    const prevOrderRes = await pool.query('SELECT motoboy_id, status, delivery_code, valor_total, loja_user, tipo_pagamento FROM orders WHERE id=$1', [req.params.id]);
+    const prevOrderRes = await pool.query('SELECT motoboy_id, status, delivery_code, valor_total, loja_user, tipo_pagamento, ifood_confirmado_em FROM orders WHERE id=$1', [req.params.id]);
     const prevMotoboyId = prevOrderRes.rows.length > 0 ? prevOrderRes.rows[0].motoboy_id : null;
 
     // Validacao do codigo de entrega ANTES do UPDATE
@@ -932,6 +933,18 @@ app.put('/orders/:id', async (req, res) => {
       if (obsInformada !== String(prevOrderRes.rows[0].delivery_code)) {
         return res.status(400).json({ error: 'Codigo de entrega incorreto. Verifique o codigo com o cliente e tente novamente.' });
       }
+    }
+    // Pedidos iFood Entrega Propria: o codigo de entrega comum (acima) nao se
+    // aplica a eles - a confirmacao deles e feita pelo robo do iFood (rota
+    // /ifood/confirmar-entrega), que so grava ifood_confirmado_em quando a
+    // entrega e REALMENTE confirmada no site do iFood. Por isso, bloqueamos
+    // aqui no servidor qualquer tentativa de marcar um pedido iFood como
+    // entregue sem essa confirmacao real registrada - isso vale para
+    // qualquer tela que tente finalizar (app do motoboy, painel admin, etc),
+    // fechando a brecha de finalizar um pedido iFood com codigo errado ou
+    // sem confirmar de verdade no iFood.
+    if (fields.status === 'entregue' && prevOrderRes.rows.length > 0 && prevOrderRes.rows[0].tipo_pagamento === 'ifood' && !prevOrderRes.rows[0].ifood_confirmado_em) {
+      return res.status(400).json({ error: 'Este pedido iFood ainda nao teve a entrega confirmada no site do iFood. Confirme a entrega (localizador + codigo do cliente) antes de finalizar.' });
     }
 
     const r = await pool.query(`UPDATE orders SET ${sets} WHERE id=$1 RETURNING *`, [req.params.id, ...vals]);
@@ -3142,10 +3155,10 @@ app.post('/ifood/verificar-localizador', async (req, res) => {
 });
 
 // POST /ifood/confirmar-entrega
-// Body: { localizador: "12345678", codigoCliente: "1234" }
+// Body: { localizador: "12345678", codigoCliente: "1234", orderId: 123 }
 // Retorna: { ok: true } ou { ok: false, erro: "..." }
 app.post('/ifood/confirmar-entrega', async (req, res) => {
-  const { localizador, codigoCliente } = req.body;
+  const { localizador, codigoCliente, orderId } = req.body;
   if (!localizador || localizador.length !== 8) return res.status(400).json({ ok: false, erro: 'Localizador deve ter 8 digitos' });
   if (!codigoCliente || codigoCliente.length !== 4) return res.status(400).json({ ok: false, erro: 'Codigo do cliente deve ter 4 digitos' });
   let page;
@@ -3199,7 +3212,17 @@ app.post('/ifood/confirmar-entrega', async (req, res) => {
     });
     await page.close();
     const sucesso = resultadoPagina.fraseForteSucesso || (resultadoPagina.fraseFracaSucesso && !resultadoPagina.temErro);
-    if (sucesso) return res.json({ ok: true });
+    if (sucesso) {
+      // Registra no proprio pedido que a confirmacao no iFood realmente aconteceu.
+      // Isso e o que a rota PUT /orders/:id exige antes de aceitar finalizar um
+      // pedido iFood - assim nenhuma tela (app do motoboy, painel admin, etc)
+      // consegue marcar um pedido iFood como entregue sem essa confirmacao real.
+      if (orderId) {
+        try { await pool.query('UPDATE orders SET ifood_confirmado_em = NOW() WHERE id=$1', [orderId]); }
+        catch (eSalvarConf) { console.error('[iFood bot] erro ao salvar confirmacao no pedido:', eSalvarConf.message); }
+      }
+      return res.json({ ok: true });
+    }
     return res.status(400).json({ ok: false, erro: 'Nao foi possivel confirmar a entrega no iFood. Verifique o localizador e o codigo do cliente e tente novamente.' });
   } catch (err) {
     if (page) await page.close().catch(() => {});
