@@ -3133,6 +3133,7 @@ const pref = prefRes.data;
 // 2) Criar pagamento PIX para gerar copia e cola
 let pixCopiaECola = null;
 let pixQrCodeBase64 = null;
+let pixPaymentId = null;
 try {
 const pixPayload = {
 transaction_amount: valor,
@@ -3160,7 +3161,10 @@ if (pixData) {
 pixCopiaECola = pixData.qr_code || null;
 pixQrCodeBase64 = pixData.qr_code_base64 || null;
 }
-// Salvar payment_id associado ao preference_id para verificacao posterior
+// Guarda o payment_id do pagamento pix criado diretamente - e ele que permite
+// verificar o pagamento de forma confiavel depois (mesmo mecanismo do "adicionar
+// saldo": busca direta GET /v1/payments/:id, em vez de busca por preference_id).
+pixPaymentId = pixRes.data.id || null;
 } catch(pixErr) {
 console.error('[MP-CHECKOUT] Erro ao gerar PIX:', pixErr.response ? JSON.stringify(pixErr.response.data) : pixErr.message);
 }
@@ -3170,7 +3174,8 @@ checkout_url: pref.init_point,
 sandbox_url: pref.sandbox_init_point,
 preference_id: pref.id,
 pix_copia_cola: pixCopiaECola,
-pix_qrcode_base64: pixQrCodeBase64
+pix_qrcode_base64: pixQrCodeBase64,
+pix_payment_id: pixPaymentId
 });
 
 } catch(err) {
@@ -3188,17 +3193,39 @@ app.post('/mercadopago/webhook-pedido/:loja_id', async (req, res) => {
   // A confirmacao de pagamento e feita pelo polling no frontend
   res.status(200).json({ received: true });
 });
-// GET /mercadopago/verificar-pagamento-pedido?preference_id=xxx&loja_id=xxx
+// GET /mercadopago/verificar-pagamento-pedido?payment_id=xxx&loja_id=xxx  (ou preference_id=xxx, para pedidos antigos)
 app.get('/mercadopago/verificar-pagamento-pedido', async (req, res) => {
 try {
-const { preference_id, loja_id } = req.query;
-if (!preference_id || !loja_id) return res.status(400).json({ error: 'preference_id e loja_id obrigatorios' });
+const { preference_id, loja_id, payment_id } = req.query;
+if ((!preference_id && !payment_id) || !loja_id) return res.status(400).json({ error: 'payment_id (ou preference_id) e loja_id obrigatorios' });
 const lojaRes = await pool.query('SELECT mp_access_token FROM users WHERE id=$1', [loja_id]);
 if (!lojaRes.rows.length) return res.status(400).json({ error: 'Loja nao encontrada' });
 const mpToken = (lojaRes.rows[0] && lojaRes.rows[0].mp_access_token) || process.env.MP_ACCESS_TOKEN;
 if (!mpToken) return res.status(400).json({ error: 'Token Mercado Pago nao configurado no servidor' });
-// Buscar pagamentos por preference_id
+
+// Mesmo mecanismo usado no "Adicionar Saldo" da loja (GET /mercadopago/status/:paymentId):
+// busca DIRETA do pagamento pelo payment_id. E o jeito confiavel de verificar, porque
+// busca exatamente o pagamento que foi criado - nao depende do MP indexar o pagamento
+// pelo preference_id (que e o que falhava antes).
+if (payment_id) {
+try {
+const pr = await axios.get('https://api.mercadopago.com/v1/payments/' + payment_id, {
+headers: { 'Authorization': 'Bearer ' + mpToken }
+});
+const p = pr.data;
+if (p && p.status === 'approved') {
+return res.json({ pago: true, payment_id: p.id, valor: p.transaction_amount, status: p.status });
+}
+return res.json({ pago: false, status: p ? p.status : null });
+} catch(e0) {
+console.error('[MP-VER] payment_id lookup err:', e0.response ? JSON.stringify(e0.response.data) : e0.message);
+// se der erro na busca direta, cai no fallback por preference_id abaixo (se disponivel)
+}
+}
+
+// Fallback (pedidos antigos, sem payment_id salvo): busca por preference_id
 let aprovado = null;
+if (preference_id) {
 try {
 const sr1 = await axios.get('https://api.mercadopago.com/v1/payments/search', {
 headers: { 'Authorization': 'Bearer ' + mpToken },
@@ -3207,6 +3234,7 @@ params: { preference_id: preference_id, sort: 'date_created', criteria: 'desc', 
 const p1 = sr1.data && sr1.data.results ? sr1.data.results : [];
 aprovado = p1.find(p => p.status === 'approved');
 } catch(e1) { console.error('[MP-VER] search err:', e1.message); }
+}
 if (aprovado) {
 return res.json({ pago: true, payment_id: aprovado.id, valor: aprovado.transaction_amount, status: aprovado.status });
 }
