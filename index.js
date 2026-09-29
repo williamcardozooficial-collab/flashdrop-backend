@@ -205,6 +205,7 @@ async function initDB() {
     try { await pool.query("CREATE TABLE IF NOT EXISTS avaliacoes (id SERIAL PRIMARY KEY, order_id INTEGER UNIQUE, loja_user VARCHAR(50), cod_pedido VARCHAR(50), nota INTEGER NOT NULL, comentario TEXT, created_at TIMESTAMP DEFAULT NOW())"); } catch(e) {}
     try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS price_per_km_acima DECIMAL DEFAULT 0"); } catch(e) {}
     try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS km_limite_faixa DECIMAL DEFAULT 0"); } catch(e) {}
+    try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS commission_min DECIMAL DEFAULT 0"); } catch(e) {}
     try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS desconto_promocao DECIMAL DEFAULT 0"); } catch(e) {}
     try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS nome_promocao VARCHAR(200)"); } catch(e) {}
 
@@ -1750,7 +1751,7 @@ app.put('/settings/emprestimo-modo', async (req, res) => { try { const { modo } 
           taxa_noturna, taxa_noturna_ativa, taxa_noturna_hora_inicio, taxa_noturna_hora_fim, taxa_noturna_horarios,
           perc_cartao_aprox,
           app_link, wpp_link, app_data, taxa_cancelamento, formas_pagamento_novo_pedido,
-          price_per_km_acima, km_limite_faixa } = req.body;
+          price_per_km_acima, km_limite_faixa, commission_min } = req.body;
   const delayVal = (launch_delay_minutes !== null) ? parseInt(launch_delay_minutes) : 60;
   const creditLimitVal = (credit_limit !== null) ? parseFloat(credit_limit) : 20.00;
     const commissionTypeVal = (commission_type === 'percentual') ? 'percentual' : 'valor';
@@ -1764,7 +1765,7 @@ app.put('/settings/emprestimo-modo', async (req, res) => { try { const { modo } 
       app_link=$15, wpp_link=$16, app_data=$17,
       perc_cartao_aprox=$18, taxa_cancelamento=$19, formas_pagamento_novo_pedido=$20,
             taxa_noturna_horarios=$21, commission_type=$22,
-            price_per_km_acima=$23, km_limite_faixa=$24
+            price_per_km_acima=$23, km_limite_faixa=$24, commission_min=$25
       WHERE id=1 RETURNING *`,
     [min_fee, price_per_km, arrancada, commission, max_per_motoboy, delayVal, creditLimitVal,
      taxa_chuva || 0, taxa_chuva_ativa || false, taxa_chuva_desconto_de || 'admin',
@@ -1774,7 +1775,7 @@ app.put('/settings/emprestimo-modo', async (req, res) => { try { const { modo } 
      parseFloat(perc_cartao_aprox) || 5.00, parseFloat(taxa_cancelamento) || 0, formas_pagamento_novo_pedido || '',
           taxa_noturna_horarios ? (typeof taxa_noturna_horarios === 'string' ? taxa_noturna_horarios : JSON.stringify(taxa_noturna_horarios)) : null,
           commissionTypeVal,
-          parseFloat(price_per_km_acima) || 0, parseFloat(km_limite_faixa) || 0]
+          parseFloat(price_per_km_acima) || 0, parseFloat(km_limite_faixa) || 0, parseFloat(commission_min) || 0]
   );
   res.json(r.rows[0]);
 });
