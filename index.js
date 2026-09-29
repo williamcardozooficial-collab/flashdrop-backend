@@ -3490,6 +3490,7 @@ app.get('/financeiro/resumo', async (req, res) => {
     const dinheiroColetado = await pool.query("SELECT COALESCE(SUM(valor_pedido),0) AS total, COUNT(*) AS qtd FROM orders WHERE status='entregue' AND tipo_pagamento='dinheiro' AND created_at BETWEEN $1 AND $2", [inicio, fim]);
     const cartaoAproxColetado = await pool.query("SELECT COALESCE(SUM(valor_pedido),0) AS total, COUNT(*) AS qtd FROM orders WHERE status='entregue' AND tipo_pagamento='cartao_aproximacao' AND created_at BETWEEN $1 AND $2", [inicio, fim]);
     const maquinaLoja = await pool.query("SELECT COALESCE(SUM(valor_pedido),0) AS total, COUNT(*) AS qtd FROM orders WHERE status='entregue' AND tipo_pagamento='maquina' AND created_at BETWEEN $1 AND $2", [inicio, fim]);
+    const despesas = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM platform_events WHERE tipo='despesa' AND created_at BETWEEN $1 AND $2", [inicio, fim]);
     const saldoPlataforma = await pool.query('SELECT * FROM platform_wallet WHERE id=1');
 
     res.json({
@@ -3507,6 +3508,7 @@ app.get('/financeiro/resumo', async (req, res) => {
       dinheiro_coletado_motoboys: dinheiroColetado.rows[0],
       cartao_aproximacao_coletado_motoboys: cartaoAproxColetado.rows[0],
       maquina_loja_nao_rastreavel: maquinaLoja.rows[0],
+      despesas: despesas.rows[0],
       saldo_plataforma: saldoPlataforma.rows[0] || { balance: 0, total_ganho: 0, total_sacado: 0 }
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
