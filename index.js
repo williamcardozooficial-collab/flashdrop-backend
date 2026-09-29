@@ -1859,6 +1859,29 @@ app.put('/platform/saque-config', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// Despesa manual do admin: desconta direto do saldo do caixa, sem checar saldo
+// minimo (pode ficar negativo de proposito, para o admin enxergar prejuizo).
+// Diferente do /platform/withdraw: nao tem valor minimo/multiplo de R$10, nao
+// faz split para motoboys - e so um registro simples de saida de caixa.
+app.post('/platform/despesa', async (req, res) => {
+  try {
+    const { valor, descricao } = req.body;
+    const v = parseFloat(valor);
+    if (!v || v <= 0) return res.status(400).json({ error: 'Valor invalido.' });
+    if (!descricao || !descricao.trim()) return res.status(400).json({ error: 'Informe o nome/descricao da despesa.' });
+    await pool.query(
+      `UPDATE platform_wallet SET balance = balance - $1, total_sacado = total_sacado + $1, updated_at=NOW() WHERE id=1`,
+      [v]
+    );
+    await pool.query(
+      `INSERT INTO platform_events (tipo, valor, descricao) VALUES ('despesa', $1, $2)`,
+      [v, descricao.trim()]
+    );
+    const updated = await pool.query('SELECT * FROM platform_wallet WHERE id=1');
+    res.json({ ok: true, wallet: updated.rows[0] });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/platform/withdraw', async (req, res) => {
   try {
     const { valor, motivo } = req.body;
