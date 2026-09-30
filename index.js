@@ -3319,7 +3319,7 @@ function haversineMetros(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
-const RAIO_CHEGADA_AUTO = 50; // metros - raio para chegada automatica (coleta e entrega)
+const RAIO_CHEGADA_AUTO = 100; // metros - raio para chegada automatica (coleta e entrega). Aumentado de 50 para 100 para dar mais margem à imprecisão normal do GPS de celular.
 
 // Verifica se o motoboy chegou perto do ponto de coleta ou de entrega do pedido
 // e, se sim, avanca o status automaticamente chamando a mesma rota PUT /orders/:id
