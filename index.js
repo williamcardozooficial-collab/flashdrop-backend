@@ -1017,7 +1017,37 @@ app.put('/orders/:id', async (req, res) => {
       return res.status(400).json({ error: 'Este pedido iFood ainda nao teve a entrega confirmada no site do iFood. Confirme a entrega (localizador + codigo do cliente) antes de finalizar.' });
     }
 
-    const r = await pool.query(`UPDATE orders SET ${sets} WHERE id=$1 RETURNING *`, [req.params.id, ...vals]);
+    // Para status que tem guarda anti-duplicidade de notificacao (na_loja/coletado/
+    // no_cliente), o UPDATE e feito dentro de uma transacao com SELECT ... FOR UPDATE,
+    // travando a linha do pedido. Isso serializa duas requisicoes quase simultaneas
+    // para o MESMO pedido (ex: motoboy aperta o botao manual no exato momento em que o
+    // ping de GPS automatico tambem detecta a chegada) - a segunda requisicao so
+    // prossegue depois que a primeira ja commitou, e enxerga o status JA atualizado.
+    // Sem isso, as duas podiam ler o status antigo ao mesmo tempo (antes de qualquer
+    // UPDATE terminar) e cada uma achava que era a "primeira" a fazer a transicao,
+    // disparando a notificacao por WhatsApp em duplicidade (as vezes ate 3x).
+    let r;
+    if (['na_loja', 'coletado', 'no_cliente'].includes(fields.status)) {
+      const lockClient = await pool.connect();
+      try {
+        await lockClient.query('BEGIN');
+        const lockRes = await lockClient.query('SELECT status FROM orders WHERE id=$1 FOR UPDATE', [req.params.id]);
+        const statusAntesDoLock = lockRes.rows.length > 0 ? lockRes.rows[0].status : null;
+        r = await lockClient.query(`UPDATE orders SET ${sets} WHERE id=$1 RETURNING *`, [req.params.id, ...vals]);
+        await lockClient.query('COMMIT');
+        // Sobrescreve o status "anterior" (lido antes do UPDATE, fora do lock) pelo valor
+        // lido DENTRO do lock atomico, para que a guarda de duplicidade mais abaixo
+        // compare contra o status realmente vigente no exato momento do UPDATE.
+        if (prevOrderRes.rows[0]) prevOrderRes.rows[0].status = statusAntesDoLock;
+      } catch (eLock) {
+        try { await lockClient.query('ROLLBACK'); } catch (eRollback) {}
+        throw eLock;
+      } finally {
+        lockClient.release();
+      }
+    } else {
+      r = await pool.query(`UPDATE orders SET ${sets} WHERE id=$1 RETURNING *`, [req.params.id, ...vals]);
+    }
     const order = r.rows[0];
     if (fields.status === 'aceito' && fields.motoboy_id) {
       registrarEventoMotoboyPedido(order.id, fields.motoboy_id, fields.motoboy_name || order.motoboy_name, 'aceito', null);
