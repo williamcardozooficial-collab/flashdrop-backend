@@ -2313,10 +2313,12 @@ async function checkLateArrivals() {
               { headers: { 'x-bot-secret': botSecretGroupRepost } }
             ).catch(e => console.error('[BOT] Erro msg grupo repost:', e.message));
             const pagLabelRepost = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX',pix_direto:'PIX'}[order.tipo_pagamento] || order.tipo_pagamento || '-');
-            const msgGroupRepost2 = '🚴 Pedido Disponível!\n' +
+            const msgGroupRepost2 = '⏰ Pedido Disponível Novamente!\n' +
               '📦 Pedido #' + order.id + ' — ' + lojaRepostNome + '\n' +
               '💳 Pagamento: ' + pagLabelRepost + '\n' +
-              '⚡ Motoboy, acesse o FlashDrop para aceitar!';
+              '⚠️ O motoboy anterior não chegou a tempo na loja, pedido voltou pro sistema.\n' +
+              '⚡ Motoboy, acesse o FlashDrop para aceitar!\n' +
+              '📲 https://play.google.com/store/apps/details?id=com.flashdrop.motoboy&pcampaignid=web_share';
             axios.post(botUrlGroupRepost + '/api/send-group-message',
               { message: msgGroupRepost2, grupo: 'secundario' },
               { headers: { 'x-bot-secret': botSecretGroupRepost } }
@@ -2366,7 +2368,8 @@ app.post('/orders/:id/launch', async (req, res) => {
           const msgGroupPend2 = '\uD83D\uDEB4 Pedido Dispon\u00EDvel!\n' +
             '\uD83D\uDCE6 Pedido #' + pedido.id + ' \u2014 ' + lojaNomePend + '\n' +
             '\uD83D\uDCB3 Pagamento: ' + pagLabelPend + '\n' +
-            '\u26A1 Motoboy, acesse o FlashDrop para aceitar!';
+            '\u26A1 Motoboy, acesse o FlashDrop para aceitar!\n' +
+            '\uD83D\uDCF2 https://play.google.com/store/apps/details?id=com.flashdrop.motoboy&pcampaignid=web_share';
           axios.post(botUrlGroupL + '/api/send-group-message',
             { message: msgGroupPend2, grupo: 'secundario' },
             { headers: { 'x-bot-secret': botSecretGroupL } }
@@ -2776,7 +2779,8 @@ async function checkAndLaunchOrders() {
               const msgGroupAuto2 = '\uD83D\uDEB4 Pedido Dispon\u00EDvel!\n' +
                 '\uD83D\uDCE6 Pedido #' + pedido.id + ' \u2014 ' + lojaNomeAuto + '\n' +
                 '\uD83D\uDCB3 Pagamento: ' + pagLabelAuto + '\n' +
-                '\u26A1 Motoboy, acesse o FlashDrop para aceitar!';
+                '\u26A1 Motoboy, acesse o FlashDrop para aceitar!\n' +
+                '\uD83D\uDCF2 https://play.google.com/store/apps/details?id=com.flashdrop.motoboy&pcampaignid=web_share';
               axios.post(botUrlGroupA + '/api/send-group-message',
                 { message: msgGroupAuto2, grupo: 'secundario' },
                 { headers: { 'x-bot-secret': botSecretGroupA } }
