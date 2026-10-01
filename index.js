@@ -1390,7 +1390,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
               if (lojaRef.rows.length > 0) {
                 const ref = lojaRef.rows[0];
                 const comLoja = ref.comissao_tipo_loja === 'percentual'
-                  ? Math.round((parseFloat(ord.valor_pedido || 0) * parseFloat(ref.comissao_percentual_loja || 0) / 100) * 100) / 100
+                  ? Math.round((parseFloat(ord.valor_motoboy || 0) * parseFloat(ref.comissao_percentual_loja || 0) / 100) * 100) / 100
                   : parseFloat(ref.comissao_por_pedido_loja || 0);
                 if (comLoja > 0) {
                   await pool.query('UPDATE users SET balance = balance + $1 WHERE id=$2', [comLoja, ref.referrer_id]);
