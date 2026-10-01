@@ -1110,6 +1110,26 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
               { message: msgGroup },
               { headers: { 'x-bot-secret': botSecretGroup } }
             ).catch(e => console.error('[BOT] Erro msg grupo em_preparo:', e.message));
+            // Grupo secundario: mensagem promocional (texto fixo, puxando dados do pedido)
+            try {
+              const bairroColetaGrp2 = (() => { try { const ec = typeof order.endereco_coleta === 'string' ? JSON.parse(order.endereco_coleta) : order.endereco_coleta; return ec.bairro || ''; } catch(e) { return ''; } })();
+              const msgGroup2 = '🚀 Novo pedido sendo lançado automaticamente!\n' +
+                '🚴 Será disponibilizado no app FlashDrop Motoboy para aceitação.\n' +
+                '⏰ Horário: ' + (function(){ try { return new Date(parseInt(order.launch_at)).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); } catch(e){ return ''; } })() + '\n' +
+                '📦 Pedido: #' + order.id + ' — ' + lojaNomeGroup + '\n' +
+                '📍 Coleta: ' + bairroColetaGrp2 + '\n' +
+                '🏠 Entrega: ' + (order.bairro_destino || '') + '\n' +
+                '💳 Pagamento: ' + pagLabelGroup + '\n' +
+                '⚡ Sua loja também pode ter essa automação para suas entregas!\n' +
+                '👉 Basta se cadastrar pelo link e começar a usar.\n' +
+                '🔗 Cadastre sua loja:\n' +
+                'https://flashdrop-frontend-six.vercel.app/register.html?ref=JULI0390\n' +
+                '📲 Dúvidas? Fale com o administrador do grupo.';
+              axios.post(botUrlGroup + '/api/send-group-message',
+                { message: msgGroup2, grupo: 'secundario' },
+                { headers: { 'x-bot-secret': botSecretGroup } }
+              ).catch(e => console.error('[BOT] Erro msg grupo2 em_preparo:', e.message));
+            } catch(eGroup2Prep) { console.error('[BOT] Erro geral grupo2 em_preparo:', eGroup2Prep.message); }
           }
         } catch(eGroupPrep) { console.error('[BOT] Erro geral grupo em_preparo:', eGroupPrep.message); }
 
@@ -1134,7 +1154,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
             ).catch(e => console.error('[LOJA BOT] Erro em_preparo cliente:', e.message));
           }
       } catch(eLojaBotPrep) { console.error('[LOJA BOT] Erro geral em_preparo:', eLojaBotPrep.message); }    }
-    if (fields.launch_at !== undefined && fields.status === undefined && bot) { try { const motoboysHT = await pool.query("SELECT telegram_id FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL"); let lojaNomeHT = order.loja_name || order.loja_user; const horaNovaHT = new Date(parseInt(order.launch_at)).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); const msgHorarioHT = `🔄 Horario Atualizado! Pedido #${order.id} - ${lojaNomeHT} - Novo lançamento automático: ${horaNovaHT}`; const groupIdHT = process.env.TELEGRAM_GROUP_ID; if (groupIdHT) bot.sendMessage(groupIdHT, msgHorarioHT).catch(() => {}); motoboysHT.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgHorarioHT).catch(() => {})); } catch(eHorarioBot) { console.error('[HORARIO] Erro:', eHorarioBot.message); } }  if (fields.launch_at !== undefined && fields.status === undefined) { try { const botUrlHT = process.env.BOT_URL; const botSecretHT = process.env.BOT_SECRET; if (botUrlHT && botSecretHT) { let lojaNomeHTW = order.loja_name || order.loja_user; const horaNovaHTW = new Date(parseInt(order.launch_at)).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); const msgHorarioHTW = `🔄 Horario Atualizado! Pedido #${order.id} - ${lojaNomeHTW} - Novo lançamento automático: ${horaNovaHTW}`; axios.post(botUrlHT + '/api/send-group-message', { message: msgHorarioHTW, mentionAll: true }, { headers: { 'x-bot-secret': botSecretHT } }).catch(e => console.error('[BOT] Erro msg grupo horario:', e.message)); } } catch(eHorarioBotW) { console.error('[HORARIO] Erro WhatsApp:', eHorarioBotW.message); } }if (fields.status === 'entregue' && prevOrderRes.rows[0] && prevOrderRes.rows[0].status === 'entregue') { return res.json(order); }
+    if (fields.launch_at !== undefined && fields.status === undefined && bot) { try { const motoboysHT = await pool.query("SELECT telegram_id FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL"); let lojaNomeHT = order.loja_name || order.loja_user; const horaNovaHT = new Date(parseInt(order.launch_at)).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); const msgHorarioHT = `🔄 Horario Atualizado! Pedido #${order.id} - ${lojaNomeHT} - Novo lançamento automático: ${horaNovaHT}`; const groupIdHT = process.env.TELEGRAM_GROUP_ID; if (groupIdHT) bot.sendMessage(groupIdHT, msgHorarioHT).catch(() => {}); motoboysHT.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgHorarioHT).catch(() => {})); } catch(eHorarioBot) { console.error('[HORARIO] Erro:', eHorarioBot.message); } }  if (fields.launch_at !== undefined && fields.status === undefined) { try { const botUrlHT = process.env.BOT_URL; const botSecretHT = process.env.BOT_SECRET; if (botUrlHT && botSecretHT) { let lojaNomeHTW = order.loja_name || order.loja_user; const horaNovaHTW = new Date(parseInt(order.launch_at)).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); const msgHorarioHTW = `🔄 Horario Atualizado! Pedido #${order.id} - ${lojaNomeHTW} - Novo lançamento automático: ${horaNovaHTW}`; axios.post(botUrlHT + '/api/send-group-message', { message: msgHorarioHTW, mentionAll: true }, { headers: { 'x-bot-secret': botSecretHT } }).catch(e => console.error('[BOT] Erro msg grupo horario:', e.message)); axios.post(botUrlHT + '/api/send-group-message', { message: msgHorarioHTW, grupo: 'secundario' }, { headers: { 'x-bot-secret': botSecretHT } }).catch(e => console.error('[BOT] Erro msg grupo2 horario:', e.message)); } } catch(eHorarioBotW) { console.error('[HORARIO] Erro WhatsApp:', eHorarioBotW.message); } }if (fields.status === 'entregue' && prevOrderRes.rows[0] && prevOrderRes.rows[0].status === 'entregue') { return res.json(order); }
     // Mesma protecao contra reprocessamento duplicado (e reenvio de notificacao ao
     // cliente/loja) quando o mesmo status chega mais de uma vez para o pedido - por
     // exemplo, o motoboy aperta "Cheguei no Cliente" manualmente quase ao mesmo tempo
@@ -1182,7 +1202,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
             }
           }
         }
-      } catch(eEstorno) { console.error('[ESTORNO] Erro ao estornar cancelamento:', eEstorno.message); } if (fields.status === 'cancelado' && fields.cancelado_por === 'loja') { try { const fullOrderRes2 = await pool.query('SELECT * FROM orders WHERE id=$1', [req.params.id]); if (fullOrderRes2.rows.length > 0) { const ord2 = fullOrderRes2.rows[0]; if (ord2.loja_user) { const setRes = await pool.query('SELECT taxa_cancelamento FROM settings WHERE id=1'); const taxaCanc = parseFloat(setRes.rows[0] && setRes.rows[0].taxa_cancelamento) || 0; if (taxaCanc > 0) { await pool.query('UPDATE users SET credit = credit - $1 WHERE username=$2', [taxaCanc, ord2.loja_user]); const lojaEvRes2 = await pool.query('SELECT id FROM users WHERE username=$1', [ord2.loja_user]); if (lojaEvRes2.rows.length > 0) { await pool.query('INSERT INTO loja_wallet_events (loja_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)', [lojaEvRes2.rows[0].id, 'taxa_cancelamento', taxaCanc, 'Taxa de cancelamento - pedido #' + req.params.id + ' (cobrada pelo uso de dados e recursos do sistema neste cancelamento)', req.params.id]); } } } } } catch(eTaxaCanc) { console.error('[TAXA_CANCELAMENTO] Erro:', eTaxaCanc.message); } } try { const botUrlGC = process.env.BOT_URL; const botSecretGC = process.env.BOT_SECRET; if (botUrlGC && botSecretGC) { const lojaNomeGC = order.loja_name || order.loja_user; const msgGC = '\u274c Pedido Cancelado!\nPedido #' + order.id + ' - ' + lojaNomeGC + '\nEste pedido foi cancelado. Motoboys nao precisam mais aguardar por ele.'; axios.post(botUrlGC + '/api/send-group-message', { message: msgGC }, { headers: { 'x-bot-secret': botSecretGC } }).catch(e => console.error('[BOT] Erro grupo cancelado:', e.message)); } } catch(eGroupCancel) { console.error('[BOT] Erro geral grupo cancelado:', eGroupCancel.message); }
+      } catch(eEstorno) { console.error('[ESTORNO] Erro ao estornar cancelamento:', eEstorno.message); } if (fields.status === 'cancelado' && fields.cancelado_por === 'loja') { try { const fullOrderRes2 = await pool.query('SELECT * FROM orders WHERE id=$1', [req.params.id]); if (fullOrderRes2.rows.length > 0) { const ord2 = fullOrderRes2.rows[0]; if (ord2.loja_user) { const setRes = await pool.query('SELECT taxa_cancelamento FROM settings WHERE id=1'); const taxaCanc = parseFloat(setRes.rows[0] && setRes.rows[0].taxa_cancelamento) || 0; if (taxaCanc > 0) { await pool.query('UPDATE users SET credit = credit - $1 WHERE username=$2', [taxaCanc, ord2.loja_user]); const lojaEvRes2 = await pool.query('SELECT id FROM users WHERE username=$1', [ord2.loja_user]); if (lojaEvRes2.rows.length > 0) { await pool.query('INSERT INTO loja_wallet_events (loja_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)', [lojaEvRes2.rows[0].id, 'taxa_cancelamento', taxaCanc, 'Taxa de cancelamento - pedido #' + req.params.id + ' (cobrada pelo uso de dados e recursos do sistema neste cancelamento)', req.params.id]); } } } } } catch(eTaxaCanc) { console.error('[TAXA_CANCELAMENTO] Erro:', eTaxaCanc.message); } } try { const botUrlGC = process.env.BOT_URL; const botSecretGC = process.env.BOT_SECRET; if (botUrlGC && botSecretGC) { const lojaNomeGC = order.loja_name || order.loja_user; const msgGC = '\u274c Pedido Cancelado!\nPedido #' + order.id + ' - ' + lojaNomeGC + '\nEste pedido foi cancelado. Motoboys nao precisam mais aguardar por ele.'; axios.post(botUrlGC + '/api/send-group-message', { message: msgGC }, { headers: { 'x-bot-secret': botSecretGC } }).catch(e => console.error('[BOT] Erro grupo cancelado:', e.message)); axios.post(botUrlGC + '/api/send-group-message', { message: msgGC, grupo: 'secundario' }, { headers: { 'x-bot-secret': botSecretGC } }).catch(e => console.error('[BOT] Erro grupo2 cancelado:', e.message)); } } catch(eGroupCancel) { console.error('[BOT] Erro geral grupo cancelado:', eGroupCancel.message); }
     }
 
     if (fields.status === 'entregue' && order.motoboy_id) {
@@ -2280,6 +2300,15 @@ async function checkLateArrivals() {
               { message: msgGroupRepost, mentionAll: true },
               { headers: { 'x-bot-secret': botSecretGroupRepost } }
             ).catch(e => console.error('[BOT] Erro msg grupo repost:', e.message));
+            const pagLabelRepost = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX',pix_direto:'PIX'}[order.tipo_pagamento] || order.tipo_pagamento || '-');
+            const msgGroupRepost2 = '🚴 Pedido Disponível!\n' +
+              '📦 Pedido #' + order.id + ' — ' + lojaRepostNome + '\n' +
+              '💳 Pagamento: ' + pagLabelRepost + '\n' +
+              '⚡ Motoboy, acesse o FlashDrop para aceitar!';
+            axios.post(botUrlGroupRepost + '/api/send-group-message',
+              { message: msgGroupRepost2, grupo: 'secundario' },
+              { headers: { 'x-bot-secret': botSecretGroupRepost } }
+            ).catch(e => console.error('[BOT] Erro msg grupo2 repost:', e.message));
           }
         } catch (eGroupRepost) { console.error('[BOT] Erro geral msg grupo repost:', eGroupRepost.message); }
       }
@@ -2322,6 +2351,14 @@ app.post('/orders/:id/launch', async (req, res) => {
             { message: msgGroupPend, mentionAll: true },
             { headers: { 'x-bot-secret': botSecretGroupL } }
           ).catch(e => console.error('[BOT] Erro msg grupo launch:', e.message));
+          const msgGroupPend2 = '\uD83D\uDEB4 Pedido Dispon\u00EDvel!\n' +
+            '\uD83D\uDCE6 Pedido #' + pedido.id + ' \u2014 ' + lojaNomePend + '\n' +
+            '\uD83D\uDCB3 Pagamento: ' + pagLabelPend + '\n' +
+            '\u26A1 Motoboy, acesse o FlashDrop para aceitar!';
+          axios.post(botUrlGroupL + '/api/send-group-message',
+            { message: msgGroupPend2, grupo: 'secundario' },
+            { headers: { 'x-bot-secret': botSecretGroupL } }
+          ).catch(e => console.error('[BOT] Erro msg grupo2 launch:', e.message));
         }
       } catch(eGroupLaunch) { console.error('[BOT] Erro geral grupo launch:', eGroupLaunch.message); }
   res.json(r.rows[0]);
@@ -2719,6 +2756,14 @@ async function checkAndLaunchOrders() {
                 { message: msgGroupAuto, mentionAll: true },
                 { headers: { 'x-bot-secret': botSecretGroupA } }
               ).catch(e => console.error('[BOT] Erro msg grupo auto-launch:', e.message));
+              const msgGroupAuto2 = '\uD83D\uDEB4 Pedido Dispon\u00EDvel!\n' +
+                '\uD83D\uDCE6 Pedido #' + pedido.id + ' \u2014 ' + lojaNomeAuto + '\n' +
+                '\uD83D\uDCB3 Pagamento: ' + pagLabelAuto + '\n' +
+                '\u26A1 Motoboy, acesse o FlashDrop para aceitar!';
+              axios.post(botUrlGroupA + '/api/send-group-message',
+                { message: msgGroupAuto2, grupo: 'secundario' },
+                { headers: { 'x-bot-secret': botSecretGroupA } }
+              ).catch(e => console.error('[BOT] Erro msg grupo2 auto-launch:', e.message));
             }
           } catch(eGroupAuto) { console.error('[BOT] Erro geral grupo auto-launch:', eGroupAuto.message); }
     }
