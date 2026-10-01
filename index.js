@@ -198,6 +198,7 @@ async function initDB() {
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS t_retornado TIMESTAMP"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS complemento_coleta TEXT"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS complemento_entrega TEXT"); } catch(e) {}
+  try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS bairro_coleta VARCHAR(100)"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS obs_coleta TEXT"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS obs_entrega_loja TEXT"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_code VARCHAR(4)"); } catch(e) {}
@@ -888,8 +889,8 @@ app.post('/orders', async (req, res) => {
   const statusInicial = (d.plataforma === 'entrega_direta') ? 'pendente' : 'novo';
 
   const r = await pool.query(
-    `INSERT INTO orders (loja_user,loja_name,plataforma,endereco_coleta,endereco_entrega,bairro_destino,nome_cliente,telefone_cliente,cod_pedido,cobrar_cliente,tipo_pagamento,valor_pedido,valor_total,valor_motoboy,comissao,distancia,previsao,obs,status,pending_until,telefone_loja,launch_at,complemento_coleta,complemento_entrega,obs_coleta,obs_entrega_loja,delivery_code,taxa_extra_chuva,taxa_extra_noturna,chuva_desconto_de,ifood_localizador,ifood_numero_pedido,ifood_nome_cliente,cpf_cliente,desconto_promocao,nome_promocao,coleta_lat,coleta_lng,entrega_lat,entrega_lng,nome_coleta,telefone_coleta) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$42,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41) RETURNING *`,
-    [d.loja_user,d.loja_name,d.plataforma,d.endereco_coleta,d.endereco_entrega,d.bairro_destino,d.nome_cliente,d.telefone_cliente,d.cod_pedido,d.cobrar_cliente||'nao',d.tipo_pagamento||'dinheiro',d.valor_pedido||0,valorTotal,valorMotoboy,d.comissao,d.distancia,d.previsao,d.obs,Date.now()+15000,telefone_loja,d.launch_at||0,d.complemento_coleta||null,d.complemento_entrega||null,d.obs_coleta||null,d.obs_entrega_loja||null,deliveryCode,taxa_extra_chuva,taxa_extra_noturna,chuva_desconto_de,d.ifood_localizador||null,d.ifood_numero_pedido||null,d.ifood_nome_cliente||null,d.cpf_cliente||null,d.desconto_promocao||0,d.nome_promocao||null,(d.coleta_lat!==undefined&&d.coleta_lat!==null&&d.coleta_lat!=='')?parseFloat(d.coleta_lat):null,(d.coleta_lng!==undefined&&d.coleta_lng!==null&&d.coleta_lng!=='')?parseFloat(d.coleta_lng):null,(d.entrega_lat!==undefined&&d.entrega_lat!==null&&d.entrega_lat!=='')?parseFloat(d.entrega_lat):null,(d.entrega_lng!==undefined&&d.entrega_lng!==null&&d.entrega_lng!=='')?parseFloat(d.entrega_lng):null,d.nome_coleta||null,d.telefone_coleta||null,statusInicial]
+    `INSERT INTO orders (loja_user,loja_name,plataforma,endereco_coleta,endereco_entrega,bairro_destino,nome_cliente,telefone_cliente,cod_pedido,cobrar_cliente,tipo_pagamento,valor_pedido,valor_total,valor_motoboy,comissao,distancia,previsao,obs,status,pending_until,telefone_loja,launch_at,complemento_coleta,complemento_entrega,obs_coleta,obs_entrega_loja,delivery_code,taxa_extra_chuva,taxa_extra_noturna,chuva_desconto_de,ifood_localizador,ifood_numero_pedido,ifood_nome_cliente,cpf_cliente,desconto_promocao,nome_promocao,coleta_lat,coleta_lng,entrega_lat,entrega_lng,nome_coleta,telefone_coleta,bairro_coleta) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$42,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$43) RETURNING *`,
+    [d.loja_user,d.loja_name,d.plataforma,d.endereco_coleta,d.endereco_entrega,d.bairro_destino,d.nome_cliente,d.telefone_cliente,d.cod_pedido,d.cobrar_cliente||'nao',d.tipo_pagamento||'dinheiro',d.valor_pedido||0,valorTotal,valorMotoboy,d.comissao,d.distancia,d.previsao,d.obs,Date.now()+15000,telefone_loja,d.launch_at||0,d.complemento_coleta||null,d.complemento_entrega||null,d.obs_coleta||null,d.obs_entrega_loja||null,deliveryCode,taxa_extra_chuva,taxa_extra_noturna,chuva_desconto_de,d.ifood_localizador||null,d.ifood_numero_pedido||null,d.ifood_nome_cliente||null,d.cpf_cliente||null,d.desconto_promocao||0,d.nome_promocao||null,(d.coleta_lat!==undefined&&d.coleta_lat!==null&&d.coleta_lat!=='')?parseFloat(d.coleta_lat):null,(d.coleta_lng!==undefined&&d.coleta_lng!==null&&d.coleta_lng!=='')?parseFloat(d.coleta_lng):null,(d.entrega_lat!==undefined&&d.entrega_lat!==null&&d.entrega_lat!=='')?parseFloat(d.entrega_lat):null,(d.entrega_lng!==undefined&&d.entrega_lng!==null&&d.entrega_lng!=='')?parseFloat(d.entrega_lng):null,d.nome_coleta||null,d.telefone_coleta||null,statusInicial,d.bairro_coleta||null]
   );
   const pedido = r.rows[0];
   // Notifica loja e cliente via WhatsApp bot
@@ -1118,7 +1119,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
             ).catch(e => console.error('[BOT] Erro msg grupo em_preparo:', e.message));
             // Grupo secundario: mensagem promocional (texto fixo, puxando dados do pedido)
             try {
-              const bairroColetaGrp2 = (() => { try { const ec = typeof order.endereco_coleta === 'string' ? JSON.parse(order.endereco_coleta) : order.endereco_coleta; return ec.bairro || ''; } catch(e) { return ''; } })();
+              const bairroColetaGrp2 = order.bairro_coleta || (() => { try { const ec = typeof order.endereco_coleta === 'string' ? JSON.parse(order.endereco_coleta) : order.endereco_coleta; return ec.bairro || ''; } catch(e) { return ''; } })();
               const msgGroup2 = '🚀 Novo pedido sendo lançado automaticamente!\n' +
                 '🚴 Será disponibilizado no app FlashDrop Motoboy para aceitação.\n' +
                 '⏰ Horário: ' + (function(){ try { return new Date(parseInt(order.launch_at)).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); } catch(e){ return ''; } })() + '\n' +
@@ -2313,8 +2314,11 @@ async function checkLateArrivals() {
               { headers: { 'x-bot-secret': botSecretGroupRepost } }
             ).catch(e => console.error('[BOT] Erro msg grupo repost:', e.message));
             const pagLabelRepost = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX',pix_direto:'PIX'}[order.tipo_pagamento] || order.tipo_pagamento || '-');
+            const bairroColetaRepost2 = order.bairro_coleta || (() => { try { const ec = typeof order.endereco_coleta === 'string' ? JSON.parse(order.endereco_coleta) : order.endereco_coleta; return ec.bairro || ''; } catch(e) { return ''; } })();
             const msgGroupRepost2 = '⏰ Pedido Disponível Novamente!\n' +
               '📦 Pedido #' + order.id + ' — ' + lojaRepostNome + '\n' +
+              '📍 Coleta: ' + bairroColetaRepost2 + '\n' +
+              '🏠 Entrega: ' + (order.bairro_destino || '') + '\n' +
               '💳 Pagamento: ' + pagLabelRepost + '\n' +
               '⚠️ O motoboy anterior não chegou a tempo na loja, pedido voltou pro sistema.\n' +
               '⚡ Motoboy, acesse o FlashDrop para aceitar!\n' +
@@ -2365,8 +2369,11 @@ app.post('/orders/:id/launch', async (req, res) => {
             { message: msgGroupPend, mentionAll: true },
             { headers: { 'x-bot-secret': botSecretGroupL } }
           ).catch(e => console.error('[BOT] Erro msg grupo launch:', e.message));
+          const bairroColetaPend2 = pedido.bairro_coleta || (() => { try { const ec = typeof pedido.endereco_coleta === 'string' ? JSON.parse(pedido.endereco_coleta) : pedido.endereco_coleta; return ec.bairro || ''; } catch(e) { return ''; } })();
           const msgGroupPend2 = '\uD83D\uDEB4 Pedido Dispon\u00EDvel!\n' +
             '\uD83D\uDCE6 Pedido #' + pedido.id + ' \u2014 ' + lojaNomePend + '\n' +
+            '\uD83D\uDCCD Coleta: ' + bairroColetaPend2 + '\n' +
+            '\uD83C\uDFE0 Entrega: ' + (pedido.bairro_destino || '') + '\n' +
             '\uD83D\uDCB3 Pagamento: ' + pagLabelPend + '\n' +
             '\u26A1 Motoboy, acesse o FlashDrop para aceitar!\n' +
             '\uD83D\uDCF2 https://play.google.com/store/apps/details?id=com.flashdrop.motoboy&pcampaignid=web_share';
@@ -2776,8 +2783,11 @@ async function checkAndLaunchOrders() {
                 { message: msgGroupAuto, mentionAll: true },
                 { headers: { 'x-bot-secret': botSecretGroupA } }
               ).catch(e => console.error('[BOT] Erro msg grupo auto-launch:', e.message));
+              const bairroColetaAuto2 = pedido.bairro_coleta || (() => { try { const ec = typeof pedido.endereco_coleta === 'string' ? JSON.parse(pedido.endereco_coleta) : pedido.endereco_coleta; return ec.bairro || ''; } catch(e) { return ''; } })();
               const msgGroupAuto2 = '\uD83D\uDEB4 Pedido Dispon\u00EDvel!\n' +
                 '\uD83D\uDCE6 Pedido #' + pedido.id + ' \u2014 ' + lojaNomeAuto + '\n' +
+                '\uD83D\uDCCD Coleta: ' + bairroColetaAuto2 + '\n' +
+                '\uD83C\uDFE0 Entrega: ' + (pedido.bairro_destino || '') + '\n' +
                 '\uD83D\uDCB3 Pagamento: ' + pagLabelAuto + '\n' +
                 '\u26A1 Motoboy, acesse o FlashDrop para aceitar!\n' +
                 '\uD83D\uDCF2 https://play.google.com/store/apps/details?id=com.flashdrop.motoboy&pcampaignid=web_share';
