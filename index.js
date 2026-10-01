@@ -243,6 +243,12 @@ async function initDB() {
     data_conclusao TIMESTAMP,
     created_at TIMESTAMP DEFAULT NOW()
   )`); } catch(e) {}
+  // Comissao personalizada por indicacao (loja): quando preenchida, substitui a
+  // regra geral de referral_settings so para esta indicacao especifica. NULL =
+  // usa a regra geral (comportamento padrao, igual antes dessas colunas existirem).
+  try { await pool.query(`ALTER TABLE referrals ADD COLUMN IF NOT EXISTS comissao_tipo_custom VARCHAR(20)`); } catch(e) {}
+  try { await pool.query(`ALTER TABLE referrals ADD COLUMN IF NOT EXISTS comissao_percentual_custom DECIMAL`); } catch(e) {}
+  try { await pool.query(`ALTER TABLE referrals ADD COLUMN IF NOT EXISTS comissao_valor_custom DECIMAL`); } catch(e) {}
   try { await pool.query(`CREATE TABLE IF NOT EXISTS referral_earnings (
     id SERIAL PRIMARY KEY,
     referrer_id INTEGER NOT NULL,
@@ -1389,9 +1395,15 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
                    AND (r.data_fim IS NULL OR r.data_fim > NOW())`, [loja.id]);
               if (lojaRef.rows.length > 0) {
                 const ref = lojaRef.rows[0];
-                const comLoja = ref.comissao_tipo_loja === 'percentual'
-                  ? Math.round((parseFloat(ord.valor_motoboy || 0) * parseFloat(ref.comissao_percentual_loja || 0) / 100) * 100) / 100
-                  : parseFloat(ref.comissao_por_pedido_loja || 0);
+                // Se esta indicacao tem comissao personalizada (comissao_tipo_custom
+                // preenchido), ela substitui totalmente a regra geral so para este
+                // indicado. Sem personalizacao (NULL), usa a regra geral normalmente.
+                const tipoEfetivo = ref.comissao_tipo_custom || ref.comissao_tipo_loja;
+                const percEfetivo = ref.comissao_tipo_custom ? ref.comissao_percentual_custom : ref.comissao_percentual_loja;
+                const valorFixoEfetivo = ref.comissao_tipo_custom ? ref.comissao_valor_custom : ref.comissao_por_pedido_loja;
+                const comLoja = tipoEfetivo === 'percentual'
+                  ? Math.round((parseFloat(ord.valor_motoboy || 0) * parseFloat(percEfetivo || 0) / 100) * 100) / 100
+                  : parseFloat(valorFixoEfetivo || 0);
                 if (comLoja > 0) {
                   await pool.query('UPDATE users SET balance = balance + $1 WHERE id=$2', [comLoja, ref.referrer_id]);
                   await pool.query(`UPDATE platform_wallet SET balance = balance - $1, total_sacado = total_sacado + $1, updated_at=NOW() WHERE id=1`, [comLoja]);
@@ -2482,7 +2494,7 @@ app.post('/referrals/apply', async (req, res) => {
 // PUT /referrals/:id ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ admin edita uma indicaÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ§ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ£o
 app.put('/referrals/:id', async (req, res) => {
   try {
-    const { referrer_id, data_fim, meta_pedidos, bonus_valor, status_ref, bonus_pago, total_pedidos_validos } = req.body;
+    const { referrer_id, data_fim, meta_pedidos, bonus_valor, status_ref, bonus_pago, total_pedidos_validos, comissao_tipo_custom, comissao_percentual_custom, comissao_valor_custom } = req.body;
     const flds = [];
     const vals = [];
     let i = 1;
@@ -2492,6 +2504,11 @@ app.put('/referrals/:id', async (req, res) => {
     if (bonus_valor !== undefined) { flds.push('bonus_valor=$' + i++); vals.push(bonus_valor); }
     if (status_ref !== undefined) { flds.push('status_ref=$' + i++); vals.push(status_ref); }
     if (bonus_pago !== undefined) { flds.push('bonus_pago=$' + i++); vals.push(bonus_pago); }
+    // Comissao personalizada desta indicacao: enviar null limpa a personalizacao
+    // e volta a usar a regra geral (comportamento padrao).
+    if (comissao_tipo_custom !== undefined) { flds.push('comissao_tipo_custom=$' + i++); vals.push(comissao_tipo_custom || null); }
+    if (comissao_percentual_custom !== undefined) { flds.push('comissao_percentual_custom=$' + i++); vals.push(comissao_percentual_custom === null ? null : (parseFloat(comissao_percentual_custom) || 0)); }
+    if (comissao_valor_custom !== undefined) { flds.push('comissao_valor_custom=$' + i++); vals.push(comissao_valor_custom === null ? null : (parseFloat(comissao_valor_custom) || 0)); }
     if (total_pedidos_validos !== undefined) { flds.push('total_pedidos_validos=$' + i++); vals.push(total_pedidos_validos); }
     if (flds.length === 0) return res.status(400).json({error: 'Nenhum campo'});
     vals.push(req.params.id);
