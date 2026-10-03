@@ -2371,7 +2371,7 @@ app.post('/orders/:id/launch', async (req, res) => {
             { headers: { 'x-bot-secret': botSecretGroupL } }
           ).catch(e => console.error('[BOT] Erro msg grupo launch:', e.message));
           const bairroColetaPend2 = pedido.bairro_coleta || (() => { try { const ec = typeof pedido.endereco_coleta === 'string' ? JSON.parse(pedido.endereco_coleta) : pedido.endereco_coleta; return ec.bairro || ''; } catch(e) { return ''; } })();
-          const msgGroupPend2 = '\uD83D\uDEB4 Pedido Dispon\u00EDvel!\n' +
+          const msgGroupPend2 = '\uD83D\uDEB4 Pedido Dispon\u00EDvel no App!\n' +
             '\uD83D\uDCE6 Pedido #' + pedido.id + ' \u2014 ' + lojaNomePend + '\n' +
             '\uD83D\uDCCD Coleta: ' + bairroColetaPend2 + '\n' +
             '\uD83C\uDFE0 Entrega: ' + (pedido.bairro_destino || '') + '\n' +
@@ -2785,7 +2785,7 @@ async function checkAndLaunchOrders() {
                 { headers: { 'x-bot-secret': botSecretGroupA } }
               ).catch(e => console.error('[BOT] Erro msg grupo auto-launch:', e.message));
               const bairroColetaAuto2 = pedido.bairro_coleta || (() => { try { const ec = typeof pedido.endereco_coleta === 'string' ? JSON.parse(pedido.endereco_coleta) : pedido.endereco_coleta; return ec.bairro || ''; } catch(e) { return ''; } })();
-              const msgGroupAuto2 = '\uD83D\uDEB4 Pedido Dispon\u00EDvel!\n' +
+              const msgGroupAuto2 = '\uD83D\uDEB4 Pedido Dispon\u00EDvel no App!\n' +
                 '\uD83D\uDCE6 Pedido #' + pedido.id + ' \u2014 ' + lojaNomeAuto + '\n' +
                 '\uD83D\uDCCD Coleta: ' + bairroColetaAuto2 + '\n' +
                 '\uD83C\uDFE0 Entrega: ' + (pedido.bairro_destino || '') + '\n' +
