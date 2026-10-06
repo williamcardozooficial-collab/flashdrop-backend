@@ -516,6 +516,10 @@ app.get('/orders/loja-entrega-direta', async (req, res) => {
     res.json(r.rows[0]);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
+// Bairro de coleta (loja) de um pedido - usado nas mensagens de WhatsApp (so bairro, sem endereco completo)
+function _bairroColeta(o) { try { if (o.bairro_coleta) return o.bairro_coleta; const ec = typeof o.endereco_coleta === 'string' ? JSON.parse(o.endereco_coleta) : o.endereco_coleta; return (ec && ec.bairro) || ''; } catch (e) { return ''; } }
+// Linha de retorno a loja (so pedidos pagos com maquina): bairro para onde o motoboy volta = bairro da loja
+function _linhaRetornoWpp(o) { return o.tipo_pagamento === 'maquina' ? ('\n\uD83D\uDD04 Retorno \u00e0 loja: ' + _bairroColeta(o)) : ''; }
 app.get('/debug/time', (req, res) => {
   const now = new Date();
   const brOffset = -3 * 60;
@@ -1107,14 +1111,11 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
             const precisaSaldoGrp = order.tipo_pagamento === 'dinheiro';
             const saldoNecessarioGrp = precisaSaldoGrp ? (parseFloat(order.valor_pedido||0) + parseFloat(order.comissao||0)).toFixed(2) : '';
             const linhaSaldoGrp = precisaSaldoGrp ? ('\n\n💰 Precisa cobrar o cliente: Sim\n💳 Saldo necessário para aceitar: R$ ' + saldoNecessarioGrp) : '';
-            const msgGroup = '🔥 Pedido em Preparo! ⏰ Lançamento automático as ' + (function(){ try { return new Date(parseInt(order.launch_at)).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); } catch(e){ return ''; } })() + '\n' +
-              'Pedido #' + order.id + ' - ' + lojaNomeGroup + '\n' +
-              'Distancia: ' + order.distancia + ' km\n' +
-              'Pagamento: ' + pagLabelGroup + linhaSaldoGrp + '\n' +
-              'Motoboy ganha: R$ ' + parseFloat(order.valor_motoboy).toFixed(2) + '\n' +
-              '\uD83D\uDCCD Coleta: ' + (() => { try { const ec = typeof order.endereco_coleta === 'string' ? JSON.parse(order.endereco_coleta) : order.endereco_coleta; return [ec.rua && ec.num ? ec.rua + ', ' + ec.num : (ec.rua || ec.num || ''), ec.comp || '', ec.bairro, ec.cidade].filter(Boolean).join(', '); } catch(e) { return String(order.endereco_coleta || ''); } })() + '\n' +
-              '\uD83C\uDFE0 Entrega: ' + [order.endereco_entrega, order.complemento_entrega, order.bairro_destino].filter(Boolean).join(', ') +
-              (order.tipo_pagamento === 'maquina' ? '\n\uD83D\uDD04 Retorno \u00e0 loja: Sim' : '');
+            const msgGroup = '🔥 Pedido em Preparo! ⏰ Lançamento automático às ' + (function(){ try { return new Date(parseInt(order.launch_at)).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); } catch(e){ return ''; } })() + '\n' +
+              '\uD83D\uDCE6 Pedido #' + order.id + ' \u2014 ' + lojaNomeGroup + '\n' +
+              '\uD83D\uDCCD Coleta: ' + _bairroColeta(order) + '\n' +
+              '\uD83C\uDFE0 Entrega: ' + (order.bairro_destino || '') +
+              _linhaRetornoWpp(order);
             axios.post(botUrlGroup + '/api/send-group-message',
               { message: msgGroup },
               { headers: { 'x-bot-secret': botSecretGroup } }
@@ -1127,8 +1128,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
                 '⏰ Horário de Previsão: ' + (function(){ try { return new Date(parseInt(order.launch_at)).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); } catch(e){ return ''; } })() + '\n' +
                 '📦 Pedido: #' + order.id + ' — ' + lojaNomeGroup + '\n' +
                 '📍 Coleta: ' + bairroColetaGrp2 + '\n' +
-                '🏠 Entrega: ' + (order.bairro_destino || '') + '\n' +
-                '💳 Pagamento: ' + pagLabelGroup + '\n' +
+                '🏠 Entrega: ' + (order.bairro_destino || '') + _linhaRetornoWpp(order) + '\n' +
                 '⚡ Sua loja também pode ter essa automação para suas entregas!\n' +
                 '👉 Basta se cadastrar pelo link e começar a usar.\n' +
                 '🔗 Cadastre sua loja:\n' +
@@ -2304,10 +2304,11 @@ async function checkLateArrivals() {
           const botUrlGroupRepost = process.env.BOT_URL;
           const botSecretGroupRepost = process.env.BOT_SECRET;
           if (botUrlGroupRepost && botSecretGroupRepost) {
-            const msgGroupRepost = '🚴 Pedido Disponivel Novamente!\n' +
-              'Pedido #' + order.id + ' - ' + lojaRepostNome + '\n' +
-              'Distancia: ' + order.distancia + ' km\n' +
-              'Motoboy ganha: R$ ' + parseFloat(order.valor_motoboy).toFixed(2) + '\n\n' +
+            const msgGroupRepost = '🛵 Pedido Disponível Novamente!\n' +
+              '\uD83D\uDCE6 Pedido #' + order.id + ' \u2014 ' + lojaRepostNome + '\n' +
+              '\uD83D\uDCCD Coleta: ' + _bairroColeta(order) + '\n' +
+              '\uD83C\uDFE0 Entrega: ' + (order.bairro_destino || '') +
+              _linhaRetornoWpp(order) + '\n\n' +
               'Prazo: 15 minutos\n' +
               'Aceito as: ' + horaAceitoRepost + '\n' +
               'Expirou as: ' + horaExpirouRepost + '\n\n' +
@@ -2321,8 +2322,7 @@ async function checkLateArrivals() {
             const msgGroupRepost2 = '⏰ Pedido Disponível Novamente!\n' +
               '📦 Pedido #' + order.id + ' — ' + lojaRepostNome + '\n' +
               '📍 Coleta: ' + bairroColetaRepost2 + '\n' +
-              '🏠 Entrega: ' + (order.bairro_destino || '') + '\n' +
-              '💳 Pagamento: ' + pagLabelRepost + '\n' +
+              '🏠 Entrega: ' + (order.bairro_destino || '') + _linhaRetornoWpp(order) + '\n' +
               '⚠️ O motoboy anterior não chegou a tempo na loja, pedido voltou pro sistema.\n' +
               '⚡ Motoboy, acesse o FlashDrop para aceitar!\n' +
               '📲 https://play.google.com/store/apps/details?id=com.flashdrop.motoboy&pcampaignid=web_share';
@@ -2363,11 +2363,11 @@ app.post('/orders/:id/launch', async (req, res) => {
         if (botUrlGroupL && botSecretGroupL) {
           let lojaNomePend = pedido.loja_name || pedido.loja_user;
           const pagLabelPend = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX',pix_direto:'PIX'}[pedido.tipo_pagamento] || pedido.tipo_pagamento || '-');
-          const msgGroupPend = '\uD83D\uDEB4 Pedido Disponivel!\n' +
-            'Pedido #' + pedido.id + ' - ' + lojaNomePend + '\n' +
-            'Distancia: ' + pedido.distancia + ' km\n' +
-            'Pagamento: ' + pagLabelPend + '\n' +
-            'Motoboy ganha: R$ ' + parseFloat(pedido.valor_motoboy).toFixed(2);
+          const msgGroupPend = '\uD83D\uDEF5 Pedido Dispon\u00EDvel!\n' +
+            '\uD83D\uDCE6 Pedido #' + pedido.id + ' \u2014 ' + lojaNomePend + '\n' +
+            '\uD83D\uDCCD Coleta: ' + _bairroColeta(pedido) + '\n' +
+            '\uD83C\uDFE0 Entrega: ' + (pedido.bairro_destino || '') +
+            _linhaRetornoWpp(pedido);
           axios.post(botUrlGroupL + '/api/send-group-message',
             { message: msgGroupPend, mentionAll: true },
             { headers: { 'x-bot-secret': botSecretGroupL } }
@@ -2376,8 +2376,7 @@ app.post('/orders/:id/launch', async (req, res) => {
           const msgGroupPend2 = '\uD83D\uDEB4 Pedido Dispon\u00EDvel no App!\n' +
             '\uD83D\uDCE6 Pedido #' + pedido.id + ' \u2014 ' + lojaNomePend + '\n' +
             '\uD83D\uDCCD Coleta: ' + bairroColetaPend2 + '\n' +
-            '\uD83C\uDFE0 Entrega: ' + (pedido.bairro_destino || '') + '\n' +
-            '\uD83D\uDCB3 Pagamento: ' + pagLabelPend + '\n' +
+            '\uD83C\uDFE0 Entrega: ' + (pedido.bairro_destino || '') + _linhaRetornoWpp(pedido) + '\n' +
             '\u26A1 Motoboy, acesse o FlashDrop para aceitar!\n' +
             '\uD83D\uDCF2 https://play.google.com/store/apps/details?id=com.flashdrop.motoboy&pcampaignid=web_share';
           axios.post(botUrlGroupL + '/api/send-group-message',
@@ -2777,11 +2776,11 @@ async function checkAndLaunchOrders() {
             if (botUrlGroupA && botSecretGroupA) {
               let lojaNomeAuto = pedido.loja_name || pedido.loja_user;
               const pagLabelAuto = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX',pix_direto:'PIX'}[pedido.tipo_pagamento] || pedido.tipo_pagamento || '-');
-              const msgGroupAuto = '\uD83D\uDEB4 Pedido Disponivel!\n' +
-                'Pedido #' + pedido.id + ' - ' + lojaNomeAuto + '\n' +
-                'Distancia: ' + pedido.distancia + ' km\n' +
-                'Pagamento: ' + pagLabelAuto + '\n' +
-                'Motoboy ganha: R$ ' + parseFloat(pedido.valor_motoboy).toFixed(2);
+              const msgGroupAuto = '\uD83D\uDEF5 Pedido Dispon\u00EDvel!\n' +
+                '\uD83D\uDCE6 Pedido #' + pedido.id + ' \u2014 ' + lojaNomeAuto + '\n' +
+                '\uD83D\uDCCD Coleta: ' + _bairroColeta(pedido) + '\n' +
+                '\uD83C\uDFE0 Entrega: ' + (pedido.bairro_destino || '') +
+                _linhaRetornoWpp(pedido);
               axios.post(botUrlGroupA + '/api/send-group-message',
                 { message: msgGroupAuto, mentionAll: true },
                 { headers: { 'x-bot-secret': botSecretGroupA } }
@@ -2790,8 +2789,7 @@ async function checkAndLaunchOrders() {
               const msgGroupAuto2 = '\uD83D\uDEB4 Pedido Dispon\u00EDvel no App!\n' +
                 '\uD83D\uDCE6 Pedido #' + pedido.id + ' \u2014 ' + lojaNomeAuto + '\n' +
                 '\uD83D\uDCCD Coleta: ' + bairroColetaAuto2 + '\n' +
-                '\uD83C\uDFE0 Entrega: ' + (pedido.bairro_destino || '') + '\n' +
-                '\uD83D\uDCB3 Pagamento: ' + pagLabelAuto + '\n' +
+                '\uD83C\uDFE0 Entrega: ' + (pedido.bairro_destino || '') + _linhaRetornoWpp(pedido) + '\n' +
                 '\u26A1 Motoboy, acesse o FlashDrop para aceitar!\n' +
                 '\uD83D\uDCF2 https://play.google.com/store/apps/details?id=com.flashdrop.motoboy&pcampaignid=web_share';
               axios.post(botUrlGroupA + '/api/send-group-message',
