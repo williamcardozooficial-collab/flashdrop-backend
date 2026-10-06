@@ -1123,7 +1123,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
             // Grupo secundario: mensagem promocional (texto fixo, puxando dados do pedido)
             try {
               const bairroColetaGrp2 = order.bairro_coleta || (() => { try { const ec = typeof order.endereco_coleta === 'string' ? JSON.parse(order.endereco_coleta) : order.endereco_coleta; return ec.bairro || ''; } catch(e) { return ''; } })();
-              const msgGroup2 = '🚀 Novo pedido em preparo.\n' +
+              const msgGroup2 = '🚀 Novo pedido em preparo, *não está disponível*.\n' +
                 '🚴 Será disponibilizado no app FlashDrop Motoboy para aceitação.\n' +
                 '⏰ Horário de Previsão: ' + (function(){ try { return new Date(parseInt(order.launch_at)).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); } catch(e){ return ''; } })() + '\n' +
                 '📦 Pedido: #' + order.id + ' — ' + lojaNomeGroup + '\n' +
