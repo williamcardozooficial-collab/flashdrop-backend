@@ -1074,7 +1074,7 @@ app.put('/orders/:id', async (req, res) => {
         const pagLabel = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX',pix_direto:'PIX'}[order.tipo_pagamento] || order.tipo_pagamento || '-');
         const precisaSaldoTg = order.tipo_pagamento === 'dinheiro' || order.tipo_pagamento === 'maquina';
         const saldoNecessarioTg = precisaSaldoTg ? (parseFloat(order.valor_pedido||0) + parseFloat(order.comissao||0)).toFixed(2) : '';
-        const linhaSaldoTg = precisaSaldoTg ? `\n\n💰 Precisa cobrar o cliente: Sim\n💳 Saldo necessário para aceitar: R$ ${saldoNecessarioTg}` : '';
+        const linhaSaldoTg = precisaSaldoTg ? `\n\n${order.tipo_pagamento === 'maquina' ? '' : '💰 Precisa cobrar o cliente: Sim\n'}💳 Saldo necessário para aceitar: R$ ${saldoNecessarioTg}` : '';
         const msgPedido = `🔥 Pedido em Preparo! ⏰ Lançamento automático as ${(() => { try { return new Date(parseInt(order.launch_at)).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); } catch(e) { return ''; } })()}
 
 Pedido #${order.id} - ${lojaNome}
@@ -1106,7 +1106,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
             const pagLabelGroup = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX',pix_direto:'PIX'}[order.tipo_pagamento] || order.tipo_pagamento || '-');
             const precisaSaldoGrp = order.tipo_pagamento === 'dinheiro' || order.tipo_pagamento === 'maquina';
             const saldoNecessarioGrp = precisaSaldoGrp ? (parseFloat(order.valor_pedido||0) + parseFloat(order.comissao||0)).toFixed(2) : '';
-            const linhaSaldoGrp = precisaSaldoGrp ? ('\n\n💰 Precisa cobrar o cliente: Sim\n💳 Saldo necessário para aceitar: R$ ' + saldoNecessarioGrp) : '';
+            const linhaSaldoGrp = precisaSaldoGrp ? ('\n\n' + (order.tipo_pagamento === 'maquina' ? '' : '💰 Precisa cobrar o cliente: Sim\n') + '💳 Saldo necessário para aceitar: R$ ' + saldoNecessarioGrp) : '';
             const msgGroup = '🔥 Pedido em Preparo! ⏰ Lançamento automático as ' + (function(){ try { return new Date(parseInt(order.launch_at)).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); } catch(e){ return ''; } })() + '\n' +
               'Pedido #' + order.id + ' - ' + lojaNomeGroup + '\n' +
               'Distancia: ' + order.distancia + ' km\n' +
