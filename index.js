@@ -1087,7 +1087,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
 
 📍 Coleta: ${(() => { try { const ec = typeof order.endereco_coleta === 'string' ? JSON.parse(order.endereco_coleta) : order.endereco_coleta; return [ec.rua && ec.num ? ec.rua + ', ' + ec.num : (ec.rua || ec.num || ''), ec.comp || '', ec.bairro, ec.cidade].filter(Boolean).join(', '); } catch(e) { return String(order.endereco_coleta || ''); } })()}
 
-🏠 Entrega: ${[order.endereco_entrega, order.complemento_entrega, order.bairro_destino].filter(Boolean).join(', ')}`;
+🏠 Entrega: ${[order.endereco_entrega, order.complemento_entrega, order.bairro_destino].filter(Boolean).join(', ')}${order.tipo_pagamento === 'maquina' ? '\n\n🔄 Retorno à loja: Sim' : ''}`;
         const groupId = process.env.TELEGRAM_GROUP_ID;
         if (groupId) bot.sendMessage(groupId, msgPedido).catch(() => {});
         motoboys.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgPedido).catch(() => {}));
@@ -1113,7 +1113,8 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
               'Pagamento: ' + pagLabelGroup + linhaSaldoGrp + '\n' +
               'Motoboy ganha: R$ ' + parseFloat(order.valor_motoboy).toFixed(2) + '\n' +
               '\uD83D\uDCCD Coleta: ' + (() => { try { const ec = typeof order.endereco_coleta === 'string' ? JSON.parse(order.endereco_coleta) : order.endereco_coleta; return [ec.rua && ec.num ? ec.rua + ', ' + ec.num : (ec.rua || ec.num || ''), ec.comp || '', ec.bairro, ec.cidade].filter(Boolean).join(', '); } catch(e) { return String(order.endereco_coleta || ''); } })() + '\n' +
-              '\uD83C\uDFE0 Entrega: ' + [order.endereco_entrega, order.complemento_entrega, order.bairro_destino].filter(Boolean).join(', ');
+              '\uD83C\uDFE0 Entrega: ' + [order.endereco_entrega, order.complemento_entrega, order.bairro_destino].filter(Boolean).join(', ') +
+              (order.tipo_pagamento === 'maquina' ? '\n\uD83D\uDD04 Retorno \u00e0 loja: Sim' : '');
             axios.post(botUrlGroup + '/api/send-group-message',
               { message: msgGroup },
               { headers: { 'x-bot-secret': botSecretGroup } }
