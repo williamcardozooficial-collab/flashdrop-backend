@@ -55,7 +55,7 @@ function slugify(str){
 }
 
 // Telegram Bot
-const bot = process.env.TELEGRAM_BOT_TOKEN ? new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, {polling: true}) : null; async function sendPushToOnlineMotoboys(titulo, corpo, dataExtra) { try { const rPush = await pool.query("SELECT id, push_token, app_abre_auto FROM users WHERE role='motoboy' AND online=true AND push_token IS NOT NULL"); if (!rPush.rows.length) return; let ocupadoIds = new Set(); try { const rOcupados = await pool.query("SELECT DISTINCT motoboy_id FROM orders WHERE motoboy_id IS NOT NULL AND status IN ('aceito','na_loja','coletado','no_cliente')"); ocupadoIds = new Set(rOcupados.rows.map(function(r){ return r.motoboy_id; })); } catch(eOcc) { console.error('[PUSH] Erro ao checar motoboys ocupados:', eOcc.message); } const mensagens = rPush.rows.map(function(row) { const ocupado = ocupadoIds.has(row.id); return { to: row.push_token, sound: ocupado ? null : 'default', title: titulo, body: corpo, data: Object.assign({}, dataExtra || {}, { silencioso: ocupado }), priority: 'high', channelId: ocupado ? 'pedidos_flashdrop_silencioso' : 'pedidos_flashdrop_v3', categoryId: 'novo_pedido' }; }); rPush.rows.forEach(function(row) { if (!ocupadoIds.has(row.id) && row.app_abre_auto === true) { mensagens.push({ to: row.push_token, data: Object.assign({}, dataExtra || {}, { abrirApp: true }), priority: 'high', ttl: 60, _contentAvailable: true }); } }); for (let i = 0; i < mensagens.length; i += 90) { const chunk = mensagens.slice(i, i + 90); await axios.post('https://exp.host/--/api/v2/push/send', chunk, { headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'Accept-Encoding': 'gzip, deflate' } }).catch(function(eChunk) { console.error('[PUSH] Erro chunk:', eChunk.message); }); } } catch(ePush) { console.error('[PUSH] Erro ao enviar push:', ePush.message); } }
+const bot = process.env.TELEGRAM_BOT_TOKEN ? new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, {polling: true}) : null; async function sendPushToOnlineMotoboys(titulo, corpo, dataExtra) { try { const rPush = await pool.query("SELECT id, push_token, app_abre_auto FROM users WHERE role='motoboy' AND online=true AND push_token IS NOT NULL AND (blocked IS NOT TRUE)"); if (!rPush.rows.length) return; let ocupadoIds = new Set(); try { const rOcupados = await pool.query("SELECT DISTINCT motoboy_id FROM orders WHERE motoboy_id IS NOT NULL AND status IN ('aceito','na_loja','coletado','no_cliente')"); ocupadoIds = new Set(rOcupados.rows.map(function(r){ return r.motoboy_id; })); } catch(eOcc) { console.error('[PUSH] Erro ao checar motoboys ocupados:', eOcc.message); } const mensagens = rPush.rows.map(function(row) { const ocupado = ocupadoIds.has(row.id); return { to: row.push_token, sound: ocupado ? null : 'default', title: titulo, body: corpo, data: Object.assign({}, dataExtra || {}, { silencioso: ocupado }), priority: 'high', channelId: ocupado ? 'pedidos_flashdrop_silencioso' : 'pedidos_flashdrop_v3', categoryId: 'novo_pedido' }; }); rPush.rows.forEach(function(row) { if (!ocupadoIds.has(row.id) && row.app_abre_auto === true) { mensagens.push({ to: row.push_token, data: Object.assign({}, dataExtra || {}, { abrirApp: true }), priority: 'high', ttl: 60, _contentAvailable: true }); } }); for (let i = 0; i < mensagens.length; i += 90) { const chunk = mensagens.slice(i, i + 90); await axios.post('https://exp.host/--/api/v2/push/send', chunk, { headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'Accept-Encoding': 'gzip, deflate' } }).catch(function(eChunk) { console.error('[PUSH] Erro chunk:', eChunk.message); }); } } catch(ePush) { console.error('[PUSH] Erro ao enviar push:', ePush.message); } }
 const ADMIN_ID = 738230199;
 
 // Bot Commands
@@ -701,6 +701,15 @@ app.post('/users/:id/approve', async (req, res) => {
 
 app.put('/users/:id', async (req, res) => {
   try {
+    // Admin bloqueando: derruba o online junto
+    if (req.body && req.body.blocked === true) { req.body.online = false; }
+    // Usuario bloqueado nao pode ficar online (exceto quando o proprio pedido desbloqueia)
+    if (req.body && req.body.online === true && req.body.blocked !== false) {
+      const blkRes = await pool.query('SELECT blocked FROM users WHERE id=$1', [req.params.id]);
+      if (blkRes.rows.length > 0 && blkRes.rows[0].blocked === true) {
+        return res.status(403).json({ error: 'Conta bloqueada. Fale com o administrador.' });
+      }
+    }
     if (req.body && req.body.online === true) { req.body.online_since = Date.now(); req.body.ultimo_login = Date.now(); } else if (req.body && req.body.online === false) { req.body.online_since = null; }
 
     if (req.body && req.body.loja_online === true) {
@@ -950,6 +959,20 @@ app.put('/orders/:id', async (req, res) => {
     const fields = req.body;
     if (fields.status === 'em_preparo' && !fields.t_em_preparo) { fields.t_em_preparo = new Date().toISOString(); }
 
+    // === BLOQUEIO DO ADMIN: motoboy bloqueado nao pode aceitar/ser atribuido a pedido ===
+    // So verifica quando o pedido esta sendo atribuido a um motoboy DIFERENTE do atual
+    // (aceite novo). Pedidos ja aceitos/em andamento pelo mesmo motoboy seguem normalmente.
+    if (fields.motoboy_id !== undefined && fields.motoboy_id !== null && fields.motoboy_id !== '') {
+      const ordAtualRes = await pool.query('SELECT motoboy_id FROM orders WHERE id=$1', [req.params.id]);
+      const motoboyAtual = ordAtualRes.rows.length > 0 ? ordAtualRes.rows[0].motoboy_id : null;
+      if (String(motoboyAtual) !== String(fields.motoboy_id)) {
+        const mbBlockRes = await pool.query('SELECT blocked FROM users WHERE id=$1', [fields.motoboy_id]);
+        if (mbBlockRes.rows.length > 0 && mbBlockRes.rows[0].blocked === true) {
+          return res.status(403).json({ error: 'Conta bloqueada. Fale com o administrador.' });
+        }
+      }
+    }
+
     // === VERIFICACAO DE LIMITE DE CREDITO AO ACEITAR CORRIDA EM DINHEIRO ===
     if (fields.status === 'em_preparo' && fields.motoboy_id) {
 
@@ -1068,7 +1091,7 @@ app.put('/orders/:id', async (req, res) => {
     // Notificar motoboys quando loja coloca pedido em preparo
     if (fields.status === 'em_preparo' && bot) {
       try {
-        const motoboys = await pool.query("SELECT telegram_id FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL");
+        const motoboys = await pool.query("SELECT telegram_id FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL AND (blocked IS NOT TRUE)");
         let lojaNome = order.loja_name;
         if (!lojaNome && order.loja_user) {
           const lojaRes = await pool.query("SELECT name FROM users WHERE username=$1", [order.loja_user]);
@@ -1163,7 +1186,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
             ).catch(e => console.error('[LOJA BOT] Erro em_preparo cliente:', e.message));
           }
       } catch(eLojaBotPrep) { console.error('[LOJA BOT] Erro geral em_preparo:', eLojaBotPrep.message); }    }
-    if (fields.launch_at !== undefined && fields.status === undefined && bot) { try { const motoboysHT = await pool.query("SELECT telegram_id FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL"); let lojaNomeHT = order.loja_name || order.loja_user; const horaNovaHT = new Date(parseInt(order.launch_at)).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); const msgHorarioHT = `🔄 Horario Atualizado! Pedido #${order.id} - ${lojaNomeHT} - Novo lançamento automático: ${horaNovaHT}`; const groupIdHT = process.env.TELEGRAM_GROUP_ID; if (groupIdHT) bot.sendMessage(groupIdHT, msgHorarioHT).catch(() => {}); motoboysHT.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgHorarioHT).catch(() => {})); } catch(eHorarioBot) { console.error('[HORARIO] Erro:', eHorarioBot.message); } }  if (fields.launch_at !== undefined && fields.status === undefined) { try { const botUrlHT = process.env.BOT_URL; const botSecretHT = process.env.BOT_SECRET; if (botUrlHT && botSecretHT) { let lojaNomeHTW = order.loja_name || order.loja_user; const horaNovaHTW = new Date(parseInt(order.launch_at)).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); const msgHorarioHTW = `🔄 Horario Atualizado! Pedido #${order.id} - ${lojaNomeHTW} - Novo lançamento automático: ${horaNovaHTW}`; axios.post(botUrlHT + '/api/send-group-message', { message: msgHorarioHTW, mentionAll: true }, { headers: { 'x-bot-secret': botSecretHT } }).catch(e => console.error('[BOT] Erro msg grupo horario:', e.message)); axios.post(botUrlHT + '/api/send-group-message', { message: msgHorarioHTW, grupo: 'secundario' }, { headers: { 'x-bot-secret': botSecretHT } }).catch(e => console.error('[BOT] Erro msg grupo2 horario:', e.message)); } } catch(eHorarioBotW) { console.error('[HORARIO] Erro WhatsApp:', eHorarioBotW.message); } }if (fields.status === 'entregue' && prevOrderRes.rows[0] && prevOrderRes.rows[0].status === 'entregue') { return res.json(order); }
+    if (fields.launch_at !== undefined && fields.status === undefined && bot) { try { const motoboysHT = await pool.query("SELECT telegram_id FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL AND (blocked IS NOT TRUE)"); let lojaNomeHT = order.loja_name || order.loja_user; const horaNovaHT = new Date(parseInt(order.launch_at)).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); const msgHorarioHT = `🔄 Horario Atualizado! Pedido #${order.id} - ${lojaNomeHT} - Novo lançamento automático: ${horaNovaHT}`; const groupIdHT = process.env.TELEGRAM_GROUP_ID; if (groupIdHT) bot.sendMessage(groupIdHT, msgHorarioHT).catch(() => {}); motoboysHT.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgHorarioHT).catch(() => {})); } catch(eHorarioBot) { console.error('[HORARIO] Erro:', eHorarioBot.message); } }  if (fields.launch_at !== undefined && fields.status === undefined) { try { const botUrlHT = process.env.BOT_URL; const botSecretHT = process.env.BOT_SECRET; if (botUrlHT && botSecretHT) { let lojaNomeHTW = order.loja_name || order.loja_user; const horaNovaHTW = new Date(parseInt(order.launch_at)).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); const msgHorarioHTW = `🔄 Horario Atualizado! Pedido #${order.id} - ${lojaNomeHTW} - Novo lançamento automático: ${horaNovaHTW}`; axios.post(botUrlHT + '/api/send-group-message', { message: msgHorarioHTW, mentionAll: true }, { headers: { 'x-bot-secret': botSecretHT } }).catch(e => console.error('[BOT] Erro msg grupo horario:', e.message)); axios.post(botUrlHT + '/api/send-group-message', { message: msgHorarioHTW, grupo: 'secundario' }, { headers: { 'x-bot-secret': botSecretHT } }).catch(e => console.error('[BOT] Erro msg grupo2 horario:', e.message)); } } catch(eHorarioBotW) { console.error('[HORARIO] Erro WhatsApp:', eHorarioBotW.message); } }if (fields.status === 'entregue' && prevOrderRes.rows[0] && prevOrderRes.rows[0].status === 'entregue') { return res.json(order); }
     // Mesma protecao contra reprocessamento duplicado (e reenvio de notificacao ao
     // cliente/loja) quando o mesmo status chega mais de uma vez para o pedido - por
     // exemplo, o motoboy aperta "Cheguei no Cliente" manualmente quase ao mesmo tempo
@@ -2297,7 +2320,7 @@ async function checkLateArrivals() {
         const horaExpirouRepost = order.t_aceito ? fmtHoraBR(new Date(order.t_aceito).getTime() + ARRIVE_TIMEOUT_MS) : '-';
         const msgRepost = `Pedido #${order.id} disponivel novamente!\n\nLoja: ${lojaRepostNome}\nMotoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}\nDistancia: ${order.distancia} km\n\nPrazo: 15 minutos\nAceito as: ${horaAceitoRepost}\nExpirou as: ${horaExpirouRepost}\n\nMotoboy anterior nao chegou no prazo.`;
         if (groupId) bot.sendMessage(groupId, msgRepost).catch(() => {});
-        const motoboys = await pool.query("SELECT telegram_id FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL");
+        const motoboys = await pool.query("SELECT telegram_id FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL AND (blocked IS NOT TRUE)");
         motoboys.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgRepost).catch(() => {})); sendPushToOnlineMotoboys('🛵 Pedido disponível novamente!', 'Pedido #' + order.id + ' - ' + lojaRepostNome + ' - R$ ' + parseFloat(order.valor_motoboy).toFixed(2), { orderId: order.id });
         // Notificar grupo WhatsApp tambem (motoboy anterior nao chegou no prazo)
         try {
@@ -2353,7 +2376,7 @@ app.post('/orders/:id/launch', async (req, res) => {
       const msgLancado = `Pedido #${pedido.id} DISPONIVEL AGORA!\n\nLoja: ${lojaNome}\nPagamento: ${pagLabel}\nMotoboy ganha: R$ ${parseFloat(pedido.valor_motoboy).toFixed(2)}\nDistancia: ${pedido.distancia} km\n\nPedido pronto! Aceite agora.`;
       const groupId = process.env.TELEGRAM_GROUP_ID;
       if (groupId) bot.sendMessage(groupId, msgLancado).catch(() => {});
-      const motoboys = await pool.query("SELECT telegram_id FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL");
+      const motoboys = await pool.query("SELECT telegram_id FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL AND (blocked IS NOT TRUE)");
       motoboys.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgLancado).catch(() => {})); sendPushToOnlineMotoboys('🛵 Pedido disponível agora!', 'Pedido #' + pedido.id + ' - ' + lojaNome + ' - R$ ' + parseFloat(pedido.valor_motoboy).toFixed(2), { orderId: pedido.id });
     }
       // Notificar grupo WhatsApp quando pedido fica disponivel (pendente - launch manual)
@@ -2765,7 +2788,7 @@ async function checkAndLaunchOrders() {
         const msgAuto = `Pedido #${pedido.id} DISPONIVEL - Lancamento Automatico!\n\nLoja: ${lojaNome}\nPagamento: ${pagLabel}\nMotoboy ganha: R$ ${parseFloat(pedido.valor_motoboy).toFixed(2)}\nDistancia: ${pedido.distancia} km\n\nTimer expirou - pedido agora no sistema!`;
         const groupId = process.env.TELEGRAM_GROUP_ID;
         if (groupId) bot.sendMessage(groupId, msgAuto).catch(() => {});
-        const motoboys = await pool.query("SELECT telegram_id FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL");
+        const motoboys = await pool.query("SELECT telegram_id FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL AND (blocked IS NOT TRUE)");
         motoboys.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgAuto).catch(() => {})); sendPushToOnlineMotoboys('🛵 Pedido disponível!', 'Pedido #' + pedido.id + ' - ' + lojaNome + ' - R$ ' + parseFloat(pedido.valor_motoboy).toFixed(2), { orderId: pedido.id });
       }
       console.log(`[JOB] Pedido #${pedido.id} lancado automaticamente.`);
