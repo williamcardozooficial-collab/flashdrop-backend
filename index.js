@@ -1072,6 +1072,8 @@ app.put('/orders/:id', async (req, res) => {
   try {
     const fields = req.body;
     if (fields.status === 'em_preparo' && !fields.t_em_preparo) { fields.t_em_preparo = new Date().toISOString(); }
+    // Marcador interno da chegada agrupada (nao e coluna): evita repropagar a partir dos pedidos irmaos
+    const _chegadaAgrupada = fields._chegada_agrupada === true; delete fields._chegada_agrupada;
 
     // === BLOQUEIO DO ADMIN: motoboy bloqueado nao pode aceitar/ser atribuido a pedido ===
     // So verifica quando o pedido esta sendo atribuido a um motoboy DIFERENTE do atual
@@ -1291,6 +1293,12 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
     if (fields.status === 'na_loja' && prevOrderRes.rows[0] && prevOrderRes.rows[0].status === 'na_loja') { return res.json(order); }
     if (fields.status === 'coletado' && prevOrderRes.rows[0] && prevOrderRes.rows[0].status === 'coletado') { return res.json(order); }
     if (fields.status === 'no_cliente' && prevOrderRes.rows[0] && prevOrderRes.rows[0].status === 'no_cliente') { return res.json(order); }
+
+    // Chegada agrupada: o motoboy chegou na loja (automatico ou manual) -> marca tambem os outros
+    // pedidos ativos dele na MESMA loja que ainda estao 'aceito' sem chegada. Roda em segundo plano.
+    if (fields.status === 'na_loja' && !_chegadaAgrupada && order && order.motoboy_id && order.loja_user) {
+      marcarChegadaPedidosMesmaLoja(order.motoboy_id, order.loja_user, order.id, fields.chegada_loja_auto === true);
+    }
 
     // Inatividade de clientes: pedido entregue reinicia o contador do cliente (mesmo celular) nesta loja
     if (fields.status === 'entregue' && order.loja_user && String(order.telefone_cliente || '').replace(/\D/g, '')) {
@@ -2413,6 +2421,22 @@ async function checkLateArrivals() {
       [cutoff]
     );
     for (const order of r.rows) {
+      // Protecao: se o mesmo motoboy ja tem chegada registrada em outro pedido ativo da MESMA loja,
+      // ele esta na loja -> marca a chegada deste pedido em vez de devolver o pedido e penalizar.
+      if (order.motoboy_id && order.loja_user) {
+        try {
+          const irmaoRes = await pool.query("SELECT id FROM orders WHERE motoboy_id=$1 AND loja_user=$2 AND id<>$3 AND t_na_loja IS NOT NULL AND status IN ('na_loja','coletado','no_cliente') ORDER BY id LIMIT 1", [order.motoboy_id, order.loja_user, order.id]);
+          if (irmaoRes.rows.length) {
+            await axios.put(`http://localhost:${PORT}/orders/${order.id}`, { status: 'na_loja', t_na_loja: new Date().toISOString(), _chegada_agrupada: true });
+            console.log('[JOB] Pedido #' + order.id + ': motoboy ja chegou na loja pelo pedido #' + irmaoRes.rows[0].id + ' -> na_loja (sem timeout/penalidade)');
+            continue;
+          }
+        } catch (eIrmao) {
+          // Na duvida nao penaliza: tenta de novo na proxima rodada do job
+          console.error('[JOB] Erro ao verificar chegada agrupada do pedido #' + order.id + ':', eIrmao.message);
+          continue;
+        }
+      }
       console.log(`[JOB] Pedido #${order.id}: motoboy ${order.motoboy_name} nao chegou na loja. Resetando para pendente.`);
       await pool.query(
         "UPDATE orders SET status='pendente', motoboy_id=NULL, motoboy_name=NULL, t_aceito=NULL, pending_until=$1 WHERE id=$2",
@@ -3521,6 +3545,23 @@ function haversineMetros(lat1, lon1, lat2, lon2) {
 }
 
 const RAIO_CHEGADA_AUTO = 100; // metros - raio para chegada automatica (coleta e entrega). Aumentado de 50 para 100 para dar mais margem à imprecisão normal do GPS de celular.
+
+// Chegada agrupada: marca como 'na_loja' os outros pedidos do motoboy na mesma loja que ainda
+// estao 'aceito' sem chegada. Cada um passa pela rota PUT /orders/:id normal (mesmos campos,
+// eventos e notificacoes, uma vez por pedido); o marcador _chegada_agrupada evita repropagar.
+async function marcarChegadaPedidosMesmaLoja(motoboyId, lojaUser, pedidoOrigemId, auto) {
+  try {
+    const r = await pool.query("SELECT id FROM orders WHERE motoboy_id=$1 AND loja_user=$2 AND id<>$3 AND status='aceito' AND t_na_loja IS NULL ORDER BY id", [motoboyId, lojaUser, pedidoOrigemId]);
+    for (const o of r.rows) {
+      try {
+        const body = { status: 'na_loja', t_na_loja: new Date().toISOString(), _chegada_agrupada: true };
+        if (auto) body.chegada_loja_auto = true;
+        await axios.put(`http://localhost:${PORT}/orders/${o.id}`, body);
+        console.log('[CHEGADA-AGRUPADA] Pedido #' + o.id + ' -> na_loja junto com o pedido #' + pedidoOrigemId + ' (mesmo motoboy e mesma loja)');
+      } catch (ePut) { console.error('[CHEGADA-AGRUPADA] Erro no pedido #' + o.id + ':', ePut.message); }
+    }
+  } catch (e) { console.error('[CHEGADA-AGRUPADA] Erro geral:', e.message); }
+}
 
 // Verifica se o motoboy chegou perto do ponto de coleta ou de entrega do pedido
 // e, se sim, avanca o status automaticamente chamando a mesma rota PUT /orders/:id
