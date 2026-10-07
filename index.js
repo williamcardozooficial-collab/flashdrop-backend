@@ -506,7 +506,32 @@ try {
   }
 } catch(e){console.log('slug migration:',e.message);}
   try { await pool.query(`CREATE TABLE IF NOT EXISTS motoboy_localizacao (id SERIAL PRIMARY KEY, motoboy_id INTEGER NOT NULL UNIQUE, order_id INTEGER, lat DOUBLE PRECISION NOT NULL, lng DOUBLE PRECISION NOT NULL, updated_at TIMESTAMP DEFAULT NOW())`); } catch(e) {}
-try { await pool.query(`CREATE TABLE IF NOT EXISTS clientes_loja (id SERIAL PRIMARY KEY, loja_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, codigo INTEGER NOT NULL, nome VARCHAR(200) NOT NULL, celular VARCHAR(20) NOT NULL, rua VARCHAR(200), numero VARCHAR(20), complemento VARCHAR(200), bairro VARCHAR(100), cidade VARCHAR(100), created_at TIMESTAMP DEFAULT NOW(), UNIQUE(loja_id, codigo))`); } catch(e) {} try { await pool.query("ALTER TABLE clientes_loja ADD COLUMN IF NOT EXISTS rua2 VARCHAR(200)"); } catch(e) {} try { await pool.query("ALTER TABLE clientes_loja ADD COLUMN IF NOT EXISTS numero2 VARCHAR(20)"); } catch(e) {} try { await pool.query("ALTER TABLE clientes_loja ADD COLUMN IF NOT EXISTS complemento2 VARCHAR(200)"); } catch(e) {} try { await pool.query("ALTER TABLE clientes_loja ADD COLUMN IF NOT EXISTS bairro2 VARCHAR(100)"); } catch(e) {} try { await pool.query("ALTER TABLE clientes_loja ADD COLUMN IF NOT EXISTS cidade2 VARCHAR(100)"); } catch(e) {} try { await pool.query("ALTER TABLE clientes_loja ADD CONSTRAINT clientes_loja_loja_celular_unique UNIQUE (loja_id, celular)"); } catch(e) {} try { await pool.query("ALTER TABLE clientes_loja ADD COLUMN IF NOT EXISTS contador_desde BIGINT"); } catch(e) {} try { await pool.query("UPDATE clientes_loja SET contador_desde=$1 WHERE contador_desde IS NULL", [Date.now()]); } catch(e) {} console.log('DB initialized');
+try { await pool.query(`CREATE TABLE IF NOT EXISTS clientes_loja (id SERIAL PRIMARY KEY, loja_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, codigo INTEGER NOT NULL, nome VARCHAR(200) NOT NULL, celular VARCHAR(20) NOT NULL, rua VARCHAR(200), numero VARCHAR(20), complemento VARCHAR(200), bairro VARCHAR(100), cidade VARCHAR(100), created_at TIMESTAMP DEFAULT NOW(), UNIQUE(loja_id, codigo))`); } catch(e) {} try { await pool.query("ALTER TABLE clientes_loja ADD COLUMN IF NOT EXISTS rua2 VARCHAR(200)"); } catch(e) {} try { await pool.query("ALTER TABLE clientes_loja ADD COLUMN IF NOT EXISTS numero2 VARCHAR(20)"); } catch(e) {} try { await pool.query("ALTER TABLE clientes_loja ADD COLUMN IF NOT EXISTS complemento2 VARCHAR(200)"); } catch(e) {} try { await pool.query("ALTER TABLE clientes_loja ADD COLUMN IF NOT EXISTS bairro2 VARCHAR(100)"); } catch(e) {} try { await pool.query("ALTER TABLE clientes_loja ADD COLUMN IF NOT EXISTS cidade2 VARCHAR(100)"); } catch(e) {} try { await pool.query("ALTER TABLE clientes_loja ADD CONSTRAINT clientes_loja_loja_celular_unique UNIQUE (loja_id, celular)"); } catch(e) {} try { await pool.query("ALTER TABLE clientes_loja ADD COLUMN IF NOT EXISTS contador_desde BIGINT"); } catch(e) {} try { await pool.query("UPDATE clientes_loja SET contador_desde=$1 WHERE contador_desde IS NULL", [Date.now()]); } catch(e) {}
+  // Financeiro: estornos (correcao sem apagar o lancamento original) e arquivo de relatorios emitidos
+  try { await pool.query(`CREATE TABLE IF NOT EXISTS financeiro_estornos (id SERIAL PRIMARY KEY, origem_tabela VARCHAR(40) NOT NULL, origem_id INTEGER NOT NULL, origem_tipo VARCHAR(40), valor DECIMAL NOT NULL, efeito_caixa DECIMAL NOT NULL DEFAULT 0, motivo TEXT NOT NULL, criado_por VARCHAR(100), created_at TIMESTAMP DEFAULT NOW(), UNIQUE(origem_tabela, origem_id))`); } catch(e) { console.error('[MIGRACAO] financeiro_estornos:', e.message); }
+  try { await pool.query(`CREATE TABLE IF NOT EXISTS relatorios_emitidos (id SERIAL PRIMARY KEY, emitido_em TIMESTAMP DEFAULT NOW(), periodo_inicio DATE NOT NULL, periodo_fim DATE NOT NULL, emitido_por VARCHAR(100), totais JSONB, dados JSON NOT NULL)`); } catch(e) { console.error('[MIGRACAO] relatorios_emitidos:', e.message); }
+  // Registros financeiros nao podem ser apagados (nem por outro caminho do codigo): trava no proprio banco
+  try {
+    await pool.query(`CREATE OR REPLACE FUNCTION fd_bloquear_delete_financeiro() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'Registro financeiro (%) nao pode ser apagado. Use estorno.', TG_TABLE_NAME; END; $$ LANGUAGE plpgsql`);
+    await pool.query(`CREATE OR REPLACE FUNCTION fd_bloquear_delete_pedido_entregue() RETURNS trigger AS $$ BEGIN IF OLD.status = 'entregue' THEN RAISE EXCEPTION 'Pedido entregue #% e registro financeiro e nao pode ser apagado.', OLD.id; END IF; RETURN OLD; END; $$ LANGUAGE plpgsql`);
+  } catch(e) { console.error('[MIGRACAO] funcoes de trava financeira:', e.message); }
+  // Uma tentativa por tabela: se alguma ainda nao existir, as outras continuam protegidas
+  for (const t of ['platform_events', 'referral_earnings', 'withdrawals', 'loja_wallet_events', 'motoboy_wallet_events', 'financeiro_estornos', 'relatorios_emitidos']) {
+    try {
+      await pool.query(`DROP TRIGGER IF EXISTS fd_sem_delete ON ${t}`);
+      await pool.query(`CREATE TRIGGER fd_sem_delete BEFORE DELETE ON ${t} FOR EACH ROW EXECUTE PROCEDURE fd_bloquear_delete_financeiro()`);
+    } catch(e) { console.error('[MIGRACAO] trava de exclusao em ' + t + ':', e.message); }
+  }
+  // Relatorio emitido tambem nao pode ser alterado (2a via tem que sair igual)
+  try {
+    await pool.query(`DROP TRIGGER IF EXISTS fd_sem_update ON relatorios_emitidos`);
+    await pool.query(`CREATE TRIGGER fd_sem_update BEFORE UPDATE ON relatorios_emitidos FOR EACH ROW EXECUTE PROCEDURE fd_bloquear_delete_financeiro()`);
+  } catch(e) { console.error('[MIGRACAO] trava de alteracao em relatorios_emitidos:', e.message); }
+  try {
+    await pool.query(`DROP TRIGGER IF EXISTS fd_sem_delete_entregue ON orders`);
+    await pool.query(`CREATE TRIGGER fd_sem_delete_entregue BEFORE DELETE ON orders FOR EACH ROW EXECUTE PROCEDURE fd_bloquear_delete_pedido_entregue()`);
+  } catch(e) { console.error('[MIGRACAO] trava de exclusao de pedido entregue:', e.message); }
+  console.log('DB initialized');
 }
 
 app.get('/health', (req, res) => res.json({ ok: true }));
@@ -1921,6 +1946,10 @@ app.put('/withdrawals/:id', async (req, res) => {
 app.delete('/orders/:id', async (req, res) => {
   try {
     const orderRes = await pool.query('SELECT * FROM orders WHERE id=$1', [req.params.id]);
+    // Pedido entregue e registro financeiro: nao pode ser apagado
+    if (orderRes.rows.length > 0 && orderRes.rows[0].status === 'entregue') {
+      return res.status(403).json({ error: 'Pedido entregue e registro financeiro e nao pode ser excluido.' });
+    }
     if (orderRes.rows.length > 0) {
       const order = orderRes.rows[0];
       // CORRECAO: pedidos em dinheiro NAO geram estorno para a loja
@@ -2699,11 +2728,8 @@ app.post('/referrals/cleanup', async (req, res) => {
         AND COALESCE(data_conclusao, data_fim) < NOW() - INTERVAL '20 days'
         AND bonus_pago = true
       RETURNING id`);
-    const earnResult = await pool.query(`DELETE FROM referral_earnings
-      WHERE created_at < NOW() - INTERVAL '110 days'
-        AND referrer_id NOT IN (SELECT referrer_id FROM referrals WHERE status_ref='ativo')
-      RETURNING id`);
-    res.json({refs_deletados: result.rows.length, earnings_deletados: earnResult.rows.length});
+    // referral_earnings sao lancamentos financeiros (bonus pagos): nao sao mais apagados
+    res.json({refs_deletados: result.rows.length, earnings_deletados: 0});
   } catch(e) { res.status(500).json({error: e.message}); }
 });
 
@@ -3626,7 +3652,7 @@ app.get('/orders/motoboy-eventos', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/rastrear/:order_id', async (req, res) => { try { const oid = parseInt(req.params.order_id); const r = await pool.query("SELECT ml.lat, ml.lng, ml.updated_at, u.name AS nome_motoboy, o.status, o.nome_cliente FROM motoboy_localizacao ml JOIN users u ON u.id = ml.motoboy_id JOIN orders o ON o.id = ml.order_id WHERE ml.order_id = $1", [oid]); if (r.rows.length === 0) return res.status(404).json({ error: 'Rastreio nao disponivel' }); res.json(r.rows[0]); } catch(e) { res.status(500).json({ error: e.message }); } });
-initDB().then(() => {}); async function cleanupOldOrders() { try { const s = await pool.query('SELECT historico_limpeza_dias FROM settings WHERE id=1'); const dias = parseInt(s.rows[0] && s.rows[0].historico_limpeza_dias) || 30; const r = await pool.query("DELETE FROM orders WHERE status IN ('entregue','cancelado') AND created_at < NOW() - ($1 || ' days')::interval RETURNING id", [dias]); if (r.rows.length > 0) { console.log('[JOB] Limpeza automatica: ' + r.rows.length + ' pedido(s) removido(s) (prazo: ' + dias + ' dias)'); } } catch (e) { console.error('[JOB] Erro na limpeza automatica de pedidos:', e.message); } } app.put('/settings/cleanup-days', async (req, res) => { try { const dias = parseInt(req.body.historico_limpeza_dias) || 30; await pool.query('UPDATE settings SET historico_limpeza_dias=$1 WHERE id=1', [dias]); res.json({ ok: true, historico_limpeza_dias: dias }); } catch(e) { res.status(500).json({ error: e.message }); } });
+initDB().then(() => {}); async function cleanupOldOrders() { try { const s = await pool.query('SELECT historico_limpeza_dias FROM settings WHERE id=1'); const dias = parseInt(s.rows[0] && s.rows[0].historico_limpeza_dias) || 30; const r = await pool.query("DELETE FROM orders WHERE status = 'cancelado' AND created_at < NOW() - ($1 || ' days')::interval RETURNING id", [dias]); /* pedidos entregues sao registros financeiros e nao sao mais apagados */ if (r.rows.length > 0) { console.log('[JOB] Limpeza automatica: ' + r.rows.length + ' pedido(s) removido(s) (prazo: ' + dias + ' dias)'); } } catch (e) { console.error('[JOB] Erro na limpeza automatica de pedidos:', e.message); } } app.put('/settings/cleanup-days', async (req, res) => { try { const dias = parseInt(req.body.historico_limpeza_dias) || 30; await pool.query('UPDATE settings SET historico_limpeza_dias=$1 WHERE id=1', [dias]); res.json({ ok: true, historico_limpeza_dias: dias }); } catch(e) { res.status(500).json({ error: e.message }); } });
   
 // ============================================================
 // BOT iFOOD ENTREGA PROPRIA
@@ -3744,13 +3770,20 @@ app.post('/ifood/confirmar-entrega', async (req, res) => {
 });
 
 // ===== MODULO FINANCEIRO (perfil financeiro - relatorios detalhados) =====
+// Periodo do filtro em horario de Sao Paulo. As colunas TIMESTAMP do banco guardam a hora em UTC
+// (NOW() com o banco em UTC), entao o inicio/fim do dia em SP e convertido para UTC (SP = UTC-3, sem horario de verao).
+function _limiteUtcSP(dataStr, fimDoDia) {
+  const d = new Date(dataStr + (fimDoDia ? 'T23:59:59.999-03:00' : 'T00:00:00.000-03:00'));
+  return d.toISOString().replace('T', ' ').replace('Z', '');
+}
 function getFinanceiroRange(req) {
-  const hoje = new Date();
-  const padraoFim = hoje.toISOString().slice(0, 10);
-  const padraoInicio = new Date(hoje.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  const inicioStr = (req.query.inicio || padraoInicio).slice(0, 10);
-  const fimStr = (req.query.fim || padraoFim).slice(0, 10);
-  return { inicio: inicioStr + ' 00:00:00', fim: fimStr + ' 23:59:59', inicioStr, fimStr };
+  const q = Object.assign({}, req.body || {}, req.query || {});
+  const hoje = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+  const padraoInicio = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+  const valida = function(v, padrao) { v = String(v || '').slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : padrao; };
+  const inicioStr = valida(q.inicio, padraoInicio);
+  const fimStr = valida(q.fim, hoje);
+  return { inicio: _limiteUtcSP(inicioStr, false), fim: _limiteUtcSP(fimStr, true), inicioStr, fimStr };
 }
 
 // Resumo geral do periodo: depositos, saques, vendas, comissao admin, bonus pagos, coleta de dinheiro/cartao pelos motoboys, saldo da plataforma
@@ -3894,19 +3927,256 @@ app.get('/financeiro/eventos', async (req, res) => {
     const { inicio, fim } = getFinanceiroRange(req);
     const r = await pool.query(
       `SELECT * FROM (
-        SELECT tipo, valor, descricao, created_at, order_id, 'plataforma' as origem, NULL::varchar as nome
-          FROM platform_events WHERE created_at BETWEEN $1 AND $2
+        SELECT pe.id, pe.tipo, pe.valor, pe.descricao, pe.created_at, pe.order_id, 'plataforma' as origem, NULL::varchar as nome,
+            EXISTS (SELECT 1 FROM financeiro_estornos fe WHERE fe.origem_tabela='platform_events' AND fe.origem_id=pe.id) AS estornado
+          FROM platform_events pe WHERE pe.created_at BETWEEN $1 AND $2
         UNION ALL
-        SELECT lwe.tipo, lwe.valor, lwe.descricao, lwe.created_at, lwe.order_id, 'loja' as origem, u.name as nome
+        SELECT fe2.id, 'estorno' as tipo, fe2.efeito_caixa as valor, ('Estorno de ' || COALESCE(fe2.origem_tipo,'lancamento') || ' #' || fe2.origem_id || ': ' || fe2.motivo) as descricao, fe2.created_at, NULL::integer as order_id, 'plataforma' as origem, fe2.criado_por as nome, false AS estornado
+          FROM financeiro_estornos fe2 WHERE fe2.created_at BETWEEN $1 AND $2
+        UNION ALL
+        SELECT lwe.id, lwe.tipo, lwe.valor, lwe.descricao, lwe.created_at, lwe.order_id, 'loja' as origem, u.name as nome, false AS estornado
           FROM loja_wallet_events lwe LEFT JOIN users u ON u.id = lwe.loja_id WHERE lwe.created_at BETWEEN $1 AND $2
         UNION ALL
-        SELECT mwe.tipo, mwe.valor, mwe.descricao, mwe.created_at, mwe.order_id, 'motoboy' as origem, u2.name as nome
+        SELECT mwe.id, mwe.tipo, mwe.valor, mwe.descricao, mwe.created_at, mwe.order_id, 'motoboy' as origem, u2.name as nome, false AS estornado
           FROM motoboy_wallet_events mwe LEFT JOIN users u2 ON u2.id = mwe.motoboy_id WHERE mwe.created_at BETWEEN $1 AND $2
       ) combined ORDER BY created_at DESC LIMIT 3000`,
       [inicio, fim]
     );
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ===== RELATORIO FINANCEIRO DETALHADO (contador) =====
+// Data/hora em Sao Paulo a partir de uma coluna TIMESTAMP gravada em UTC
+function _sqlDataSP(col) { return "to_char((" + col + ") AT TIME ZONE 'UTC' AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI')"; }
+function _num(v) { return Math.round((parseFloat(v) || 0) * 100) / 100; }
+// Movimentos do caixa da plataforma (platform_wallet), com sinal: + entra no caixa, - sai do caixa.
+// indicacao_loja de platform_events nao entra aqui porque o mesmo valor ja esta em referral_earnings.
+const SQL_MOVIMENTOS_CAIXA = `
+  SELECT 'platform_events' AS origem_tabela, pe.id, pe.tipo, pe.descricao, pe.order_id, pe.created_at,
+         CASE WHEN pe.tipo='comissao' THEN pe.valor ELSE -pe.valor END AS valor_caixa,
+         NULL::integer AS ref_ganhou_id, NULL::varchar AS ref_ganhou, NULL::varchar AS ref_indicado
+    FROM platform_events pe WHERE pe.tipo <> 'indicacao_loja'
+  UNION ALL
+  SELECT 'referral_earnings', re.id, 'indicacao_' || COALESCE(re.tipo,''), 'Bonus de indicacao', re.order_id, re.created_at, -re.valor,
+         re.referrer_id, ur.name, ud.name
+    FROM referral_earnings re LEFT JOIN users ur ON ur.id=re.referrer_id LEFT JOIN users ud ON ud.id=re.referred_id
+  UNION ALL
+  SELECT 'financeiro_estornos', fe.id, 'estorno', ('Estorno de ' || COALESCE(fe.origem_tipo,'lancamento') || ' #' || fe.origem_id || ': ' || fe.motivo), NULL, fe.created_at, fe.efeito_caixa,
+         NULL, NULL, NULL
+    FROM financeiro_estornos fe`;
+async function montarRelatorioFinanceiro(inicio, fim, inicioStr, fimStr) {
+  const P = [inicio, fim];
+
+  // 1) Lancamentos do caixa da plataforma no periodo (fonte unica do resumo, do caixa e dos bonus por motoboy)
+  const wallet = (await pool.query('SELECT balance FROM platform_wallet WHERE id=1')).rows[0] || { balance: 0 };
+  const depois = (await pool.query("SELECT COALESCE(SUM(valor_caixa),0) AS total FROM (" + SQL_MOVIMENTOS_CAIXA + ") m WHERE m.created_at > $1", [fim])).rows[0];
+  const movRes = await pool.query("SELECT m.*, " + _sqlDataSP('m.created_at') + " AS data_hora FROM (" + SQL_MOVIMENTOS_CAIXA + ") m WHERE m.created_at BETWEEN $1 AND $2 ORDER BY m.created_at, m.origem_tabela, m.id", P);
+
+  // Motoboy de cada bonus/taxa: pelo pedido; se o pedido nao existir mais, pelo lancamento da carteira do motoboy do mesmo pedido
+  const orderIds = Array.from(new Set(movRes.rows.filter(function(m) { return m.order_id; }).map(function(m) { return m.order_id; })));
+  const mbPorPedido = {}; const mbPorPedidoTipo = {};
+  if (orderIds.length) {
+    (await pool.query('SELECT o.id, o.motoboy_id, COALESCE(u.name, o.motoboy_name) AS nome FROM orders o LEFT JOIN users u ON u.id=o.motoboy_id WHERE o.id = ANY($1::int[])', [orderIds])).rows
+      .forEach(function(r) { if (r.motoboy_id || r.nome) mbPorPedido[r.id] = { id: r.motoboy_id, nome: r.nome || '' }; });
+    (await pool.query('SELECT DISTINCT ON (mwe.order_id, mwe.tipo) mwe.order_id, mwe.tipo, mwe.motoboy_id, u.name AS nome FROM motoboy_wallet_events mwe LEFT JOIN users u ON u.id=mwe.motoboy_id WHERE mwe.order_id = ANY($1::int[]) ORDER BY mwe.order_id, mwe.tipo, mwe.id', [orderIds])).rows
+      .forEach(function(r) { mbPorPedidoTipo[r.order_id + ':' + r.tipo] = { id: r.motoboy_id, nome: r.nome || '' }; });
+  }
+  const TIPO_MWE = { bonus_entrega: 'bonus_entrega', promocao: 'bonus_promo', taxa_noturna: 'taxa_extra', taxa_chuva_admin: 'taxa_extra' };
+  const nomesPorId = {};
+  const idsDescricao = movRes.rows.map(function(m) { const x = /motoboy id (\d+)/i.exec(m.descricao || ''); return x ? parseInt(x[1]) : null; }).filter(Boolean);
+  if (idsDescricao.length) (await pool.query('SELECT id, name FROM users WHERE id = ANY($1::int[])', [idsDescricao])).rows.forEach(function(r) { nomesPorId[r.id] = r.name; });
+  function motoboyDoLancamento(m) {
+    if (m.order_id && mbPorPedidoTipo[m.order_id + ':' + TIPO_MWE[m.tipo]]) return mbPorPedidoTipo[m.order_id + ':' + TIPO_MWE[m.tipo]];
+    if (m.order_id && mbPorPedido[m.order_id]) return mbPorPedido[m.order_id];
+    const x = /motoboy id (\d+)/i.exec(m.descricao || '');
+    if (x) return { id: parseInt(x[1]), nome: nomesPorId[parseInt(x[1])] || ('motoboy #' + x[1]) };
+    return { id: null, nome: 'Não identificado (pedido não encontrado)' };
+  }
+  // Descricao legivel (com acentos e nomes) para o anexo do caixa
+  function descricaoLancamento(m, mb) {
+    const ped = m.order_id ? ' #' + m.order_id : '';
+    switch (m.tipo) {
+      case 'comissao': return 'Comissão do pedido' + ped;
+      case 'bonus_entrega': return 'Bônus por entrega – motoboy ' + mb.nome + (ped ? ' (pedido' + ped + ')' : '');
+      case 'promocao': return 'Bônus de promoção – motoboy ' + mb.nome + (m.descricao ? ' (' + m.descricao + ')' : '');
+      case 'taxa_noturna': return 'Taxa noturna paga pelo caixa – motoboy ' + mb.nome + (ped ? ' (pedido' + ped + ')' : '');
+      case 'taxa_chuva_admin': return 'Taxa de chuva paga pelo caixa – motoboy ' + mb.nome + (ped ? ' (pedido' + ped + ')' : '');
+      case 'despesa': return 'Despesa: ' + (m.descricao || '');
+      case 'saque': return 'Retirada do caixa: ' + String(m.descricao || '').replace(/^Saque:\s*/, '');
+      case 'estorno': return m.descricao || 'Estorno';
+      default:
+        if (m.origem_tabela === 'referral_earnings') return 'Bônus de indicação – ' + (m.ref_ganhou || '?') + ' por indicar ' + (m.ref_indicado || '?') + (ped ? ' (pedido' + ped + ')' : '');
+        return m.descricao || m.tipo;
+    }
+  }
+  const CATEGORIA = { comissao: 'comissao', bonus_entrega: 'bonus_entrega', promocao: 'bonus_promocao', taxa_noturna: 'taxa_chuva_noturna', taxa_chuva_admin: 'taxa_chuva_noturna', despesa: 'despesas', saque: 'retiradas', estorno: 'estornos' };
+  const movimentos = movRes.rows.map(function(m) {
+    const mb = (TIPO_MWE[m.tipo]) ? motoboyDoLancamento(m) : null;
+    const categoria = m.origem_tabela === 'referral_earnings' ? 'bonus_indicacao' : (CATEGORIA[m.tipo] || 'outros');
+    return { data_hora: m.data_hora, tipo: m.tipo, categoria: categoria, descricao: descricaoLancamento(m, mb || {}), order_id: m.order_id, origem: m.origem_tabela + '#' + m.id, motoboy_id: mb ? mb.id : (m.origem_tabela === 'referral_earnings' ? m.ref_ganhou_id : null), motoboy: mb ? mb.nome : (m.origem_tabela === 'referral_earnings' ? (m.ref_ganhou || '') : ''), valor: _num(m.valor_caixa) };
+  });
+  // Composicao do periodo (valores positivos; o sinal esta no nome do item)
+  const comp = { comissao: 0, bonus_indicacao: 0, bonus_promocao: 0, bonus_entrega: 0, taxa_chuva_noturna: 0, despesas: 0, retiradas: 0, estornos: 0, outros: 0 };
+  const qtd = { comissao: 0, bonus_indicacao: 0, bonus_promocao: 0, bonus_entrega: 0, taxa_chuva_noturna: 0, despesas: 0, retiradas: 0, estornos: 0, outros: 0 };
+  movimentos.forEach(function(m) { const k = m.categoria; qtd[k]++; comp[k] += (k === 'comissao' || k === 'estornos' || k === 'outros') ? m.valor : -m.valor; });
+  Object.keys(comp).forEach(function(k) { comp[k] = _num(comp[k]); });
+
+  const resumo = {
+    comissao: { total: comp.comissao, qtd: qtd.comissao },
+    bonus_indicacao: { total: comp.bonus_indicacao, qtd: qtd.bonus_indicacao },
+    bonus_promocao: { total: comp.bonus_promocao, qtd: qtd.bonus_promocao },
+    bonus_entrega: { total: comp.bonus_entrega, qtd: qtd.bonus_entrega },
+    taxa_chuva_noturna: { total: comp.taxa_chuva_noturna, qtd: qtd.taxa_chuva_noturna },
+    despesas: { total: comp.despesas, qtd: qtd.despesas },
+    estornos: { total: comp.estornos, qtd: qtd.estornos }
+  };
+  resumo.lucro = _num(comp.comissao - comp.bonus_indicacao - comp.bonus_promocao - comp.bonus_entrega - comp.taxa_chuva_noturna - comp.despesas + comp.estornos + comp.outros);
+
+  const entradas = _num(movimentos.reduce(function(s, m) { return s + (m.valor > 0 ? m.valor : 0); }, 0));
+  const saidas = _num(movimentos.reduce(function(s, m) { return s + (m.valor < 0 ? -m.valor : 0); }, 0));
+  const saldoFim = _num(_num(wallet.balance) - _num(depois.total));
+  const caixa = { saldo_inicio: _num(saldoFim - (entradas - saidas)), entradas: entradas, saidas: saidas, saldo_fim: saldoFim, composicao: comp, movimentos: movimentos };
+  const retiradas = movimentos.filter(function(m) { return m.categoria === 'retiradas'; }).map(function(m) { return { data_hora: m.data_hora, descricao: m.descricao, valor: -m.valor }; });
+
+  // 2) Pedidos entregues (data da entrega)
+  const pedRes = await pool.query("SELECT id, COALESCE(loja_name, loja_user) AS loja, motoboy_id, motoboy_name, tipo_pagamento, valor_total, valor_motoboy, comissao, valor_pedido, " + _sqlDataSP('COALESCE(t_entregue, created_at)') + " AS data_hora FROM orders WHERE status='entregue' AND COALESCE(t_entregue, created_at) BETWEEN $1 AND $2 ORDER BY COALESCE(t_entregue, created_at), id", P);
+  const pedidos = pedRes.rows.map(function(o) { return { data_hora: o.data_hora, id: o.id, loja: o.loja || '', motoboy_id: o.motoboy_id, motoboy: o.motoboy_name || '', pagamento: o.tipo_pagamento || '', tele: _num(o.valor_total), motoboy_valor: _num(o.valor_motoboy), comissao: _num(o.comissao), valor_pedido: _num(o.valor_pedido) }; });
+
+  // Valores coletados pelos motoboys (dinheiro e cartao por aproximacao); maquina da loja so informativo
+  const coletas = pedidos.filter(function(o) { return o.pagamento === 'dinheiro' || o.pagamento === 'cartao_aproximacao'; })
+    .map(function(o) { return { data_hora: o.data_hora, id: o.id, loja: o.loja, motoboy: o.motoboy, pagamento: o.pagamento, valor: o.valor_pedido }; });
+  const maquina = pedidos.filter(function(o) { return o.pagamento === 'maquina'; })
+    .map(function(o) { return { data_hora: o.data_hora, id: o.id, loja: o.loja, motoboy: o.motoboy, valor: o.valor_pedido }; });
+
+  // Pagamentos por motoboy: corridas dos pedidos + bonus/taxas dos MESMOS lancamentos do caixa usados no resumo
+  const pagMap = {};
+  const pag = function(id, nome) { const k = id ? 'id' + id : 'n' + (nome || '-'); if (!pagMap[k]) pagMap[k] = { motoboy_id: id || null, motoboy: nome || '', corridas_qtd: 0, corridas: 0, bonus_entrega: 0, bonus_promocao: 0, bonus_indicacao: 0, taxa_chuva_noturna: 0 }; if (nome && !pagMap[k].motoboy) pagMap[k].motoboy = nome; return pagMap[k]; };
+  pedidos.forEach(function(o) { if (!o.motoboy_id && !o.motoboy) return; const p = pag(o.motoboy_id, o.motoboy); p.corridas_qtd++; p.corridas += o.motoboy_valor; });
+  movimentos.forEach(function(m) { if (['bonus_entrega', 'bonus_promocao', 'bonus_indicacao', 'taxa_chuva_noturna'].indexOf(m.categoria) < 0) return; pag(m.motoboy_id, m.motoboy)[m.categoria] += -m.valor; });
+  const pagamentosMotoboys = Object.keys(pagMap).map(function(k) { const p = pagMap[k]; ['corridas', 'bonus_entrega', 'bonus_promocao', 'bonus_indicacao', 'taxa_chuva_noturna'].forEach(function(c) { p[c] = _num(p[c]); }); p.total = _num(p.corridas + p.bonus_entrega + p.bonus_promocao + p.bonus_indicacao + p.taxa_chuva_noturna); return p; })
+    .sort(function(a, b) { return String(a.motoboy).localeCompare(String(b.motoboy)); });
+
+  // Indicacoes
+  const indRes = await pool.query("SELECT re.id, re.tipo, re.valor, re.order_id, r.name AS ganhou, r.role AS ganhou_tipo, d.name AS indicado, d.role AS indicado_tipo, " + _sqlDataSP('re.created_at') + " AS data_hora FROM referral_earnings re LEFT JOIN users r ON r.id=re.referrer_id LEFT JOIN users d ON d.id=re.referred_id WHERE re.created_at BETWEEN $1 AND $2 ORDER BY re.created_at, re.id", P);
+  const indicacoes = indRes.rows.map(function(r) { return { data_hora: r.data_hora, ganhou: r.ganhou || '', ganhou_tipo: r.ganhou_tipo || '', indicado: r.indicado || '', indicado_tipo: r.indicado_tipo || '', tipo: r.tipo || '', order_id: r.order_id, valor: _num(r.valor) }; });
+
+  // Saques dos motoboys (aprovados pela data do pagamento; demais pela data do pedido)
+  const smRes = await pool.query("SELECT w.id, COALESCE(u.name, w.motoboy_name) AS motoboy, w.valor, w.status, " + _sqlDataSP("CASE WHEN w.status='aprovado' THEN w.updated_at ELSE w.created_at END") + " AS data_hora FROM withdrawals w LEFT JOIN users u ON u.id=w.motoboy_id WHERE w.motoboy_id IS NOT NULL AND ((w.status='aprovado' AND w.updated_at BETWEEN $1 AND $2) OR (w.status<>'aprovado' AND w.created_at BETWEEN $1 AND $2)) ORDER BY CASE WHEN w.status='aprovado' THEN w.updated_at ELSE w.created_at END, w.id", P);
+  const saquesMotoboys = smRes.rows.map(function(w) { return { data_hora: w.data_hora, id: w.id, motoboy: w.motoboy || '', valor: _num(w.valor), status: w.status || '' }; });
+
+  // Lojas: depositos (recarga Mercado Pago) e saques pagos as lojas
+  const depRes = await pool.query("SELECT lwe.id, u.name AS loja, lwe.valor, " + _sqlDataSP('lwe.created_at') + " AS data_hora FROM loja_wallet_events lwe LEFT JOIN users u ON u.id=lwe.loja_id WHERE lwe.tipo='recarga_mp' AND lwe.created_at BETWEEN $1 AND $2 ORDER BY lwe.created_at, lwe.id", P);
+  const depositosLojas = depRes.rows.map(function(d) { return { data_hora: d.data_hora, id: d.id, loja: d.loja || '', valor: _num(d.valor), meio: 'Mercado Pago' }; });
+  const slRes = await pool.query("SELECT w.id, COALESCE(u.name, w.loja_name) AS loja, w.valor, " + _sqlDataSP('w.updated_at') + " AS data_hora FROM withdrawals w LEFT JOIN users u ON u.id=w.loja_id WHERE w.loja_id IS NOT NULL AND w.status='aprovado' AND w.updated_at BETWEEN $1 AND $2 ORDER BY w.updated_at, w.id", P);
+  const saquesLojas = slRes.rows.map(function(s) { return { data_hora: s.data_hora, id: s.id, loja: s.loja || '', valor: _num(s.valor) }; });
+
+  // Despesas (com marcacao das que foram estornadas, em qualquer data)
+  const despRes = await pool.query("SELECT pe.id, pe.descricao, pe.valor, " + _sqlDataSP('pe.created_at') + " AS data_hora, EXISTS (SELECT 1 FROM financeiro_estornos fe WHERE fe.origem_tabela='platform_events' AND fe.origem_id=pe.id) AS estornada FROM platform_events pe WHERE pe.tipo='despesa' AND pe.created_at BETWEEN $1 AND $2 ORDER BY pe.created_at, pe.id", P);
+  const despesas = despRes.rows.map(function(d) { return { data_hora: d.data_hora, id: d.id, descricao: d.descricao || '', valor: _num(d.valor), estornada: !!d.estornada }; });
+
+  // Estornos lancados no periodo
+  const estRes = await pool.query("SELECT fe.id, fe.origem_tabela, fe.origem_id, fe.origem_tipo, fe.valor, fe.efeito_caixa, fe.motivo, fe.criado_por, " + _sqlDataSP('fe.created_at') + " AS data_hora FROM financeiro_estornos fe WHERE fe.created_at BETWEEN $1 AND $2 ORDER BY fe.created_at, fe.id", P);
+  const estornos = estRes.rows.map(function(e) { return { data_hora: e.data_hora, id: e.id, referencia: (e.origem_tipo || e.origem_tabela) + ' #' + e.origem_id, valor_original: _num(e.valor), efeito_caixa: _num(e.efeito_caixa), motivo: e.motivo || '', criado_por: e.criado_por || '' }; });
+
+  // Saldos de terceiros sob guarda da plataforma (carteiras das lojas e dos motoboys).
+  // Nao ha historico completo das carteiras para recalcular inicio/fim do periodo: posicao na data de emissao.
+  const sl = (await pool.query("SELECT COUNT(*) AS qtd, COALESCE(SUM(credit),0) AS total, COALESCE(SUM(CASE WHEN credit > 0 THEN credit ELSE 0 END),0) AS positivo, COALESCE(SUM(CASE WHEN credit < 0 THEN credit ELSE 0 END),0) AS negativo FROM users WHERE role='loja'")).rows[0];
+  const sm = (await pool.query("SELECT COUNT(*) AS qtd, COALESCE(SUM(balance),0) AS total, COALESCE(SUM(CASE WHEN balance > 0 THEN balance ELSE 0 END),0) AS positivo, COALESCE(SUM(CASE WHEN balance < 0 THEN balance ELSE 0 END),0) AS negativo FROM users WHERE role='motoboy'")).rows[0];
+  const saldosTerceiros = {
+    posicao: 'emissao',
+    lojas: { qtd: parseInt(sl.qtd), total: _num(sl.total), positivo: _num(sl.positivo), negativo: _num(sl.negativo) },
+    motoboys: { qtd: parseInt(sm.qtd), total: _num(sm.total), positivo: _num(sm.positivo), negativo: _num(sm.negativo) }
+  };
+
+  return {
+    versao: 2,
+    empresa: { razao_social: String(process.env.EMPRESA_RAZAO_SOCIAL || '').trim(), cnpj: String(process.env.EMPRESA_CNPJ || '').trim() },
+    periodo: { inicio: inicioStr, fim: fimStr },
+    resumo: resumo,
+    caixa: caixa,
+    retiradas: retiradas,
+    pedidos: pedidos,
+    coletas: coletas,
+    maquina_loja: maquina,
+    pagamentos_motoboys: pagamentosMotoboys,
+    indicacoes: indicacoes,
+    saques_motoboys: saquesMotoboys,
+    depositos_lojas: depositosLojas,
+    saques_lojas: saquesLojas,
+    despesas: despesas,
+    estornos: estornos,
+    saldos_terceiros: saldosTerceiros
+  };
+}
+
+// Emite o relatorio do periodo e arquiva no banco (registro imutavel; o PDF/planilha sao gerados a partir destes dados)
+app.post('/financeiro/relatorios', async (req, res) => {
+  try {
+    const { inicio, fim, inicioStr, fimStr } = getFinanceiroRange(req);
+    const dados = await montarRelatorioFinanceiro(inicio, fim, inicioStr, fimStr);
+    const idRes = await pool.query("SELECT nextval(pg_get_serial_sequence('relatorios_emitidos','id')) AS id");
+    const id = parseInt(idRes.rows[0].id);
+    const agora = new Date();
+    const emitidoPor = String((req.body && req.body.emitido_por) || '').slice(0, 100) || null;
+    dados.relatorio_id = id;
+    dados.emitido_em = agora.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+    dados.emitido_por = emitidoPor || '';
+    const totais = { lucro: dados.resumo.lucro, comissao: dados.resumo.comissao.total, despesas: dados.resumo.despesas.total, saldo_inicio: dados.caixa.saldo_inicio, saldo_fim: dados.caixa.saldo_fim, pedidos: dados.pedidos.length };
+    await pool.query('INSERT INTO relatorios_emitidos (id, emitido_em, periodo_inicio, periodo_fim, emitido_por, totais, dados) VALUES ($1,$2,$3,$4,$5,$6,$7)', [id, agora, inicioStr, fimStr, emitidoPor, JSON.stringify(totais), JSON.stringify(dados)]);
+    res.json({ id: id, dados: dados });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Lista dos relatorios ja emitidos (sem os dados completos)
+app.get('/financeiro/relatorios', async (req, res) => {
+  try {
+    const r = await pool.query("SELECT id, " + _sqlDataSP('emitido_em') + " AS emitido_em, to_char(periodo_inicio,'DD/MM/YYYY') AS periodo_inicio, to_char(periodo_fim,'DD/MM/YYYY') AS periodo_fim, emitido_por, totais FROM relatorios_emitidos ORDER BY id DESC LIMIT 200");
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Dados de um relatorio emitido, para baixar de novo exatamente igual
+app.get('/financeiro/relatorios/:id', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT id, dados FROM relatorios_emitidos WHERE id=$1', [parseInt(req.params.id) || 0]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Relatorio nao encontrado' });
+    res.json({ id: r.rows[0].id, dados: r.rows[0].dados });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Estorno de um lancamento do caixa da plataforma (platform_events). Registros financeiros nao sao apagados:
+// a correcao e um novo lancamento com referencia ao original e motivo, que ajusta o saldo do caixa.
+app.post('/financeiro/estornos', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const eventoId = parseInt(req.body && req.body.evento_id);
+    const motivo = String((req.body && req.body.motivo) || '').trim();
+    const criadoPor = String((req.body && req.body.criado_por) || '').slice(0, 100) || null;
+    if (!eventoId) return res.status(400).json({ error: 'Lancamento invalido.' });
+    if (!motivo) return res.status(400).json({ error: 'Informe o motivo do estorno.' });
+    await client.query('BEGIN');
+    const evRes = await client.query('SELECT id, tipo, valor FROM platform_events WHERE id=$1 FOR UPDATE', [eventoId]);
+    if (!evRes.rows.length) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Lancamento nao encontrado.' }); }
+    const ev = evRes.rows[0];
+    const ja = await client.query("SELECT id FROM financeiro_estornos WHERE origem_tabela='platform_events' AND origem_id=$1", [eventoId]);
+    if (ja.rows.length) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'Este lancamento ja foi estornado.' }); }
+    const v = _num(ev.valor);
+    // comissao entrou no caixa -> estorno tira; os demais sairam do caixa -> estorno devolve
+    const efeito = ev.tipo === 'comissao' ? -v : v;
+    if (ev.tipo === 'comissao') {
+      await client.query('UPDATE platform_wallet SET balance = balance - $1, total_ganho = total_ganho - $1, updated_at=NOW() WHERE id=1', [v]);
+    } else {
+      await client.query('UPDATE platform_wallet SET balance = balance + $1, total_sacado = total_sacado - $1, updated_at=NOW() WHERE id=1', [v]);
+    }
+    const ins = await client.query('INSERT INTO financeiro_estornos (origem_tabela, origem_id, origem_tipo, valor, efeito_caixa, motivo, criado_por) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *', ['platform_events', eventoId, ev.tipo, v, efeito, motivo, criadoPor]);
+    await client.query('COMMIT');
+    console.log('[ESTORNO] platform_events #' + eventoId + ' (' + ev.tipo + ', R$ ' + v.toFixed(2) + ') estornado por ' + (criadoPor || '-') + ': ' + motivo);
+    res.json({ ok: true, estorno: ins.rows[0] });
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (eRb) {}
+    res.status(500).json({ error: e.message });
+  } finally { client.release(); }
 });
 
 app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
