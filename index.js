@@ -2417,9 +2417,7 @@ async function checkLateArrivals() {
               '📦 Pedido #' + order.id + ' — ' + lojaRepostNome + '\n' +
               '📍 Coleta: ' + bairroColetaRepost2 + '\n' +
               '🏠 Entrega: ' + (order.bairro_destino || '') + _linhaRetornoWpp(order) + '\n' +
-              '⚠️ O motoboy anterior não chegou a tempo na loja, pedido voltou pro sistema.\n' +
-              '⚡ Motoboy, acesse o FlashDrop para aceitar!\n' +
-              '📲 https://play.google.com/store/apps/details?id=com.flashdrop.motoboy&pcampaignid=web_share';
+              '⚠️ O motoboy anterior não chegou a tempo na loja, pedido voltou pro sistema.';
             axios.post(botUrlGroupRepost + '/api/send-group-message',
               { message: msgGroupRepost2, grupo: 'secundario' },
               { headers: { 'x-bot-secret': botSecretGroupRepost } }
