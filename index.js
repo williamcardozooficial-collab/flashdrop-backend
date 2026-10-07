@@ -574,6 +574,22 @@ async function aplicarPenalidadeMotoboy(motoboyId, motivo) {
 function _descPenalidade(p) { if (!p) return ''; const min = Math.round(p.duracaoMs / 60000); return p.count + 'a penalidade do dia, ' + (min >= 60 ? (min / 60) + 'h' : min + ' min') + ', ate ' + _horaSP(p.blockedUntil); }
 // Linha de retorno a loja (so pedidos pagos com maquina): bairro para onde o motoboy volta = bairro da loja
 function _linhaRetornoWpp(o) { return o.tipo_pagamento === 'maquina' ? ('\n\uD83D\uDD04 Retorno \u00e0 loja: ' + _bairroColeta(o)) : ''; }
+// Mensagem "Pedido Disponivel no App" do grupo SECUNDARIO do WhatsApp (divulgacao para lojistas/motoboys)
+function _msgDisponivelSecundario(o, lojaNome) {
+  return '\uD83D\uDEB4 Pedido Dispon\u00EDvel no App!\n' +
+    '\uD83D\uDCE6 Pedido #' + o.id + ' \u2014 ' + lojaNome + '\n' +
+    '\uD83D\uDCCD Coleta: ' + _bairroColeta(o) + '\n' +
+    '\uD83C\uDFE0 Entrega: ' + (o.bairro_destino || '') + _linhaRetornoWpp(o) + '\n' +
+    '\n' +
+    '\u26A1 Lojista sua loja tamb\u00E9m pode ter essa automa\u00E7\u00E3o para suas entregas!\n' +
+    '\n' +
+    '\uD83D\uDC49 Basta se cadastrar pelo link e come\u00E7ar a usar.\n' +
+    '\n' +
+    '\uD83D\uDD17 *Cadastre sua loja*\n' +
+    'https://flashdrop-frontend-six.vercel.app/register.html?ref=JULI0390\n' +
+    '\n' +
+    '\uD83D\uDCF2 D\u00FAvidas? Fale com o administrador do grupo. Motoboy tamb\u00E9m pode se cadastrar por esse link.';
+}
 app.get('/debug/time', (req, res) => {
   const now = new Date();
   const brOffset = -3 * 60;
@@ -1202,25 +1218,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
               { message: msgGroup },
               { headers: { 'x-bot-secret': botSecretGroup } }
             ).catch(e => console.error('[BOT] Erro msg grupo em_preparo:', e.message));
-            // Grupo secundario: mensagem promocional (texto fixo, puxando dados do pedido)
-            try {
-              const bairroColetaGrp2 = order.bairro_coleta || (() => { try { const ec = typeof order.endereco_coleta === 'string' ? JSON.parse(order.endereco_coleta) : order.endereco_coleta; return ec.bairro || ''; } catch(e) { return ''; } })();
-              const msgGroup2 = '🚀 Novo pedido em preparo, *não está disponível*.\n' +
-                '🚴 Será disponibilizado no app FlashDrop Motoboy para aceitação.\n' +
-                '⏰ Horário de Previsão: ' + (function(){ try { return new Date(parseInt(order.launch_at)).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); } catch(e){ return ''; } })() + '\n' +
-                '📦 Pedido: #' + order.id + ' — ' + lojaNomeGroup + '\n' +
-                '📍 Coleta: ' + bairroColetaGrp2 + '\n' +
-                '🏠 Entrega: ' + (order.bairro_destino || '') + _linhaRetornoWpp(order) + '\n' +
-                '⚡ Sua loja também pode ter essa automação para suas entregas!\n' +
-                '👉 Basta se cadastrar pelo link e começar a usar.\n' +
-                '🔗 Cadastre sua loja:\n' +
-                'https://flashdrop-frontend-six.vercel.app/register.html?ref=JULI0390\n' +
-                '📲 Dúvidas? Fale com o administrador do grupo.';
-              axios.post(botUrlGroup + '/api/send-group-message',
-                { message: msgGroup2, grupo: 'secundario' },
-                { headers: { 'x-bot-secret': botSecretGroup } }
-              ).catch(e => console.error('[BOT] Erro msg grupo2 em_preparo:', e.message));
-            } catch(eGroup2Prep) { console.error('[BOT] Erro geral grupo2 em_preparo:', eGroup2Prep.message); }
+            // Grupo secundario: nao recebe mais a mensagem de "em preparo" (so a de "Disponivel no App")
           }
         } catch(eGroupPrep) { console.error('[BOT] Erro geral grupo em_preparo:', eGroupPrep.message); }
 
@@ -2468,13 +2466,7 @@ app.post('/orders/:id/launch', async (req, res) => {
             { message: msgGroupPend, mentionAll: true },
             { headers: { 'x-bot-secret': botSecretGroupL } }
           ).catch(e => console.error('[BOT] Erro msg grupo launch:', e.message));
-          const bairroColetaPend2 = pedido.bairro_coleta || (() => { try { const ec = typeof pedido.endereco_coleta === 'string' ? JSON.parse(pedido.endereco_coleta) : pedido.endereco_coleta; return ec.bairro || ''; } catch(e) { return ''; } })();
-          const msgGroupPend2 = '\uD83D\uDEB4 Pedido Dispon\u00EDvel no App!\n' +
-            '\uD83D\uDCE6 Pedido #' + pedido.id + ' \u2014 ' + lojaNomePend + '\n' +
-            '\uD83D\uDCCD Coleta: ' + bairroColetaPend2 + '\n' +
-            '\uD83C\uDFE0 Entrega: ' + (pedido.bairro_destino || '') + _linhaRetornoWpp(pedido) + '\n' +
-            '\u26A1 Motoboy, acesse o FlashDrop para aceitar!\n' +
-            '\uD83D\uDCF2 https://play.google.com/store/apps/details?id=com.flashdrop.motoboy&pcampaignid=web_share';
+          const msgGroupPend2 = _msgDisponivelSecundario(pedido, lojaNomePend);
           axios.post(botUrlGroupL + '/api/send-group-message',
             { message: msgGroupPend2, grupo: 'secundario' },
             { headers: { 'x-bot-secret': botSecretGroupL } }
@@ -2881,13 +2873,7 @@ async function checkAndLaunchOrders() {
                 { message: msgGroupAuto, mentionAll: true },
                 { headers: { 'x-bot-secret': botSecretGroupA } }
               ).catch(e => console.error('[BOT] Erro msg grupo auto-launch:', e.message));
-              const bairroColetaAuto2 = pedido.bairro_coleta || (() => { try { const ec = typeof pedido.endereco_coleta === 'string' ? JSON.parse(pedido.endereco_coleta) : pedido.endereco_coleta; return ec.bairro || ''; } catch(e) { return ''; } })();
-              const msgGroupAuto2 = '\uD83D\uDEB4 Pedido Dispon\u00EDvel no App!\n' +
-                '\uD83D\uDCE6 Pedido #' + pedido.id + ' \u2014 ' + lojaNomeAuto + '\n' +
-                '\uD83D\uDCCD Coleta: ' + bairroColetaAuto2 + '\n' +
-                '\uD83C\uDFE0 Entrega: ' + (pedido.bairro_destino || '') + _linhaRetornoWpp(pedido) + '\n' +
-                '\u26A1 Motoboy, acesse o FlashDrop para aceitar!\n' +
-                '\uD83D\uDCF2 https://play.google.com/store/apps/details?id=com.flashdrop.motoboy&pcampaignid=web_share';
+              const msgGroupAuto2 = _msgDisponivelSecundario(pedido, lojaNomeAuto);
               axios.post(botUrlGroupA + '/api/send-group-message',
                 { message: msgGroupAuto2, grupo: 'secundario' },
                 { headers: { 'x-bot-secret': botSecretGroupA } }
