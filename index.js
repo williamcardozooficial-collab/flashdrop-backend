@@ -528,10 +528,35 @@ const PENALIDADE_DURACOES_MS = [10 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000, 
 const SQL_PEDIDO_ATIVO_MOTOBOY = "SELECT COUNT(*) FROM orders WHERE motoboy_id=$1 AND status NOT IN ('pendente','entregue','retornado','cancelado')";
 function _hojeSP() { return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }); }
 function _horaSP(ms) { try { return new Date(parseInt(ms)).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' }); } catch (e) { return ''; } }
+// Sufixo de dia quando o fim da penalidade cai em outro dia (SP): '' (hoje), ' de amanhã' ou ' do dia DD/MM'
+function _sufixoDiaSP(ms) {
+  try {
+    const d = new Date(parseInt(ms)).toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+    const hoje = _hojeSP();
+    if (d === hoje) return '';
+    const amanha = new Date(hoje + 'T12:00:00Z'); amanha.setUTCDate(amanha.getUTCDate() + 1);
+    if (d === amanha.toISOString().slice(0, 10)) return ' de amanhã';
+    const p = d.split('-'); return ' do dia ' + p[2] + '/' + p[1];
+  } catch (e) { return ''; }
+}
 function _penalidadeVigente(blockedUntil) { const bu = parseInt(blockedUntil) || 0; return bu > Date.now() ? bu : 0; }
-function _msgPenalidade(bu) { return 'Você está com penalidade até ' + _horaSP(bu) + ' (horário de Brasília). Não é possível aceitar novos pedidos.'; }
+function _msgPenalidade(bu) { return 'Você está com penalidade até ' + _horaSP(bu) + _sufixoDiaSP(bu) + ' (horário de Brasília). Não é possível aceitar novos pedidos.'; }
+// Push de aviso de penalidade para o celular do motoboy. Notificacao comum: sem categoryId (sem botao
+// "Aceitar"), sem orderId e sem abrirApp (nao dispara abertura automatica), canal padrao com som normal.
+async function _enviarPushPenalidade(motoboyId, motivo, p, temAtivo) {
+  const tRes = await pool.query('SELECT push_token FROM users WHERE id=$1', [motoboyId]);
+  const token = tRes.rows.length > 0 ? tRes.rows[0].push_token : null;
+  if (!token) return;
+  const min = Math.round(p.duracaoMs / 60000);
+  const corpo = (motivo ? motivo + ' ' : '') + p.count + 'ª penalidade do dia: ' + (min >= 60 ? (min / 60) + ' h' : min + ' min') +
+    '. Você não pode aceitar pedidos até ' + _horaSP(p.blockedUntil) + _sufixoDiaSP(p.blockedUntil) + '.' +
+    (temAtivo ? ' Termine sua entrega atual normalmente.' : '');
+  await axios.post('https://exp.host/--/api/v2/push/send',
+    [{ to: token, title: '⚠️ Penalidade aplicada', body: corpo, sound: 'default', priority: 'high', data: { tipo: 'penalidade' } }],
+    { headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, timeout: 10000 });
+}
 async function _motoboyTemPedidoAtivo(motoboyId) { const r = await pool.query(SQL_PEDIDO_ATIVO_MOTOBOY, [motoboyId]); return (parseInt(r.rows[0].count) || 0) > 0; }
-async function aplicarPenalidadeMotoboy(motoboyId) {
+async function aplicarPenalidadeMotoboy(motoboyId, motivo) {
   const hoje = _hojeSP();
   // Incremento atomico da contagem do dia (reinicia em 1 quando muda o dia)
   const cRes = await pool.query("UPDATE users SET penalty_count = CASE WHEN penalty_date = $1 THEN COALESCE(penalty_count,0) + 1 ELSE 1 END, penalty_date = $1 WHERE id=$2 RETURNING penalty_count", [hoje, motoboyId]);
@@ -542,6 +567,8 @@ async function aplicarPenalidadeMotoboy(motoboyId) {
   // Sem pedido ativo: fica offline ja. Com pedido ativo: continua online so para terminar.
   const temAtivo = await _motoboyTemPedidoAtivo(motoboyId);
   await pool.query('UPDATE users SET blocked_until=$1' + (temAtivo ? '' : ', online=false, online_since=NULL') + ' WHERE id=$2', [blockedUntil, motoboyId]);
+  // Aviso por push sem bloquear o fluxo (erros so logados)
+  _enviarPushPenalidade(motoboyId, motivo, { count, duracaoMs, blockedUntil }, temAtivo).catch(function (ePushPen) { console.error('[PENALIDADE] Erro push:', ePushPen.message); });
   return { count, duracaoMs, blockedUntil };
 }
 function _descPenalidade(p) { if (!p) return ''; const min = Math.round(p.duracaoMs / 60000); return p.count + 'a penalidade do dia, ' + (min >= 60 ? (min / 60) + 'h' : min + ' min') + ', ate ' + _horaSP(p.blockedUntil); }
@@ -739,7 +766,7 @@ app.put('/users/:id', async (req, res) => {
       // Penalidade vigente: so pode ficar online se tiver pedido ativo para terminar
       const buOnline = blkRes.rows.length > 0 ? _penalidadeVigente(blkRes.rows[0].blocked_until) : 0;
       if (buOnline && !(await _motoboyTemPedidoAtivo(req.params.id))) {
-        return res.status(403).json({ error: 'Você está com penalidade até ' + _horaSP(buOnline) + ' (horário de Brasília). Não é possível ficar online.' });
+        return res.status(403).json({ error: 'Você está com penalidade até ' + _horaSP(buOnline) + _sufixoDiaSP(buOnline) + ' (horário de Brasília). Não é possível ficar online.' });
       }
     }
     if (req.body && req.body.online === true) { req.body.online_since = Date.now(); req.body.ultimo_login = Date.now(); } else if (req.body && req.body.online === false) { req.body.online_since = null; }
@@ -1236,7 +1263,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
     if (fields.status === 'pendente' && fields.motoboy_id === null && prevMotoboyId) {
       // Penalidade progressiva (10min / 30min / 1h / 6h / 24h pela contagem do dia)
       let penCancel = null;
-      try { penCancel = await aplicarPenalidadeMotoboy(prevMotoboyId); } catch (ePenCancel) { console.error('[PENALIDADE] Erro desistencia:', ePenCancel.message); }
+      try { penCancel = await aplicarPenalidadeMotoboy(prevMotoboyId, 'Você desistiu de um pedido.'); } catch (ePenCancel) { console.error('[PENALIDADE] Erro desistencia:', ePenCancel.message); }
       registrarEventoMotoboyPedido(order.id, prevMotoboyId, prevMotoboyName, 'cancelado', 'Motoboy cancelou o pedido (' + (_descPenalidade(penCancel) || 'penalidade') + ')');
     }
 
@@ -2351,7 +2378,7 @@ async function checkLateArrivals() {
       );
       // Penalidade progressiva tambem no timeout (mesma contagem do dia da desistencia)
       let penTimeout = null;
-      if (order.motoboy_id) { try { penTimeout = await aplicarPenalidadeMotoboy(order.motoboy_id); } catch (ePenTimeout) { console.error('[PENALIDADE] Erro timeout:', ePenTimeout.message); } }
+      if (order.motoboy_id) { try { penTimeout = await aplicarPenalidadeMotoboy(order.motoboy_id, 'Você não chegou na loja em 15 minutos.'); } catch (ePenTimeout) { console.error('[PENALIDADE] Erro timeout:', ePenTimeout.message); } }
       registrarEventoMotoboyPedido(order.id, order.motoboy_id, order.motoboy_name, 'timeout', 'Motoboy nao chegou na loja em 15 minutos, pedido voltou pro sistema' + (penTimeout ? ' (' + _descPenalidade(penTimeout) + ')' : ''));
       if (bot) {
         const groupId = process.env.TELEGRAM_GROUP_ID;
