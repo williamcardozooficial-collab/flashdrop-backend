@@ -1820,6 +1820,13 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
 /* ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ SAQUES (WITHDRAWALS) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ */
 app.get('/withdrawals', async (req, res) => {
   try {
+    // Filtro de periodo opcional (pagina Financeiro): mesmo criterio do relatorio para contador
+    // (aprovados pela data do pagamento, recusados pela data do pedido); pendentes sempre aparecem, pois aguardam acao.
+    if (req.query.inicio || req.query.fim) {
+      const { inicio, fim } = getFinanceiroRange(req);
+      const rf = await pool.query("SELECT * FROM withdrawals WHERE status='pendente' OR (status='aprovado' AND updated_at BETWEEN $1 AND $2) OR (status NOT IN ('aprovado','pendente') AND created_at BETWEEN $1 AND $2) ORDER BY created_at DESC", [inicio, fim]);
+      return res.json(rf.rows);
+    }
     const r = await pool.query("SELECT * FROM withdrawals WHERE created_at >= NOW() - INTERVAL '7 days' ORDER BY created_at DESC");
     res.json(r.rows);
   } catch(e) { res.status(500).json({ error: e.message }); }
@@ -3786,42 +3793,37 @@ function getFinanceiroRange(req) {
   return { inicio: _limiteUtcSP(inicioStr, false), fim: _limiteUtcSP(fimStr, true), inicioStr, fimStr };
 }
 
-// Resumo geral do periodo: depositos, saques, vendas, comissao admin, bonus pagos, coleta de dinheiro/cartao pelos motoboys, saldo da plataforma
+// Resumo geral do periodo. Os numeros saem do mesmo calculo do relatorio para contador (montarRelatorioFinanceiro),
+// para a tela bater com o PDF do mesmo periodo. Saldo do caixa: atual (hoje) e no inicio/fim do periodo.
+function _somaQtd(lista, campo) { return { total: _num((lista || []).reduce(function(t, x) { return t + (parseFloat(x[campo]) || 0); }, 0)), qtd: (lista || []).length }; }
 app.get('/financeiro/resumo', async (req, res) => {
   try {
     const { inicio, fim, inicioStr, fimStr } = getFinanceiroRange(req);
-    const depositosLojas = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM loja_wallet_events WHERE tipo='recarga_mp' AND created_at BETWEEN $1 AND $2", [inicio, fim]);
-    const saquesLojas = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM withdrawals WHERE loja_id IS NOT NULL AND status='aprovado' AND updated_at BETWEEN $1 AND $2", [inicio, fim]);
-    const saquesMotoboys = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM withdrawals WHERE motoboy_id IS NOT NULL AND status='aprovado' AND updated_at BETWEEN $1 AND $2", [inicio, fim]);
-    const pedidosEntregues = await pool.query("SELECT COALESCE(SUM(valor_total),0) AS total, COALESCE(SUM(valor_pedido),0) AS total_produtos, COALESCE(SUM(valor_motoboy),0) AS total_motoboy, COUNT(*) AS qtd FROM orders WHERE status='entregue' AND created_at BETWEEN $1 AND $2", [inicio, fim]);
-    const vendasPromocao = await pool.query("SELECT COALESCE(SUM(valor_pedido),0) AS total_vendido, COALESCE(SUM(desconto_promocao),0) AS total_desconto, COUNT(*) AS qtd FROM orders WHERE status='entregue' AND nome_promocao IS NOT NULL AND created_at BETWEEN $1 AND $2", [inicio, fim]);
-    const receitaComissao = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM platform_events WHERE tipo='comissao' AND created_at BETWEEN $1 AND $2", [inicio, fim]);
-    const taxasChuvaNoturna = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM platform_events WHERE tipo IN ('taxa_chuva_admin','taxa_noturna') AND created_at BETWEEN $1 AND $2", [inicio, fim]);
-    const bonusIndicacao = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM referral_earnings WHERE created_at BETWEEN $1 AND $2", [inicio, fim]);
-    const bonusPromocaoMotoboy = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM motoboy_wallet_events WHERE tipo='bonus_promo' AND created_at BETWEEN $1 AND $2", [inicio, fim]);
-    const bonusEntregaMotoboy = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM motoboy_wallet_events WHERE tipo='bonus_entrega' AND created_at BETWEEN $1 AND $2", [inicio, fim]);
-    const dinheiroColetado = await pool.query("SELECT COALESCE(SUM(valor_pedido),0) AS total, COUNT(*) AS qtd FROM orders WHERE status='entregue' AND tipo_pagamento='dinheiro' AND created_at BETWEEN $1 AND $2", [inicio, fim]);
-    const cartaoAproxColetado = await pool.query("SELECT COALESCE(SUM(valor_pedido),0) AS total, COUNT(*) AS qtd FROM orders WHERE status='entregue' AND tipo_pagamento='cartao_aproximacao' AND created_at BETWEEN $1 AND $2", [inicio, fim]);
-    const maquinaLoja = await pool.query("SELECT COALESCE(SUM(valor_pedido),0) AS total, COUNT(*) AS qtd FROM orders WHERE status='entregue' AND tipo_pagamento='maquina' AND created_at BETWEEN $1 AND $2", [inicio, fim]);
-    const despesas = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM platform_events WHERE tipo='despesa' AND created_at BETWEEN $1 AND $2", [inicio, fim]);
+    const d = await montarRelatorioFinanceiro(inicio, fim, inicioStr, fimStr);
+    const vendasPromocao = await pool.query("SELECT COALESCE(SUM(valor_pedido),0) AS total_vendido, COALESCE(SUM(desconto_promocao),0) AS total_desconto, COUNT(*) AS qtd FROM orders WHERE status='entregue' AND nome_promocao IS NOT NULL AND COALESCE(t_entregue, created_at) BETWEEN $1 AND $2", [inicio, fim]);
     const saldoPlataforma = await pool.query('SELECT * FROM platform_wallet WHERE id=1');
-
+    const pedidos = d.pedidos || [];
+    const porPagamento = function(tp) { return _somaQtd(pedidos.filter(function(o) { return o.pagamento === tp; }), 'valor_pedido'); };
+    const smAprov = (d.saques_motoboys || []).filter(function(x) { return x.status === 'aprovado'; });
     res.json({
       periodo: { inicio: inicioStr, fim: fimStr },
-      depositos_lojas: depositosLojas.rows[0],
-      saques_lojas: saquesLojas.rows[0],
-      saques_motoboys: saquesMotoboys.rows[0],
-      pedidos_entregues: pedidosEntregues.rows[0],
+      depositos_lojas: _somaQtd(d.depositos_lojas, 'valor'),
+      saques_lojas: _somaQtd(d.saques_lojas, 'valor'),
+      saques_motoboys: _somaQtd(smAprov, 'valor'),
+      pedidos_entregues: Object.assign(_somaQtd(pedidos, 'tele'), { total_produtos: _somaQtd(pedidos, 'valor_pedido').total, total_motoboy: _somaQtd(pedidos, 'motoboy_valor').total }),
       vendas_com_promocao: vendasPromocao.rows[0],
-      receita_comissao_admin: receitaComissao.rows[0],
-      custo_taxas_chuva_noturna_admin: taxasChuvaNoturna.rows[0],
-      bonus_indicacao_pago_motoboys: bonusIndicacao.rows[0],
-      bonus_promocao_pago_motoboys: bonusPromocaoMotoboy.rows[0],
-      bonus_por_entrega_pago_motoboys: bonusEntregaMotoboy.rows[0],
-      dinheiro_coletado_motoboys: dinheiroColetado.rows[0],
-      cartao_aproximacao_coletado_motoboys: cartaoAproxColetado.rows[0],
-      maquina_loja_nao_rastreavel: maquinaLoja.rows[0],
-      despesas: despesas.rows[0],
+      receita_comissao_admin: d.resumo.comissao,
+      custo_taxas_chuva_noturna_admin: d.resumo.taxa_chuva_noturna,
+      bonus_indicacao_pago_motoboys: d.resumo.bonus_indicacao,
+      bonus_promocao_pago_motoboys: d.resumo.bonus_promocao,
+      bonus_por_entrega_pago_motoboys: d.resumo.bonus_entrega,
+      despesas: d.resumo.despesas,
+      estornos: d.resumo.estornos,
+      lucro: d.resumo.lucro,
+      dinheiro_coletado_motoboys: porPagamento('dinheiro'),
+      cartao_aproximacao_coletado_motoboys: porPagamento('cartao_aproximacao'),
+      maquina_loja_nao_rastreavel: porPagamento('maquina'),
+      caixa_periodo: { saldo_inicio: d.caixa.saldo_inicio, saldo_fim: d.caixa.saldo_fim, entradas: d.caixa.entradas, saidas: d.caixa.saidas, retiradas: _somaQtd(d.retiradas, 'valor') },
       saldo_plataforma: saldoPlataforma.rows[0] || { balance: 0, total_ganho: 0, total_sacado: 0 }
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -3836,8 +3838,8 @@ app.get('/financeiro/lojas', async (req, res) => {
     for (const loja of lojas.rows) {
       const deposito = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM loja_wallet_events WHERE loja_id=$1 AND tipo='recarga_mp' AND created_at BETWEEN $2 AND $3", [loja.id, inicio, fim]);
       const saque = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM withdrawals WHERE loja_id=$1 AND status='aprovado' AND updated_at BETWEEN $2 AND $3", [loja.id, inicio, fim]);
-      const pedidos = await pool.query("SELECT COALESCE(SUM(valor_total),0) AS total, COALESCE(SUM(valor_pedido),0) AS total_produtos, COUNT(*) AS qtd FROM orders WHERE loja_user=$1 AND status='entregue' AND created_at BETWEEN $2 AND $3", [loja.username, inicio, fim]);
-      const promocao = await pool.query("SELECT COALESCE(SUM(valor_pedido),0) AS total_vendido, COALESCE(SUM(desconto_promocao),0) AS total_desconto, COUNT(*) AS qtd FROM orders WHERE loja_user=$1 AND status='entregue' AND nome_promocao IS NOT NULL AND created_at BETWEEN $2 AND $3", [loja.username, inicio, fim]);
+      const pedidos = await pool.query("SELECT COALESCE(SUM(valor_total),0) AS total, COALESCE(SUM(valor_pedido),0) AS total_produtos, COUNT(*) AS qtd FROM orders WHERE loja_user=$1 AND status='entregue' AND COALESCE(t_entregue, created_at) BETWEEN $2 AND $3", [loja.username, inicio, fim]);
+      const promocao = await pool.query("SELECT COALESCE(SUM(valor_pedido),0) AS total_vendido, COALESCE(SUM(desconto_promocao),0) AS total_desconto, COUNT(*) AS qtd FROM orders WHERE loja_user=$1 AND status='entregue' AND nome_promocao IS NOT NULL AND COALESCE(t_entregue, created_at) BETWEEN $2 AND $3", [loja.username, inicio, fim]);
       resultado.push({
         id: loja.id, username: loja.username, name: loja.name,
         saldo_atual: loja.credit,
@@ -3875,30 +3877,32 @@ app.get('/financeiro/loja-relatorio', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Detalhamento por motoboy: ganhos, dinheiro coletado, cartao aproximacao coletado, bonus indicacao/promocao, saques, saldo atual
+// Detalhamento por motoboy no periodo. Corridas, coletas e bonus vem do mesmo calculo do relatorio para contador
+// (secoes 3a/3b/3c), para a tela bater com o PDF. Saldo: posicao atual (hoje).
 app.get('/financeiro/motoboys', async (req, res) => {
   try {
-    const { inicio, fim } = getFinanceiroRange(req);
+    const { inicio, fim, inicioStr, fimStr } = getFinanceiroRange(req);
+    const d = await montarRelatorioFinanceiro(inicio, fim, inicioStr, fimStr);
+    const pagPorId = {};
+    (d.pagamentos_motoboys || []).forEach(function(p) { if (p.motoboy_id) pagPorId[p.motoboy_id] = p; });
     const motoboys = await pool.query("SELECT id, username, name, balance FROM users WHERE role='motoboy' ORDER BY name ASC");
     const resultado = [];
     for (const mb of motoboys.rows) {
-      const ganhoCorrida = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM motoboy_wallet_events WHERE motoboy_id=$1 AND tipo='corrida' AND created_at BETWEEN $2 AND $3", [mb.id, inicio, fim]);
-      const dinheiro = await pool.query("SELECT COALESCE(SUM(valor_pedido),0) AS total, COUNT(*) AS qtd FROM orders WHERE motoboy_id=$1 AND status='entregue' AND tipo_pagamento='dinheiro' AND created_at BETWEEN $2 AND $3", [mb.id, inicio, fim]);
-      const cartaoAprox = await pool.query("SELECT COALESCE(SUM(valor_pedido),0) AS total, COUNT(*) AS qtd FROM orders WHERE motoboy_id=$1 AND status='entregue' AND tipo_pagamento='cartao_aproximacao' AND created_at BETWEEN $2 AND $3", [mb.id, inicio, fim]);
-      const bonusIndicacao = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM referral_earnings WHERE referrer_id=$1 AND created_at BETWEEN $2 AND $3", [mb.id, inicio, fim]);
-      const bonusPromocao = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM motoboy_wallet_events WHERE motoboy_id=$1 AND tipo='bonus_promo' AND created_at BETWEEN $2 AND $3", [mb.id, inicio, fim]);
-      const bonusEntrega = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM motoboy_wallet_events WHERE motoboy_id=$1 AND tipo='bonus_entrega' AND created_at BETWEEN $2 AND $3", [mb.id, inicio, fim]);
+      const pag = pagPorId[mb.id] || {};
+      const peds = (d.pedidos || []).filter(function(o) { return String(o.motoboy_id) === String(mb.id); });
+      const coleta = function(tp) { return _somaQtd(peds.filter(function(o) { return o.pagamento === tp; }), 'valor_pedido'); };
+      const qtdMov = function(cat) { return (d.caixa.movimentos || []).filter(function(m) { return m.categoria === cat && String(m.motoboy_id) === String(mb.id); }).length; };
       const lucroSistema = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM motoboy_wallet_events WHERE motoboy_id=$1 AND tipo='saque_caixa_admin' AND created_at BETWEEN $2 AND $3", [mb.id, inicio, fim]);
       const saque = await pool.query("SELECT COALESCE(SUM(valor),0) AS total, COUNT(*) AS qtd FROM withdrawals WHERE motoboy_id=$1 AND status='aprovado' AND updated_at BETWEEN $2 AND $3", [mb.id, inicio, fim]);
       resultado.push({
         id: mb.id, username: mb.username, name: mb.name,
         saldo_atual: mb.balance,
-        ganho_corridas: ganhoCorrida.rows[0],
-        dinheiro_coletado: dinheiro.rows[0],
-        cartao_aproximacao_coletado: cartaoAprox.rows[0],
-        bonus_indicacao: bonusIndicacao.rows[0],
-        bonus_promocao: bonusPromocao.rows[0],
-        bonus_por_entrega: bonusEntrega.rows[0],
+        ganho_corridas: { total: _num(pag.corridas), qtd: pag.corridas_qtd || 0 },
+        dinheiro_coletado: coleta('dinheiro'),
+        cartao_aproximacao_coletado: coleta('cartao_aproximacao'),
+        bonus_indicacao: { total: _num(pag.bonus_indicacao), qtd: qtdMov('bonus_indicacao') },
+        bonus_promocao: { total: _num(pag.bonus_promocao), qtd: qtdMov('bonus_promocao') },
+        bonus_por_entrega: { total: _num(pag.bonus_entrega), qtd: qtdMov('bonus_entrega') },
         lucro_sistema: lucroSistema.rows[0],
         saque: saque.rows[0]
       });
@@ -3912,10 +3916,12 @@ app.get('/financeiro/pedidos', async (req, res) => {
   try {
     const { inicio, fim } = getFinanceiroRange(req);
     const params = [inicio, fim];
-    let sql = "SELECT id, loja_user, loja_name, motoboy_id, motoboy_name, tipo_pagamento, valor_pedido, valor_total, valor_motoboy, comissao, distancia, nome_promocao, desconto_promocao, status, created_at FROM orders WHERE created_at BETWEEN $1 AND $2";
+    // criterio=relatorio (pagina Financeiro): entregues pela data da entrega, como no relatorio para contador; demais pela data de criacao
+    const colData = req.query.criterio === 'relatorio' ? "(CASE WHEN status='entregue' THEN COALESCE(t_entregue, created_at) ELSE created_at END)" : 'created_at';
+    let sql = "SELECT id, loja_user, loja_name, motoboy_id, motoboy_name, tipo_pagamento, valor_pedido, valor_total, valor_motoboy, comissao, distancia, nome_promocao, desconto_promocao, status, created_at, " + colData + " AS data_ref FROM orders WHERE " + colData + " BETWEEN $1 AND $2";
     if (req.query.loja_user) { params.push(req.query.loja_user); sql += ` AND loja_user=$${params.length}`; }
     if (req.query.motoboy_id) { params.push(req.query.motoboy_id); sql += ` AND motoboy_id=$${params.length}`; }
-    sql += ' ORDER BY created_at DESC LIMIT 2000';
+    sql += ' ORDER BY ' + colData + ' DESC LIMIT 2000';
     const r = await pool.query(sql, params);
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -4131,7 +4137,10 @@ app.post('/financeiro/relatorios', async (req, res) => {
 // Lista dos relatorios ja emitidos (sem os dados completos)
 app.get('/financeiro/relatorios', async (req, res) => {
   try {
-    const r = await pool.query("SELECT id, " + _sqlDataSP('emitido_em') + " AS emitido_em, to_char(periodo_inicio,'DD/MM/YYYY') AS periodo_inicio, to_char(periodo_fim,'DD/MM/YYYY') AS periodo_fim, emitido_por, totais FROM relatorios_emitidos ORDER BY id DESC LIMIT 200");
+    // Filtro opcional: relatorios cujo periodo cobre alguma parte do periodo filtrado
+    let where = ''; const params = [];
+    if (req.query.inicio || req.query.fim) { const { inicioStr, fimStr } = getFinanceiroRange(req); params.push(inicioStr, fimStr); where = ' WHERE periodo_fim >= $1::date AND periodo_inicio <= $2::date'; }
+    const r = await pool.query("SELECT id, " + _sqlDataSP('emitido_em') + " AS emitido_em, to_char(periodo_inicio,'DD/MM/YYYY') AS periodo_inicio, to_char(periodo_fim,'DD/MM/YYYY') AS periodo_fim, emitido_por, totais FROM relatorios_emitidos" + where + " ORDER BY id DESC LIMIT 200", params);
     res.json(r.rows);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
