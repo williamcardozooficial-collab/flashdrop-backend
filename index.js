@@ -308,7 +308,7 @@ try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARC
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS wpp_link TEXT DEFAULT ''"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS app_data TEXT DEFAULT ''"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS perc_cartao_aprox DECIMAL DEFAULT 5.00"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS historico_limpeza_dias INTEGER DEFAULT 30"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS formas_pagamento_novo_pedido TEXT DEFAULT ''"); } catch(e) {}
-    try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS commission_type VARCHAR(12) DEFAULT 'valor'"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS robo_pagamentos BOOLEAN DEFAULT false"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS emprestimo_modo VARCHAR(12) DEFAULT 'manual'"); } catch(e) {} try { await pool.query("CREATE TABLE IF NOT EXISTS loja_motoboy_credito (id SERIAL PRIMARY KEY, loja_user VARCHAR(100) NOT NULL, motoboy_id INTEGER NOT NULL, limite NUMERIC(10,2) NOT NULL DEFAULT 0, created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW(), UNIQUE(loja_user, motoboy_id))"); } catch(e) {} try { await pool.query("ALTER TABLE loja_motoboy_credito ADD COLUMN IF NOT EXISTS devido NUMERIC(10,2) NOT NULL DEFAULT 0"); } catch(e) {} try { await pool.query("CREATE TABLE IF NOT EXISTS loja_motoboy_credito_eventos (id SERIAL PRIMARY KEY, loja_user VARCHAR(100) NOT NULL, motoboy_id INTEGER NOT NULL, valor NUMERIC(10,2) NOT NULL, descricao TEXT, order_id INTEGER, created_at TIMESTAMP DEFAULT NOW())"); } catch(e) {}
+    try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS commission_type VARCHAR(12) DEFAULT 'valor'"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS robo_pagamentos BOOLEAN DEFAULT false"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS offline_23h_ultima_data VARCHAR(10) DEFAULT NULL"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS emprestimo_modo VARCHAR(12) DEFAULT 'manual'"); } catch(e) {} try { await pool.query("CREATE TABLE IF NOT EXISTS loja_motoboy_credito (id SERIAL PRIMARY KEY, loja_user VARCHAR(100) NOT NULL, motoboy_id INTEGER NOT NULL, limite NUMERIC(10,2) NOT NULL DEFAULT 0, created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW(), UNIQUE(loja_user, motoboy_id))"); } catch(e) {} try { await pool.query("ALTER TABLE loja_motoboy_credito ADD COLUMN IF NOT EXISTS devido NUMERIC(10,2) NOT NULL DEFAULT 0"); } catch(e) {} try { await pool.query("CREATE TABLE IF NOT EXISTS loja_motoboy_credito_eventos (id SERIAL PRIMARY KEY, loja_user VARCHAR(100) NOT NULL, motoboy_id INTEGER NOT NULL, valor NUMERIC(10,2) NOT NULL, descricao TEXT, order_id INTEGER, created_at TIMESTAMP DEFAULT NOW())"); } catch(e) {}
   // ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ TAXA EXTRA NOS PEDIDOS (armazenar taxas aplicadas) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS taxa_extra_chuva DECIMAL DEFAULT 0"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS taxa_extra_noturna DECIMAL DEFAULT 0"); } catch(e) {}
@@ -4287,6 +4287,37 @@ async function checkMotoboyAutoOffline() {
   } catch (e) { st.erros.push('pedidos parados: ' + e.message); console.error('[JOB] checkMotoboyAutoOffline (pedidos parados):', e.message); }
   Object.assign(_autoOfflineStatus, st);
 }
+// ===== OFFLINE GERAL DIARIO (23:01 SP) =====
+// Todo dia as MOTOBOY_OFFLINE_DIARIO_HORA (horario de Brasilia) coloca offline todos os motoboys online SEM pedido em andamento.
+// Roda 1x por dia: a data da ultima execucao fica em settings.offline_23h_ultima_data (vale mesmo com reinicio do servidor).
+// Se o servidor reiniciar entre 23:01 e 23:59 e ainda nao rodou hoje, roda uma vez; depois da meia-noite, nao.
+// Quem estava com pedido continua online e so sai pelas regras normais. Ninguem e reativado.
+const MOTOBOY_OFFLINE_DIARIO_HORA = '23:01';
+function _dataHoraSP(ms) {
+  const d = new Date(ms);
+  return { data: d.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' }), hora: new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(d) };
+}
+async function checkOfflineDiarioMotoboys(agoraMs) {
+  const agora = agoraMs || Date.now();
+  const sp = _dataHoraSP(agora);
+  if (sp.hora < MOTOBOY_OFFLINE_DIARIO_HORA) return null;
+  try {
+    // Marca o dia antes de agir: so uma execucao por dia, mesmo com reinicio ou mais de uma instancia
+    const marca = await pool.query('UPDATE settings SET offline_23h_ultima_data=$1 WHERE id=1 AND offline_23h_ultima_data IS DISTINCT FROM $1 RETURNING id', [sp.data]);
+    if (!marca.rows.length) return null;
+    const der = await pool.query("UPDATE users u SET online=false, online_since=NULL WHERE u.role='motoboy' AND u.online=true AND " + SQL_SEM_PEDIDO_ATIVO + " RETURNING u.id, u.name");
+    const mant = await pool.query("SELECT u.id, u.name FROM users u WHERE u.role='motoboy' AND u.online=true AND NOT " + SQL_SEM_PEDIDO_ATIVO);
+    const reg = {
+      data: sp.data, hora: sp.hora, executado_em: new Date(agora).toISOString(),
+      derrubados: der.rows.map(function(x) { return { id: x.id, nome: x.name || '' }; }),
+      mantidos_por_pedido: mant.rows.map(function(x) { return { id: x.id, nome: x.name || '' }; })
+    };
+    _autoOfflineStatus.offline_23h = reg;
+    console.log('[JOB] Offline diario ' + sp.data + ' ' + sp.hora + ' SP: ' + reg.derrubados.length + ' motoboy(s) colocado(s) offline' + (reg.derrubados.length ? ' (' + reg.derrubados.map(function(x) { return x.id + ' ' + x.nome; }).join(', ') + ')' : '') + '; ' + reg.mantidos_por_pedido.length + ' mantido(s) por pedido em andamento' + (reg.mantidos_por_pedido.length ? ' (' + reg.mantidos_por_pedido.map(function(x) { return x.id + ' ' + x.nome; }).join(', ') + ')' : '') + '.');
+    return reg;
+  } catch (e) { console.error('[JOB] checkOfflineDiarioMotoboys:', e.message); _autoOfflineStatus.offline_23h_erro = e.message; return null; }
+}
+
 app.get('/motoboys/auto-offline/status', function(req, res) {
   res.json(Object.assign({ regras: { online_max_min: MOTOBOY_ONLINE_MAX_MIN, fantasma_min: MOTOBOY_FANTASMA_MIN, pedido_parado_h: MOTOBOY_PEDIDO_PARADO_H } }, _autoOfflineStatus));
 });
@@ -4299,7 +4330,7 @@ app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
   setInterval(expirePagamentosRestaurante, 30 * 1000);
   // Exclusao de clientes inativos: ao iniciar (apos as migracoes) e diariamente as 03:00 (SP)
   setTimeout(excluirClientesInativos, 60 * 1000); setInterval(agendarExclusaoClientesInativos, 10 * 60 * 1000); console.log('[JOB] Exclusao diaria de clientes inativos iniciada (03:00 SP)');
-  setInterval(checkLojaAutoOffline, 60 * 1000); setInterval(cleanupOldOrders, 60 * 60 * 1000); cleanupOldOrders(); setInterval(checkLojaHorarioSemanal, 60 * 1000); checkLojaHorarioSemanal(); console.log('[JOB] Horario semanal automatico de lojas iniciado (60s)'); setInterval(checkMotoboyAutoOffline, MOTOBOY_JOB_INTERVALO_MIN * 60 * 1000); checkMotoboyAutoOffline(); console.log('[JOB] Auto-offline de motoboys iniciado (6h online / ' + MOTOBOY_FANTASMA_MIN + 'min sem localizacao, checagem a cada ' + MOTOBOY_JOB_INTERVALO_MIN + 'min)');
+  setInterval(checkLojaAutoOffline, 60 * 1000); setInterval(cleanupOldOrders, 60 * 60 * 1000); cleanupOldOrders(); setInterval(checkLojaHorarioSemanal, 60 * 1000); checkLojaHorarioSemanal(); console.log('[JOB] Horario semanal automatico de lojas iniciado (60s)'); setInterval(checkMotoboyAutoOffline, MOTOBOY_JOB_INTERVALO_MIN * 60 * 1000); setInterval(function() { checkOfflineDiarioMotoboys(); }, 60 * 1000); setTimeout(function() { checkOfflineDiarioMotoboys(); }, 15 * 1000); console.log('[JOB] Offline diario de motoboys as ' + MOTOBOY_OFFLINE_DIARIO_HORA + ' SP iniciado (checagem a cada 1min)'); checkMotoboyAutoOffline(); console.log('[JOB] Auto-offline de motoboys iniciado (6h online / ' + MOTOBOY_FANTASMA_MIN + 'min sem localizacao, checagem a cada ' + MOTOBOY_JOB_INTERVALO_MIN + 'min)');
   checkLojaAutoOffline();
   console.log('[JOB] Auto-offline de lojas iniciado (60s)');
   console.log('[JOB] Verificador de chegada iniciado (60s)');
