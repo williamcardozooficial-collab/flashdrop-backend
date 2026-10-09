@@ -4189,7 +4189,7 @@ app.post('/financeiro/estornos', async (req, res) => {
 });
 
 // ===== AUTO-OFFLINE DE MOTOBOYS (feito pelo servidor, funciona com o app fechado) =====
-// Regras (rodam a cada 2 min e ao iniciar). Nenhuma derruba motoboy com pedido em andamento.
+// Regras (rodam a cada MOTOBOY_JOB_INTERVALO_MIN e ao iniciar). Nenhuma derruba motoboy com pedido em andamento.
 // 1) Online ha mais de MOTOBOY_ONLINE_MAX_MIN: conta de online_since; se vazio, da ultima localizacao ou do ultimo login.
 // 2) Fantasma: online e sem localizacao (motoboy_localizacao.updated_at) ha mais de MOTOBOY_FANTASMA_MIN,
 //    ou que nunca mandou localizacao e esta online ha mais desse tempo.
@@ -4198,6 +4198,7 @@ app.post('/financeiro/estornos', async (req, res) => {
 const MOTOBOY_ONLINE_MAX_MIN = 360;
 const MOTOBOY_FANTASMA_MIN = 30;
 const MOTOBOY_PEDIDO_PARADO_H = 12;
+const MOTOBOY_JOB_INTERVALO_MIN = 30;
 const SQL_SEM_PEDIDO_ATIVO = "NOT EXISTS (SELECT 1 FROM orders o WHERE o.motoboy_id=u.id AND o.status NOT IN ('pendente','entregue','retornado','cancelado'))";
 const _pedidoParadoLogado = {};
 async function _derrubarMotoboyOffline(id, motivo) {
@@ -4260,7 +4261,7 @@ app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
   setInterval(expirePagamentosRestaurante, 30 * 1000);
   // Exclusao de clientes inativos: ao iniciar (apos as migracoes) e diariamente as 03:00 (SP)
   setTimeout(excluirClientesInativos, 60 * 1000); setInterval(agendarExclusaoClientesInativos, 10 * 60 * 1000); console.log('[JOB] Exclusao diaria de clientes inativos iniciada (03:00 SP)');
-  setInterval(checkLojaAutoOffline, 60 * 1000); setInterval(cleanupOldOrders, 60 * 60 * 1000); cleanupOldOrders(); setInterval(checkLojaHorarioSemanal, 60 * 1000); checkLojaHorarioSemanal(); console.log('[JOB] Horario semanal automatico de lojas iniciado (60s)'); setInterval(checkMotoboyAutoOffline, 2 * 60 * 1000); checkMotoboyAutoOffline(); console.log('[JOB] Auto-offline de motoboys iniciado (6h online / ' + MOTOBOY_FANTASMA_MIN + 'min sem localizacao, checagem a cada 2min)');
+  setInterval(checkLojaAutoOffline, 60 * 1000); setInterval(cleanupOldOrders, 60 * 60 * 1000); cleanupOldOrders(); setInterval(checkLojaHorarioSemanal, 60 * 1000); checkLojaHorarioSemanal(); console.log('[JOB] Horario semanal automatico de lojas iniciado (60s)'); setInterval(checkMotoboyAutoOffline, MOTOBOY_JOB_INTERVALO_MIN * 60 * 1000); checkMotoboyAutoOffline(); console.log('[JOB] Auto-offline de motoboys iniciado (6h online / ' + MOTOBOY_FANTASMA_MIN + 'min sem localizacao, checagem a cada ' + MOTOBOY_JOB_INTERVALO_MIN + 'min)');
   checkLojaAutoOffline();
   console.log('[JOB] Auto-offline de lojas iniciado (60s)');
   console.log('[JOB] Verificador de chegada iniciado (60s)');
