@@ -985,11 +985,21 @@ function _saldoDisponivelMotoboy(mb) {
   const credLoja = Math.max(0, (parseFloat(mb.loja_limite) || 0) - (parseFloat(mb.loja_devido) || 0));
   return Math.round(((parseFloat(mb.balance) || 0) + (parseFloat(mb.custom_credit_limit) || 0) + credLoja) * 100) / 100;
 }
+// Saldo do motoboy cobre o valor? (mesma conta no robo e na trava de aceite do PUT /orders/:id)
+function _saldoCobreValor(mb, valor) { return Math.round((parseFloat(valor) || 0) * 100) / 100 <= _saldoDisponivelMotoboy(mb); }
 function _motoboyCobrePedido(mb, valor, agoraMs) {
   if (!mb || mb.online !== true || mb.blocked === true) return false;
   if ((parseInt(mb.blocked_until) || 0) > agoraMs) return false;
-  return Math.round((parseFloat(valor) || 0) * 100) / 100 <= _saldoDisponivelMotoboy(mb);
+  return _saldoCobreValor(mb, valor);
 }
+// Credito do motoboy para aceitar um pedido em dinheiro/cartao por aproximacao: produto + tele <= saldo disponivel
+async function _creditoAceiteMotoboy(motoboyId, order) {
+  const r = await pool.query('SELECT u.balance, u.custom_credit_limit, lc.limite AS loja_limite, COALESCE(lc.devido,0) AS loja_devido FROM users u LEFT JOIN loja_motoboy_credito lc ON lc.motoboy_id=u.id AND lc.loja_user=$2 WHERE u.id=$1', [motoboyId, order.loja_user || '']);
+  const mb = r.rows[0] || {};
+  const necessario = Math.round(((parseFloat(order.valor_pedido) || 0) + (parseFloat(order.valor_total) || 0)) * 100) / 100;
+  return { ok: _saldoCobreValor(mb, necessario), disponivel: _saldoDisponivelMotoboy(mb), necessario: necessario };
+}
+function _fmtReais(v) { return 'R$ ' + (Math.round((parseFloat(v) || 0) * 100) / 100).toFixed(2).replace('.', ','); }
 async function _roboPagamentosLigado() {
   try { const r = await pool.query('SELECT robo_pagamentos FROM settings WHERE id=1'); return !!(r.rows[0] && r.rows[0].robo_pagamentos === true); } catch (e) { return false; }
 }
@@ -1176,48 +1186,19 @@ app.put('/orders/:id', async (req, res) => {
       }
     }
 
-    // === VERIFICACAO DE LIMITE DE CREDITO AO ACEITAR CORRIDA EM DINHEIRO ===
-    if (fields.status === 'em_preparo' && fields.motoboy_id) {
-
-      // (A checagem de penalidade/blocked_until foi movida para a trava de aceite acima)
-      const mbRes = await pool.query('SELECT blocked_until, balance, credit_mode, custom_credit_limit FROM users WHERE id=$1', [fields.motoboy_id]);
-      if (mbRes.rows.length > 0) {
-        const mb = mbRes.rows[0];
-
-        // Verifica limite de credito apenas para corridas em dinheiro
-        const orderRes = await pool.query('SELECT tipo_pagamento, valor_motoboy, comissao, valor_pedido, delivery_code, motoboy_id, loja_user FROM orders WHERE id=$1', [req.params.id]);
-        if (orderRes.rows.length > 0) {
-          const order = orderRes.rows[0];
-          const isDinheiro = order.tipo_pagamento === 'dinheiro';
-
-          if (isDinheiro) {
-            // Logica: custom_credit_limit define o limite individual do motoboy let lojaCredDisp = 0; try { if (order.loja_user) { const lcRes = await pool.query('SELECT limite, COALESCE(devido,0) as devido FROM loja_motoboy_credito WHERE loja_user=$1 AND motoboy_id=$2', [order.loja_user, fields.motoboy_id]); if (lcRes.rows.length > 0) { const lcLimite = parseFloat(lcRes.rows[0].limite) || 0; const lcDevido = parseFloat(lcRes.rows[0].devido) || 0; lojaCredDisp = Math.max(0, Math.round((lcLimite - lcDevido) * 100) / 100); } } } catch(eLcAccept) {}
-            // null ou 0 = bloqueado por padrao (admin precisa definir um valor > 0 para liberar)
-            const individualLimit = mb.custom_credit_limit !== null ? parseFloat(mb.custom_credit_limit) : 0;
-            const balance = parseFloat(mb.balance || 0);
-
-            if ((individualLimit + lojaCredDisp) <= 0) {
-              // Limite nao definido ou zerado: motoboy bloqueado para corridas em dinheiro
-              return res.status(403).json({
-                error: 'Voce nao possui saldo suficiente para pegar este pedido. Procure manter saldo na plataforma para poder aceitar pedidos em dinheiro.',
-                credit_blocked: true
-              });
-            }
-
-            // Verifica se aceitar este pedido ultrapassaria o limite negativo
-            // Em corridas dinheiro: motoboy vai dever valor_pedido + comissao ao sistema
-            const valorPedidoOrd = parseFloat(order.valor_pedido || 0);
-            const comissaoOrd = parseFloat(order.comissao || 0);
-            const debitoEstimado = valorPedidoOrd + comissaoOrd;
-            const saldoAposAceitar = balance - debitoEstimado;
-
-            if (balance <= -(individualLimit + lojaCredDisp) || saldoAposAceitar < -(individualLimit + lojaCredDisp)) {
-              // Saldo atual ja ultrapassou OU aceitar este pedido vai ultrapassar o limite
-              return res.status(403).json({
-                error: 'Voce nao possui saldo suficiente para pegar este pedido. Procure manter saldo na plataforma para poder aceitar pedidos em dinheiro.',
-                credit_blocked: true
-              });
-            }
+    // === VERIFICACAO DE CREDITO NO ACEITE (dinheiro e cartao por aproximacao) ===
+    // Roda quando o pedido e atribuido a um motoboy DIFERENTE do atual (aceite novo), mesma condicao da trava de bloqueio acima.
+    // Regra igual a do app do motoboy e a do robo de pagamentos: produto + tele <= saldo + custom_credit_limit + credito da loja
+    // (loja_motoboy_credito: limite - devido, minimo 0). Pedidos ja com este motoboy (coleta, entrega, finalizacao) nao passam aqui.
+    if (fields.motoboy_id !== undefined && fields.motoboy_id !== null && fields.motoboy_id !== '') {
+      const ordCredRes = await pool.query('SELECT motoboy_id, tipo_pagamento, valor_pedido, valor_total, loja_user FROM orders WHERE id=$1', [req.params.id]);
+      if (ordCredRes.rows.length > 0 && String(ordCredRes.rows[0].motoboy_id) !== String(fields.motoboy_id)) {
+        const ordCred = ordCredRes.rows[0];
+        ['tipo_pagamento', 'valor_pedido', 'valor_total', 'loja_user'].forEach(function(k) { if (fields[k] !== undefined) ordCred[k] = fields[k]; });
+        if (ordCred.tipo_pagamento === 'dinheiro' || ordCred.tipo_pagamento === 'cartao_aproximacao') {
+          const cred = await _creditoAceiteMotoboy(fields.motoboy_id, ordCred);
+          if (!cred.ok) {
+            return res.status(403).json({ error: 'Crédito insuficiente para aceitar este pedido. Seu crédito disponível: ' + _fmtReais(cred.disponivel) + '; necessário: ' + _fmtReais(cred.necessario) + '.', credit_blocked: true });
           }
         }
       }
