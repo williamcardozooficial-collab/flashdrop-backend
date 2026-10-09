@@ -1160,9 +1160,42 @@ app.post('/orders', async (req, res) => {
   res.json(pedido);
 });
 
+// ===== ACEITE ATOMICO E ACOES SO DO DONO DO PEDIDO =====
+// Status em que o pedido ainda esta disponivel para um motoboy aceitar (sem motoboy).
+const STATUS_PEDIDO_DISPONIVEL = ['pendente', 'em_preparo'];
+const MSG_PEDIDO_JA_ACEITO = 'Este pedido já foi aceito por outro motoboy.';
+const MSG_PEDIDO_NAO_E_SEU = 'Este pedido não está mais com você.';
+// Motoboy que fez a requisicao, quando ela vem com token de motoboy (as telas nativas do app mandam); senao null
+function _motoboyDaRequisicao(req) {
+  try {
+    const h = req.headers['authorization']; const t = h && h.split(' ')[1]; if (!t) return null;
+    const dec = jwt.verify(t, process.env.JWT_SECRET || 'flashdrop_secret_2024');
+    return dec && dec.role === 'motoboy' && dec.id ? String(dec.id) : null;
+  } catch (e) { return null; }
+}
+
 app.put('/orders/:id', async (req, res) => {
   try {
     const fields = req.body;
+    // Aceite novo: o pedido esta sendo atribuido a um motoboy diferente do atual
+    const _ordDono = await pool.query('SELECT motoboy_id, status FROM orders WHERE id=$1', [req.params.id]);
+    const _donoAtual = _ordDono.rows.length ? _ordDono.rows[0].motoboy_id : null;
+    const _statusAtual = _ordDono.rows.length ? _ordDono.rows[0].status : null;
+    const _aceiteNovo = fields.motoboy_id !== undefined && fields.motoboy_id !== null && fields.motoboy_id !== '' && String(_donoAtual) !== String(fields.motoboy_id);
+    // Desistencia/cancelamento do motoboy: volta para pendente sem motoboy
+    const _desistencia = fields.status === 'pendente' && fields.motoboy_id === null && _donoAtual !== null && _donoAtual !== undefined;
+    if (_aceiteNovo && _ordDono.rows.length && (_donoAtual !== null || STATUS_PEDIDO_DISPONIVEL.indexOf(_statusAtual) === -1)) {
+      return res.status(403).json({ error: MSG_PEDIDO_JA_ACEITO, ja_aceito: true });
+    }
+    // Acoes de motoboy (desistir, na loja, coletado, no cliente, entregue) so pelo dono atual do pedido
+    const _mbReq = _motoboyDaRequisicao(req);
+    if (_mbReq && !_aceiteNovo && (_desistencia || ['aceito', 'na_loja', 'coletado', 'no_cliente', 'entregue'].indexOf(fields.status) !== -1) && String(_donoAtual) !== _mbReq) {
+      return res.status(403).json({ error: MSG_PEDIDO_NAO_E_SEU, nao_e_seu: true });
+    }
+    // Desistencia so enquanto o pedido esta aceito/na loja (como no app); depois de coletado nao volta para o sistema
+    if (_desistencia && ['aceito', 'na_loja'].indexOf(_statusAtual) === -1) {
+      return res.status(403).json({ error: 'Não é possível desistir deste pedido agora (status: ' + _statusAtual + ').', nao_e_seu: true });
+    }
     if (fields.status === 'em_preparo' && !fields.t_em_preparo) { fields.t_em_preparo = new Date().toISOString(); }
     // Marcador interno da chegada agrupada (nao e coluna): evita repropagar a partir dos pedidos irmaos
     const _chegadaAgrupada = fields._chegada_agrupada === true; delete fields._chegada_agrupada;
@@ -1260,7 +1293,16 @@ app.put('/orders/:id', async (req, res) => {
         lockClient.release();
       }
     } else {
-      r = await pool.query(`UPDATE orders SET ${sets} WHERE id=$1 RETURNING *`, [req.params.id, ...vals]);
+      // Aceite novo: so grava se o pedido ainda estiver livre (2 aceites ao mesmo tempo: so um vence).
+      // Desistencia: so grava se o pedido ainda for do mesmo motoboy (a penalidade vai para ele).
+      let condAtomica = '';
+      if (_aceiteNovo) condAtomica = " AND motoboy_id IS NULL AND status IN ('" + STATUS_PEDIDO_DISPONIVEL.join("','") + "')";
+      else if (_desistencia) condAtomica = " AND motoboy_id = " + (parseInt(_donoAtual) || 0) + " AND status IN ('aceito','na_loja')";
+      r = await pool.query(`UPDATE orders SET ${sets} WHERE id=$1${condAtomica} RETURNING *`, [req.params.id, ...vals]);
+      if (condAtomica && !r.rows.length) {
+        if (_aceiteNovo) { console.log('[ACEITE] Pedido #' + req.params.id + ': aceite do motoboy ' + fields.motoboy_id + ' recusado (outro motoboy aceitou antes).'); return res.status(403).json({ error: MSG_PEDIDO_JA_ACEITO, ja_aceito: true }); }
+        return res.status(403).json({ error: MSG_PEDIDO_NAO_E_SEU, nao_e_seu: true });
+      }
     }
     const order = r.rows[0];
     if (fields.status === 'aceito' && fields.motoboy_id) {
@@ -1373,7 +1415,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
     }
 
     if (fields.status === 'entregue' && order.motoboy_id) { try { await pool.query('UPDATE users SET motoboy_total_entregas = motoboy_total_entregas + 1, motoboy_total_valor = motoboy_total_valor + $1, motoboy_total_km = motoboy_total_km + $2, motoboy_ultima_entrega_at = $3 WHERE id=$4', [parseFloat(order.valor_motoboy)||0, parseFloat(order.distancia)||0, Date.now(), order.motoboy_id]); } catch(eContadorMotoboy) { console.error('[CONTADOR_MOTOBOY] Erro:', eContadorMotoboy.message); } } // Cancelamento pelo motoboy: bloquear por 10 minutos
-    if (fields.status === 'pendente' && fields.motoboy_id === null && prevMotoboyId) {
+    if (_desistencia && fields.status === 'pendente' && fields.motoboy_id === null && prevMotoboyId && String(prevMotoboyId) === String(_donoAtual)) {
       // Penalidade progressiva (10min / 30min / 1h / 6h / 24h pela contagem do dia)
       let penCancel = null;
       try { penCancel = await aplicarPenalidadeMotoboy(prevMotoboyId, 'Você desistiu de um pedido.'); } catch (ePenCancel) { console.error('[PENALIDADE] Erro desistencia:', ePenCancel.message); }
