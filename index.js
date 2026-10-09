@@ -4204,40 +4204,53 @@ async function _derrubarMotoboyOffline(id, motivo) {
   // Confere de novo, na mesma instrucao, que continua online e sem pedido em andamento
   const r = await pool.query("UPDATE users u SET online=false, online_since=NULL WHERE u.id=$1 AND u.role='motoboy' AND u.online=true AND " + SQL_SEM_PEDIDO_ATIVO + " RETURNING u.id, u.name", [id]);
   if (r.rows.length) console.log('[JOB] Motoboy id=' + id + ' (' + (r.rows[0].name || '') + ') colocado offline automaticamente: ' + motivo);
+  return r.rows.length > 0;
 }
+// Ultima rodada do job (para conferencia: GET /motoboys/auto-offline/status)
+const _autoOfflineStatus = { ultima_rodada: null, derrubados: [], preenchidos: [], pedidos_parados: [], erros: [] };
 async function checkMotoboyAutoOffline() {
+  const agora = Date.now();
+  const st = { ultima_rodada: new Date(agora).toISOString(), derrubados: [], preenchidos: [], pedidos_parados: [], erros: [] };
+  const hm = function(ms) { return _horaSP(ms) + ' ' + new Date(ms).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }); };
   try {
-    const agora = Date.now();
     const r = await pool.query(
-      "SELECT u.id, u.online_since, u.ultimo_login, " +
-      "(EXTRACT(EPOCH FROM GREATEST(ml.updated_at, u.last_location_update)) * 1000)::BIGINT AS loc_ms " +
+      "SELECT u.id, u.online_since, u.ultimo_login, (EXTRACT(EPOCH FROM ml.updated_at) * 1000)::BIGINT AS loc_ms " +
       "FROM users u LEFT JOIN motoboy_localizacao ml ON ml.motoboy_id=u.id " +
       "WHERE u.role='motoboy' AND u.online=true AND " + SQL_SEM_PEDIDO_ATIVO);
     for (const m of r.rows) {
-      const onlineSince = parseInt(m.online_since) || 0;
-      const locMs = parseInt(m.loc_ms) || 0;
-      const inicio = onlineSince || locMs || parseInt(m.ultimo_login) || 0;
-      const hm = function(ms) { return _horaSP(ms) + ' ' + new Date(ms).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }); };
-      if (inicio && agora - inicio >= MOTOBOY_ONLINE_MAX_MIN * 60 * 1000) {
-        await _derrubarMotoboyOffline(m.id, 'online ha mais de ' + (MOTOBOY_ONLINE_MAX_MIN / 60) + 'h (desde ' + hm(inicio) + (onlineSince ? '' : locMs ? ', pela ultima localizacao' : ', pelo ultimo login') + ')');
-      } else if (locMs && agora - locMs >= MOTOBOY_FANTASMA_MIN * 60 * 1000) {
-        await _derrubarMotoboyOffline(m.id, 'sem enviar localizacao ha mais de ' + MOTOBOY_FANTASMA_MIN + 'min (ultima: ' + hm(locMs) + ')');
-      } else if (!locMs && onlineSince && agora - onlineSince >= MOTOBOY_FANTASMA_MIN * 60 * 1000) {
-        await _derrubarMotoboyOffline(m.id, 'nunca enviou localizacao e esta online ha mais de ' + MOTOBOY_FANTASMA_MIN + 'min (desde ' + hm(onlineSince) + ')');
-      }
+      try {
+        const onlineSince = parseInt(m.online_since) || 0;
+        const locMs = parseInt(m.loc_ms) || 0;
+        const inicio = onlineSince || locMs || parseInt(m.ultimo_login) || 0;
+        let motivo = null;
+        if (inicio && agora - inicio >= MOTOBOY_ONLINE_MAX_MIN * 60 * 1000) motivo = 'online ha mais de ' + (MOTOBOY_ONLINE_MAX_MIN / 60) + 'h (desde ' + hm(inicio) + (onlineSince ? '' : locMs ? ', pela ultima localizacao' : ', pelo ultimo login') + ')';
+        else if (locMs && agora - locMs >= MOTOBOY_FANTASMA_MIN * 60 * 1000) motivo = 'sem enviar localizacao ha mais de ' + MOTOBOY_FANTASMA_MIN + 'min (ultima: ' + hm(locMs) + ')';
+        else if (!locMs && onlineSince && agora - onlineSince >= MOTOBOY_FANTASMA_MIN * 60 * 1000) motivo = 'nunca enviou localizacao e esta online ha mais de ' + MOTOBOY_FANTASMA_MIN + 'min (desde ' + hm(onlineSince) + ')';
+        if (motivo && await _derrubarMotoboyOffline(m.id, motivo)) st.derrubados.push({ id: m.id, motivo: motivo });
+      } catch (eM) { st.erros.push('motoboy ' + m.id + ': ' + eM.message); console.error('[JOB] auto-offline motoboy ' + m.id + ':', eM.message); }
     }
-    // Quem continua online sem online_since passa a contar a partir de agora
+  } catch (e) { st.erros.push('regras: ' + e.message); console.error('[JOB] checkMotoboyAutoOffline (regras):', e.message); }
+  // Quem continua online sem online_since passa a contar a partir de agora
+  try {
     const fill = await pool.query("UPDATE users SET online_since=$1 WHERE role='motoboy' AND online=true AND online_since IS NULL RETURNING id", [agora]);
-    if (fill.rows.length) console.log('[JOB] online_since preenchido (agora) para motoboys online sem registro: ' + fill.rows.map(function(x) { return x.id; }).join(', '));
-    // Pedidos ativos parados: so log (no maximo 1x por hora por pedido)
-    const parados = await pool.query("SELECT id, motoboy_id, status, created_at FROM orders WHERE motoboy_id IS NOT NULL AND status NOT IN ('pendente','entregue','retornado','cancelado') AND created_at < NOW() - ($1 || ' hours')::interval", [String(MOTOBOY_PEDIDO_PARADO_H)]);
+    st.preenchidos = fill.rows.map(function(x) { return x.id; });
+    if (fill.rows.length) console.log('[JOB] online_since preenchido (agora) para motoboys online sem registro: ' + st.preenchidos.join(', '));
+  } catch (e) { st.erros.push('online_since: ' + e.message); console.error('[JOB] checkMotoboyAutoOffline (online_since):', e.message); }
+  // Pedidos ativos parados: so log (no maximo 1x por hora por pedido)
+  try {
+    const parados = await pool.query("SELECT id, motoboy_id, status FROM orders WHERE motoboy_id IS NOT NULL AND status NOT IN ('pendente','entregue','retornado','cancelado') AND created_at < NOW() - INTERVAL '" + MOTOBOY_PEDIDO_PARADO_H + " hours'");
     parados.rows.forEach(function(o) {
+      st.pedidos_parados.push({ id: o.id, motoboy_id: o.motoboy_id, status: o.status });
       if (_pedidoParadoLogado[o.id] && agora - _pedidoParadoLogado[o.id] < 60 * 60 * 1000) return;
       _pedidoParadoLogado[o.id] = agora;
       console.warn('[JOB] Pedido #' + o.id + ' ativo (' + o.status + ') ha mais de ' + MOTOBOY_PEDIDO_PARADO_H + 'h com o motoboy id=' + o.motoboy_id + ' - isso segura o motoboy online. Pedido nao alterado.');
     });
-  } catch (e) { console.error('[JOB] checkMotoboyAutoOffline:', e.message); }
+  } catch (e) { st.erros.push('pedidos parados: ' + e.message); console.error('[JOB] checkMotoboyAutoOffline (pedidos parados):', e.message); }
+  Object.assign(_autoOfflineStatus, st);
 }
+app.get('/motoboys/auto-offline/status', function(req, res) {
+  res.json(Object.assign({ regras: { online_max_min: MOTOBOY_ONLINE_MAX_MIN, fantasma_min: MOTOBOY_FANTASMA_MIN, pedido_parado_h: MOTOBOY_PEDIDO_PARADO_H } }, _autoOfflineStatus));
+});
 
 app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
   setInterval(checkLateArrivals, 60 * 1000);
