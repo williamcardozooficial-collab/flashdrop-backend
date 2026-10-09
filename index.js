@@ -308,7 +308,7 @@ try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARC
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS wpp_link TEXT DEFAULT ''"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS app_data TEXT DEFAULT ''"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS perc_cartao_aprox DECIMAL DEFAULT 5.00"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS historico_limpeza_dias INTEGER DEFAULT 30"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS formas_pagamento_novo_pedido TEXT DEFAULT ''"); } catch(e) {}
-    try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS commission_type VARCHAR(12) DEFAULT 'valor'"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS emprestimo_modo VARCHAR(12) DEFAULT 'manual'"); } catch(e) {} try { await pool.query("CREATE TABLE IF NOT EXISTS loja_motoboy_credito (id SERIAL PRIMARY KEY, loja_user VARCHAR(100) NOT NULL, motoboy_id INTEGER NOT NULL, limite NUMERIC(10,2) NOT NULL DEFAULT 0, created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW(), UNIQUE(loja_user, motoboy_id))"); } catch(e) {} try { await pool.query("ALTER TABLE loja_motoboy_credito ADD COLUMN IF NOT EXISTS devido NUMERIC(10,2) NOT NULL DEFAULT 0"); } catch(e) {} try { await pool.query("CREATE TABLE IF NOT EXISTS loja_motoboy_credito_eventos (id SERIAL PRIMARY KEY, loja_user VARCHAR(100) NOT NULL, motoboy_id INTEGER NOT NULL, valor NUMERIC(10,2) NOT NULL, descricao TEXT, order_id INTEGER, created_at TIMESTAMP DEFAULT NOW())"); } catch(e) {}
+    try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS commission_type VARCHAR(12) DEFAULT 'valor'"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS robo_pagamentos BOOLEAN DEFAULT false"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS emprestimo_modo VARCHAR(12) DEFAULT 'manual'"); } catch(e) {} try { await pool.query("CREATE TABLE IF NOT EXISTS loja_motoboy_credito (id SERIAL PRIMARY KEY, loja_user VARCHAR(100) NOT NULL, motoboy_id INTEGER NOT NULL, limite NUMERIC(10,2) NOT NULL DEFAULT 0, created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW(), UNIQUE(loja_user, motoboy_id))"); } catch(e) {} try { await pool.query("ALTER TABLE loja_motoboy_credito ADD COLUMN IF NOT EXISTS devido NUMERIC(10,2) NOT NULL DEFAULT 0"); } catch(e) {} try { await pool.query("CREATE TABLE IF NOT EXISTS loja_motoboy_credito_eventos (id SERIAL PRIMARY KEY, loja_user VARCHAR(100) NOT NULL, motoboy_id INTEGER NOT NULL, valor NUMERIC(10,2) NOT NULL, descricao TEXT, order_id INTEGER, created_at TIMESTAMP DEFAULT NOW())"); } catch(e) {}
   // ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ TAXA EXTRA NOS PEDIDOS (armazenar taxas aplicadas) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS taxa_extra_chuva DECIMAL DEFAULT 0"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS taxa_extra_noturna DECIMAL DEFAULT 0"); } catch(e) {}
@@ -975,8 +975,65 @@ app.get('/loja-motoboy-credito/:loja_user', async (req, res) => { try { const r 
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// ===== ROBO DE PAGAMENTOS =====
+// Ligado pelo admin (settings.robo_pagamentos). Com o robo ligado, Dinheiro e Cartao por aproximacao so ficam
+// disponiveis se houver pelo menos 1 motoboy online, nao bloqueado, sem penalidade vigente, cujo saldo disponivel
+// cobre o pedido inteiro. Regra igual a trava de aceite do app do motoboy (mesma para dinheiro e cartao por aproximacao):
+//   valor a cobrar (produto + tele) <= saldo + custom_credit_limit + credito da loja (loja_motoboy_credito: limite - devido, minimo 0)
+const MSG_ROBO_PAGAMENTO = { dinheiro: 'No momento não há motoboy disponível para Dinheiro. Escolha outra forma de pagamento.', cartao_aproximacao: 'No momento não há motoboy disponível para Cartão por aproximação. Escolha outra forma de pagamento.' };
+function _saldoDisponivelMotoboy(mb) {
+  const credLoja = Math.max(0, (parseFloat(mb.loja_limite) || 0) - (parseFloat(mb.loja_devido) || 0));
+  return Math.round(((parseFloat(mb.balance) || 0) + (parseFloat(mb.custom_credit_limit) || 0) + credLoja) * 100) / 100;
+}
+function _motoboyCobrePedido(mb, valor, agoraMs) {
+  if (!mb || mb.online !== true || mb.blocked === true) return false;
+  if ((parseInt(mb.blocked_until) || 0) > agoraMs) return false;
+  return Math.round((parseFloat(valor) || 0) * 100) / 100 <= _saldoDisponivelMotoboy(mb);
+}
+async function _roboPagamentosLigado() {
+  try { const r = await pool.query('SELECT robo_pagamentos FROM settings WHERE id=1'); return !!(r.rows[0] && r.rows[0].robo_pagamentos === true); } catch (e) { return false; }
+}
+async function disponibilidadePagamento(lojaUser, valor) {
+  if (!(await _roboPagamentosLigado())) return { robo_ligado: false, dinheiro_disponivel: true, cartao_aproximacao_disponivel: true };
+  const agora = Date.now();
+  const r = await pool.query("SELECT u.id, u.online, u.blocked, u.blocked_until, u.balance, u.custom_credit_limit, lc.limite AS loja_limite, COALESCE(lc.devido,0) AS loja_devido FROM users u LEFT JOIN loja_motoboy_credito lc ON lc.motoboy_id=u.id AND lc.loja_user=$1 WHERE u.role='motoboy' AND u.online=true AND u.blocked IS NOT TRUE AND (u.blocked_until IS NULL OR u.blocked_until <= $2)", [lojaUser || '', agora]);
+  const algum = r.rows.some(function(mb) { return _motoboyCobrePedido(mb, valor, agora); });
+  return { robo_ligado: true, dinheiro_disponivel: algum, cartao_aproximacao_disponivel: algum };
+}
+async function _lojaUserDe(ref) {
+  ref = String(ref || '').trim(); if (!ref) return '';
+  const r = await pool.query("SELECT username FROM users WHERE role='loja' AND (username=$1 OR custom_id=$1 OR slug=$1 OR id::text=$1) ORDER BY (username=$1) DESC LIMIT 1", [ref]);
+  return r.rows.length ? r.rows[0].username : ref;
+}
+app.get('/disponibilidade-pagamento', async (req, res) => {
+  try {
+    const lojaUser = await _lojaUserDe(req.query.loja);
+    res.json(await disponibilidadePagamento(lojaUser, parseFloat(req.query.valor) || 0));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/settings/robo-pagamentos', async (req, res) => {
+  res.json({ robo_pagamentos: await _roboPagamentosLigado() });
+});
+app.put('/settings/robo-pagamentos', authMiddleware, async (req, res) => {
+  try {
+    if (!req.user || req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas o admin pode alterar o robo.' });
+    if (typeof (req.body && req.body.ligado) !== 'boolean') return res.status(400).json({ error: 'ligado deve ser true ou false' });
+    const r = await pool.query('UPDATE settings SET robo_pagamentos=$1 WHERE id=1 RETURNING robo_pagamentos', [req.body.ligado]);
+    console.log('[ROBO] Robo de pagamentos ' + (req.body.ligado ? 'LIGADO' : 'desligado') + ' por ' + (req.user.username || req.user.id));
+    res.json({ ok: true, robo_pagamentos: !!(r.rows[0] && r.rows[0].robo_pagamentos) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/orders', async (req, res) => {
   const d = req.body;
+  // Robo de pagamentos: recusa dinheiro/cartao por aproximacao quando nenhum motoboy cobre o pedido
+  if (d && (d.tipo_pagamento === 'dinheiro' || d.tipo_pagamento === 'cartao_aproximacao')) {
+    try {
+      const disp = await disponibilidadePagamento(d.loja_user, (parseFloat(d.valor_pedido) || 0) + (parseFloat(d.valor_total) || 0));
+      const ok = d.tipo_pagamento === 'dinheiro' ? disp.dinheiro_disponivel : disp.cartao_aproximacao_disponivel;
+      if (!ok) return res.status(409).json({ error: MSG_ROBO_PAGAMENTO[d.tipo_pagamento], robo_pagamento: true });
+    } catch (eRobo) { console.error('[ROBO] Erro ao verificar disponibilidade:', eRobo.message); }
+  }
   d.nome_cliente = sanitize(d.nome_cliente);
   d.endereco_entrega = sanitize(d.endereco_entrega);
   d.obs = sanitize(d.obs);
