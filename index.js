@@ -9,6 +9,7 @@ require('dotenv').config();
 const app = express();
 app.use(cors({ origin: '*', methods: ['GET','POST','PUT','DELETE','OPTIONS'], allowedHeaders: ['Content-Type','Authorization'] }));
 app.options('*', cors());
+app.use('/admin/avisos-loja', express.json({ limit: '2mb' })); // avisos com imagem (imagem em base64)
 app.use(express.json());
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
@@ -308,7 +309,7 @@ try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARC
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS wpp_link TEXT DEFAULT ''"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS app_data TEXT DEFAULT ''"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS perc_cartao_aprox DECIMAL DEFAULT 5.00"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS historico_limpeza_dias INTEGER DEFAULT 30"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS formas_pagamento_novo_pedido TEXT DEFAULT ''"); } catch(e) {}
-    try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS commission_type VARCHAR(12) DEFAULT 'valor'"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS robo_pagamentos BOOLEAN DEFAULT false"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS funcionamento JSONB DEFAULT NULL"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS offline_23h_ultima_data VARCHAR(10) DEFAULT NULL"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS emprestimo_modo VARCHAR(12) DEFAULT 'manual'"); } catch(e) {} try { await pool.query("CREATE TABLE IF NOT EXISTS loja_motoboy_credito (id SERIAL PRIMARY KEY, loja_user VARCHAR(100) NOT NULL, motoboy_id INTEGER NOT NULL, limite NUMERIC(10,2) NOT NULL DEFAULT 0, created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW(), UNIQUE(loja_user, motoboy_id))"); } catch(e) {} try { await pool.query("ALTER TABLE loja_motoboy_credito ADD COLUMN IF NOT EXISTS devido NUMERIC(10,2) NOT NULL DEFAULT 0"); } catch(e) {} try { await pool.query("CREATE TABLE IF NOT EXISTS loja_motoboy_credito_eventos (id SERIAL PRIMARY KEY, loja_user VARCHAR(100) NOT NULL, motoboy_id INTEGER NOT NULL, valor NUMERIC(10,2) NOT NULL, descricao TEXT, order_id INTEGER, created_at TIMESTAMP DEFAULT NOW())"); } catch(e) {}
+    try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS commission_type VARCHAR(12) DEFAULT 'valor'"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS robo_pagamentos BOOLEAN DEFAULT false"); } catch(e) {} try { await pool.query("CREATE TABLE IF NOT EXISTS avisos_loja (id SERIAL PRIMARY KEY, titulo VARCHAR(200), imagem TEXT NOT NULL, lojas_alvo INTEGER[] DEFAULT NULL, ativo BOOLEAN NOT NULL DEFAULT true, expira_em TIMESTAMPTZ DEFAULT NULL, criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(), criado_por VARCHAR(100))"); await pool.query("CREATE TABLE IF NOT EXISTS avisos_loja_vistos (aviso_id INTEGER NOT NULL REFERENCES avisos_loja(id) ON DELETE CASCADE, loja_id INTEGER NOT NULL, visto_em TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY (aviso_id, loja_id))"); } catch(e) { console.error('[MIGRACAO] avisos_loja:', e.message); } try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS funcionamento JSONB DEFAULT NULL"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS offline_23h_ultima_data VARCHAR(10) DEFAULT NULL"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS emprestimo_modo VARCHAR(12) DEFAULT 'manual'"); } catch(e) {} try { await pool.query("CREATE TABLE IF NOT EXISTS loja_motoboy_credito (id SERIAL PRIMARY KEY, loja_user VARCHAR(100) NOT NULL, motoboy_id INTEGER NOT NULL, limite NUMERIC(10,2) NOT NULL DEFAULT 0, created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW(), UNIQUE(loja_user, motoboy_id))"); } catch(e) {} try { await pool.query("ALTER TABLE loja_motoboy_credito ADD COLUMN IF NOT EXISTS devido NUMERIC(10,2) NOT NULL DEFAULT 0"); } catch(e) {} try { await pool.query("CREATE TABLE IF NOT EXISTS loja_motoboy_credito_eventos (id SERIAL PRIMARY KEY, loja_user VARCHAR(100) NOT NULL, motoboy_id INTEGER NOT NULL, valor NUMERIC(10,2) NOT NULL, descricao TEXT, order_id INTEGER, created_at TIMESTAMP DEFAULT NOW())"); } catch(e) {}
   // ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ TAXA EXTRA NOS PEDIDOS (armazenar taxas aplicadas) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS taxa_extra_chuva DECIMAL DEFAULT 0"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS taxa_extra_noturna DECIMAL DEFAULT 0"); } catch(e) {}
@@ -2574,6 +2575,83 @@ app.post('/distance', async (req, res) => {
 });
 
 /* ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ AVISOS (NOTICES) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ */
+// ===== AVISOS COM IMAGEM PARA AS LOJAS =====
+// Admin cria/lista/pausa/apaga (token de admin). A loja busca os seus pendentes e marca como visto (token da loja:
+// o id da loja vem do token, nao do corpo). lojas_alvo NULL = todas as lojas. Expirado ou pausado nao aparece.
+const AVISO_IMAGEM_MAX_BYTES = 1024 * 1024;
+function _tokenDe(req, papel) {
+  try { const h = req.headers['authorization']; const t = h && h.split(' ')[1]; if (!t) return null; const d = jwt.verify(t, process.env.JWT_SECRET || 'flashdrop_secret_2024'); return d && d.role === papel && d.id ? d : null; } catch (e) { return null; }
+}
+function _somenteAdmin(req, res) { const d = _tokenDe(req, 'admin'); if (!d) { res.status(req.headers['authorization'] ? 403 : 401).json({ error: 'Apenas o admin pode gerenciar os avisos com imagem.' }); return null; } return d; }
+app.post('/admin/avisos-loja', async (req, res) => {
+  try {
+    const adm = _somenteAdmin(req, res); if (!adm) return;
+    const b = req.body || {};
+    const m = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(String(b.imagem || ''));
+    if (!m) return res.status(400).json({ error: 'Envie uma imagem JPG, PNG ou WEBP.' });
+    const bytes = Math.floor(m[2].length * 3 / 4);
+    if (bytes > AVISO_IMAGEM_MAX_BYTES) return res.status(413).json({ error: 'Imagem muito grande (máximo 1 MB).' });
+    const titulo = String(b.titulo || '').trim().slice(0, 200) || null;
+    let alvo = null;
+    if (Array.isArray(b.lojas_alvo)) {
+      alvo = Array.from(new Set(b.lojas_alvo.map(function(x) { return parseInt(x); }).filter(function(x) { return x > 0; })));
+      if (!alvo.length) return res.status(400).json({ error: 'Escolha pelo menos uma loja ou "Todas as lojas".' });
+      const ok = await pool.query("SELECT COUNT(*) AS n FROM users WHERE role='loja' AND id = ANY($1::int[])", [alvo]);
+      if (parseInt(ok.rows[0].n) !== alvo.length) return res.status(400).json({ error: 'Alguma loja escolhida não existe.' });
+    }
+    let expira = null;
+    if (b.expira_em) { const d = new Date(b.expira_em); if (isNaN(d.getTime())) return res.status(400).json({ error: 'Data de expiração inválida.' }); if (d.getTime() <= Date.now()) return res.status(400).json({ error: 'A data de expiração já passou.' }); expira = d.toISOString(); }
+    const r = await pool.query('INSERT INTO avisos_loja (titulo, imagem, lojas_alvo, expira_em, criado_por) VALUES ($1,$2,$3,$4,$5) RETURNING id, titulo, lojas_alvo, ativo, expira_em, criado_em', [titulo, b.imagem, alvo, expira, adm.username || String(adm.id)]);
+    console.log('[AVISOS_LOJA] Aviso #' + r.rows[0].id + ' criado por ' + (adm.username || adm.id) + ' (' + (alvo ? alvo.length + ' loja(s)' : 'todas as lojas') + ', ' + Math.round(bytes / 1024) + ' KB)');
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/admin/avisos-loja', async (req, res) => {
+  try {
+    if (!_somenteAdmin(req, res)) return;
+    const total = parseInt((await pool.query("SELECT COUNT(*) AS n FROM users WHERE role='loja'")).rows[0].n) || 0;
+    const r = await pool.query("SELECT a.id, a.titulo, a.imagem, a.lojas_alvo, a.ativo, a.expira_em, a.criado_em, a.criado_por, (SELECT COUNT(*) FROM avisos_loja_vistos v WHERE v.aviso_id=a.id) AS vistos FROM avisos_loja a ORDER BY a.criado_em DESC");
+    const ids = Array.from(new Set([].concat.apply([], r.rows.map(function(x) { return x.lojas_alvo || []; }))));
+    const nomes = {}; if (ids.length) (await pool.query("SELECT id, name, custom_id FROM users WHERE id = ANY($1::int[])", [ids])).rows.forEach(function(u) { nomes[u.id] = (u.custom_id ? u.custom_id + ' ' : '') + (u.name || ''); });
+    res.json(r.rows.map(function(a) { return Object.assign({}, a, { vistos: parseInt(a.vistos) || 0, total_alvo: a.lojas_alvo ? a.lojas_alvo.length : total, lojas_alvo_nomes: a.lojas_alvo ? a.lojas_alvo.map(function(id) { return nomes[id] || ('#' + id); }) : null, expirado: !!(a.expira_em && new Date(a.expira_em).getTime() <= Date.now()) }); }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.put('/admin/avisos-loja/:id', async (req, res) => {
+  try {
+    if (!_somenteAdmin(req, res)) return;
+    if (typeof (req.body && req.body.ativo) !== 'boolean') return res.status(400).json({ error: 'ativo deve ser true ou false' });
+    const r = await pool.query('UPDATE avisos_loja SET ativo=$1 WHERE id=$2 RETURNING id, ativo', [req.body.ativo, parseInt(req.params.id) || 0]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Aviso não encontrado.' });
+    res.json(r.rows[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/admin/avisos-loja/:id', async (req, res) => {
+  try {
+    if (!_somenteAdmin(req, res)) return;
+    const r = await pool.query('DELETE FROM avisos_loja WHERE id=$1 RETURNING id', [parseInt(req.params.id) || 0]);
+    if (!r.rows.length) return res.status(404).json({ error: 'Aviso não encontrado.' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Loja: avisos pendentes (ativos, nao expirados, para todas ou para esta loja, ainda nao vistos por ela)
+app.get('/avisos-loja/pendentes', async (req, res) => {
+  try {
+    const lj = _tokenDe(req, 'loja'); if (!lj) return res.status(401).json({ error: 'Faça login como loja.' });
+    const r = await pool.query("SELECT a.id, a.titulo, a.imagem, a.criado_em FROM avisos_loja a WHERE a.ativo = true AND (a.expira_em IS NULL OR a.expira_em > NOW()) AND (a.lojas_alvo IS NULL OR $1 = ANY(a.lojas_alvo)) AND NOT EXISTS (SELECT 1 FROM avisos_loja_vistos v WHERE v.aviso_id=a.id AND v.loja_id=$1) ORDER BY a.criado_em ASC", [lj.id]);
+    res.json(r.rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/avisos-loja/:id/visto', async (req, res) => {
+  try {
+    const lj = _tokenDe(req, 'loja'); if (!lj) return res.status(401).json({ error: 'Faça login como loja.' });
+    const id = parseInt(req.params.id) || 0;
+    const a = await pool.query("SELECT id FROM avisos_loja WHERE id=$1 AND (lojas_alvo IS NULL OR $2 = ANY(lojas_alvo))", [id, lj.id]);
+    if (!a.rows.length) return res.status(404).json({ error: 'Aviso não encontrado.' });
+    await pool.query('INSERT INTO avisos_loja_vistos (aviso_id, loja_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [id, lj.id]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/notices', async (req, res) => {
   try {
     const target = req.query.target;
