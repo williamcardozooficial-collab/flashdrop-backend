@@ -308,7 +308,7 @@ try { await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS pix_nome VARC
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS wpp_link TEXT DEFAULT ''"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS app_data TEXT DEFAULT ''"); } catch(e) {}
   try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS perc_cartao_aprox DECIMAL DEFAULT 5.00"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS historico_limpeza_dias INTEGER DEFAULT 30"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS formas_pagamento_novo_pedido TEXT DEFAULT ''"); } catch(e) {}
-    try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS commission_type VARCHAR(12) DEFAULT 'valor'"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS robo_pagamentos BOOLEAN DEFAULT false"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS offline_23h_ultima_data VARCHAR(10) DEFAULT NULL"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS emprestimo_modo VARCHAR(12) DEFAULT 'manual'"); } catch(e) {} try { await pool.query("CREATE TABLE IF NOT EXISTS loja_motoboy_credito (id SERIAL PRIMARY KEY, loja_user VARCHAR(100) NOT NULL, motoboy_id INTEGER NOT NULL, limite NUMERIC(10,2) NOT NULL DEFAULT 0, created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW(), UNIQUE(loja_user, motoboy_id))"); } catch(e) {} try { await pool.query("ALTER TABLE loja_motoboy_credito ADD COLUMN IF NOT EXISTS devido NUMERIC(10,2) NOT NULL DEFAULT 0"); } catch(e) {} try { await pool.query("CREATE TABLE IF NOT EXISTS loja_motoboy_credito_eventos (id SERIAL PRIMARY KEY, loja_user VARCHAR(100) NOT NULL, motoboy_id INTEGER NOT NULL, valor NUMERIC(10,2) NOT NULL, descricao TEXT, order_id INTEGER, created_at TIMESTAMP DEFAULT NOW())"); } catch(e) {}
+    try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS commission_type VARCHAR(12) DEFAULT 'valor'"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS robo_pagamentos BOOLEAN DEFAULT false"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS funcionamento JSONB DEFAULT NULL"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS offline_23h_ultima_data VARCHAR(10) DEFAULT NULL"); } catch(e) {} try { await pool.query("ALTER TABLE settings ADD COLUMN IF NOT EXISTS emprestimo_modo VARCHAR(12) DEFAULT 'manual'"); } catch(e) {} try { await pool.query("CREATE TABLE IF NOT EXISTS loja_motoboy_credito (id SERIAL PRIMARY KEY, loja_user VARCHAR(100) NOT NULL, motoboy_id INTEGER NOT NULL, limite NUMERIC(10,2) NOT NULL DEFAULT 0, created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW(), UNIQUE(loja_user, motoboy_id))"); } catch(e) {} try { await pool.query("ALTER TABLE loja_motoboy_credito ADD COLUMN IF NOT EXISTS devido NUMERIC(10,2) NOT NULL DEFAULT 0"); } catch(e) {} try { await pool.query("CREATE TABLE IF NOT EXISTS loja_motoboy_credito_eventos (id SERIAL PRIMARY KEY, loja_user VARCHAR(100) NOT NULL, motoboy_id INTEGER NOT NULL, valor NUMERIC(10,2) NOT NULL, descricao TEXT, order_id INTEGER, created_at TIMESTAMP DEFAULT NOW())"); } catch(e) {}
   // ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ TAXA EXTRA NOS PEDIDOS (armazenar taxas aplicadas) ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ¢ÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂÃÂ
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS taxa_extra_chuva DECIMAL DEFAULT 0"); } catch(e) {}
   try { await pool.query("ALTER TABLE orders ADD COLUMN IF NOT EXISTS taxa_extra_noturna DECIMAL DEFAULT 0"); } catch(e) {}
@@ -975,6 +975,103 @@ app.get('/loja-motoboy-credito/:loja_user', async (req, res) => { try { const r 
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// ===== HORARIO DE FUNCIONAMENTO DA FLASH DROP =====
+// Configuracao em settings.funcionamento (JSON): { ativo, dias: { '0'..'6': { aberto, turnos: [{ ini:'HH:MM', fim:'HH:MM' }, ...] } }, manual }
+// dia 0 = domingo. Turno com fim <= inicio passa da meia-noite (ex.: 18:00-01:00). Horario de Brasilia.
+// manual: null = segue o horario; 'fechado' = "Fechar agora" (fica fechado ate o admin clicar "Abrir agora" ou "Seguir horario");
+// 'aberto' = "Abrir agora" (fica aberto ate o admin clicar "Fechar agora" ou "Seguir horario"). Com a chave geral desligada, sempre aberto.
+const DIAS_SEMANA = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+function _minutosHHMM(v) { const m = /^(\d{1,2}):(\d{2})$/.exec(String(v || '').trim()); if (!m) return null; const h = parseInt(m[1]), mi = parseInt(m[2]); if (h > 23 || mi > 59) return null; return h * 60 + mi; }
+function _relogioSP(ms) {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', weekday: 'short', hourCycle: 'h23' }).formatToParts(new Date(ms));
+  const g = function(t) { const x = parts.find(function(p) { return p.type === t; }); return x ? x.value : ''; };
+  const dia = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(g('weekday'));
+  return { dia: dia, min: parseInt(g('hour')) * 60 + parseInt(g('minute')), data: g('year') + '-' + g('month') + '-' + g('day') };
+}
+function _turnosDoDia(cfg, dia) {
+  const d = cfg && cfg.dias && cfg.dias[String(dia)];
+  if (!d || !d.aberto) return [];
+  return (d.turnos || []).map(function(t) { return { ini: _minutosHHMM(t && t.ini), fim: _minutosHHMM(t && t.fim) }; }).filter(function(t) { return t.ini !== null && t.fim !== null && t.ini !== t.fim; });
+}
+function _hhmm(min) { return String(Math.floor(min / 60)).padStart(2, '0') + ':' + String(min % 60).padStart(2, '0'); }
+// Proxima abertura a partir de agora: { texto: 'hoje às 18:00' | 'amanhã às 11:00' | 'segunda às 11:00' } ou null
+function _proximaAbertura(cfg, agoraMs) {
+  const sp = _relogioSP(agoraMs);
+  for (let k = 0; k <= 7; k++) {
+    const dia = (sp.dia + k) % 7;
+    const inicios = _turnosDoDia(cfg, dia).map(function(t) { return t.ini; }).filter(function(ini) { return k > 0 || ini > sp.min; }).sort(function(a, b) { return a - b; });
+    if (inicios.length) return (k === 0 ? 'hoje' : k === 1 ? 'amanhã' : DIAS_SEMANA[dia]) + ' às ' + _hhmm(inicios[0]);
+  }
+  return null;
+}
+function estadoFuncionamento(cfg, agoraMs) {
+  agoraMs = agoraMs || Date.now();
+  const r = { usando_horario: !!(cfg && cfg.ativo), aberto_agora: true, motivo: 'horario_desligado', proxima_abertura: null, manual: (cfg && cfg.manual) || null };
+  if (!r.usando_horario) { r.manual = null; return r; }
+  const sp = _relogioSP(agoraMs);
+  if (cfg.manual === 'fechado') { r.aberto_agora = false; r.motivo = 'fechado_manual'; }
+  else if (cfg.manual === 'aberto') { r.aberto_agora = true; r.motivo = 'aberto_manual'; }
+  else {
+    const ontem = (sp.dia + 6) % 7;
+    const dentroHoje = _turnosDoDia(cfg, sp.dia).some(function(t) { return t.fim > t.ini ? (sp.min >= t.ini && sp.min < t.fim) : (sp.min >= t.ini); });
+    const dentroOntem = _turnosDoDia(cfg, ontem).some(function(t) { return t.fim < t.ini && sp.min < t.fim; });
+    if (dentroHoje || dentroOntem) { r.aberto_agora = true; r.motivo = 'dentro_do_horario'; }
+    else { r.aberto_agora = false; r.motivo = (cfg.dias && cfg.dias[String(sp.dia)] && cfg.dias[String(sp.dia)].aberto) ? 'fora_do_horario' : 'dia_fechado'; }
+  }
+  if (!r.aberto_agora && r.motivo !== 'fechado_manual') r.proxima_abertura = _proximaAbertura(cfg, agoraMs);
+  r.mensagem = r.aberto_agora ? null : ('A Flash Drop está fechada agora.' + (r.proxima_abertura ? ' Abrimos ' + r.proxima_abertura + '.' : ''));
+  return r;
+}
+async function _configFuncionamento() {
+  try { const r = await pool.query('SELECT funcionamento FROM settings WHERE id=1'); const v = r.rows[0] && r.rows[0].funcionamento; return (typeof v === 'string' ? JSON.parse(v) : v) || null; } catch (e) { return null; }
+}
+function _requisicaoDoAdmin(req) {
+  try { const h = req.headers['authorization']; const t = h && h.split(' ')[1]; if (!t) return false; const dec = jwt.verify(t, process.env.JWT_SECRET || 'flashdrop_secret_2024'); return !!(dec && dec.role === 'admin'); } catch (e) { return false; }
+}
+// Valida e normaliza o que o admin enviou
+function _normalizarFuncionamento(b) {
+  if (!b || typeof b !== 'object') throw new Error('configuracao invalida');
+  const out = { ativo: b.ativo === true, dias: {}, manual: (b.manual === 'fechado' || b.manual === 'aberto') ? b.manual : null };
+  for (let d = 0; d < 7; d++) {
+    const x = (b.dias && b.dias[String(d)]) || {};
+    const turnos = (Array.isArray(x.turnos) ? x.turnos : []).slice(0, 2).map(function(t, i) {
+      const ini = String((t && t.ini) || '').trim(), fim = String((t && t.fim) || '').trim();
+      if (!ini && !fim) return null;
+      if (_minutosHHMM(ini) === null || _minutosHHMM(fim) === null) throw new Error(DIAS_SEMANA[d] + ', turno ' + (i + 1) + ': informe início e fim no formato HH:MM.');
+      if (ini === fim) throw new Error(DIAS_SEMANA[d] + ', turno ' + (i + 1) + ': início e fim iguais.');
+      return { ini: _hhmm(_minutosHHMM(ini)), fim: _hhmm(_minutosHHMM(fim)) };
+    }).filter(Boolean);
+    if (x.aberto === true && !turnos.length) throw new Error(DIAS_SEMANA[d] + ' está marcado como aberto: informe pelo menos 1 turno.');
+    out.dias[String(d)] = { aberto: x.aberto === true, turnos: turnos };
+  }
+  return out;
+}
+app.get('/funcionamento', async (req, res) => {
+  try { res.json(estadoFuncionamento(await _configFuncionamento(), Date.now())); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/funcionamento/config', async (req, res) => {
+  const cfg = await _configFuncionamento();
+  res.json({ config: cfg, estado: estadoFuncionamento(cfg, Date.now()) });
+});
+app.put('/funcionamento/config', authMiddleware, async (req, res) => {
+  try {
+    if (!req.user || req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas o admin pode alterar o horário de funcionamento.' });
+    let cfg; try { cfg = _normalizarFuncionamento(req.body); } catch (eVal) { return res.status(400).json({ error: eVal.message }); }
+    await pool.query('UPDATE settings SET funcionamento=$1 WHERE id=1', [JSON.stringify(cfg)]);
+    console.log('[FUNCIONAMENTO] Configuracao salva por ' + (req.user.username || req.user.id) + ': ativo=' + cfg.ativo + ', manual=' + (cfg.manual || '-'));
+    res.json({ ok: true, config: cfg, estado: estadoFuncionamento(cfg, Date.now()) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Bloqueio na criacao de pedido (loja/cliente). O admin (token de admin) pode criar mesmo fechado.
+// Pedido que ja chega com pagamento PIX gerado (cardapio/entrega direta) passa: a checagem foi feita antes de gerar o
+// pagamento (checkout-pedido no servidor; entrega direta na tela), para o cliente nao pagar e ficar sem pedido.
+async function _bloqueioFuncionamento(req) {
+  if (_requisicaoDoAdmin(req)) return null;
+  if (req.body && req.body.pix_payment_id) return null;
+  const est = estadoFuncionamento(await _configFuncionamento(), Date.now());
+  return est.aberto_agora ? null : est;
+}
+
 // ===== ROBO DE PAGAMENTOS =====
 // Ligado pelo admin (settings.robo_pagamentos). Com o robo ligado, Dinheiro e Cartao por aproximacao so ficam
 // disponiveis se houver pelo menos 1 motoboy online, nao bloqueado, sem penalidade vigente, cujo saldo disponivel
@@ -1036,6 +1133,8 @@ app.put('/settings/robo-pagamentos', authMiddleware, async (req, res) => {
 
 app.post('/orders', async (req, res) => {
   const d = req.body;
+  // Horario de funcionamento: fechado -> nao cria pedido (exceto admin)
+  try { const fech = await _bloqueioFuncionamento(req); if (fech) return res.status(403).json({ error: fech.mensagem, fechado: true, proxima_abertura: fech.proxima_abertura }); } catch (eFunc) { console.error('[FUNCIONAMENTO] Erro ao verificar:', eFunc.message); }
   // Robo de pagamentos: recusa dinheiro/cartao por aproximacao quando nenhum motoboy cobre o pedido
   if (d && (d.tipo_pagamento === 'dinheiro' || d.tipo_pagamento === 'cartao_aproximacao')) {
     try {
@@ -3472,6 +3571,7 @@ async function calcularLimiteEmprestimo(lojaId) { const r = await pool.query('SE
 // Retorna: { checkout_url, preference_id }
 app.post('/mercadopago/checkout-pedido', async (req, res) => {
 try {
+try { const fechMp = await _bloqueioFuncionamento(req); if (fechMp) return res.status(403).json({ error: fechMp.mensagem, fechado: true, proxima_abertura: fechMp.proxima_abertura }); } catch (eFuncMp) { console.error('[FUNCIONAMENTO] Erro ao verificar (MP):', eFuncMp.message); }
 const { loja_id, itens, totalItens, taxaEntrega, totalFinal, nomeCliente } = req.body;
 if (!loja_id) return res.status(400).json({ error: 'loja_id obrigatorio' });
 if (!totalFinal || parseFloat(totalFinal) <= 0) return res.status(400).json({ error: 'Valor invalido' });
