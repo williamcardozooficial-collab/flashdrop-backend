@@ -12,7 +12,6 @@ module.exports = function instalarRotaIfood(ctx) {
   const { app, pool, axios, bot, PORT, ADMIN_ID } = ctx;
   const STATUS_ATIVOS = ['aceito', 'na_loja', 'coletado', 'no_cliente'];
   const ANTES_DA_COLETA = ['em_preparo', 'rota_espera', 'pendente', 'aceito', 'na_loja'];
-  const PRAZO_NAO_ATENDE_MIN = 15;
   const r2 = (v) => Math.round((parseFloat(v) || 0) * 100) / 100;
   const soma = (lista, campo) => r2(lista.reduce((a, p) => a + (parseFloat(p[campo]) || 0), 0));
   const fmtR = (v) => 'R$ ' + r2(v).toFixed(2).replace('.', ',');
@@ -58,6 +57,9 @@ module.exports = function instalarRotaIfood(ctx) {
       'ALTER TABLE settings ADD COLUMN IF NOT EXISTS rota_nao_atende_v15 BOOLEAN DEFAULT false',
       'UPDATE settings SET rota_nao_atende_auto_min=15, rota_nao_atende_v15=true WHERE id=1 AND rota_nao_atende_v15 IS NOT TRUE',
       'ALTER TABLE orders ADD COLUMN IF NOT EXISTS rota_nao_atende_auto_min INTEGER',
+      // Prazo da LOJA para decidir (contador do alerta), separado do gatilho: padrao 5 min. Cada pedido guarda o prazo que valeu
+      'ALTER TABLE settings ADD COLUMN IF NOT EXISTS rota_prazo_loja_min INTEGER DEFAULT 5',
+      'ALTER TABLE orders ADD COLUMN IF NOT EXISTS rota_nao_atende_prazo_min INTEGER',
       'UPDATE settings SET rota_valor_ponto=3, rota_preco_v2=true WHERE id=1 AND rota_preco_v2 IS NOT TRUE'
     ];
     for (const q of qs) { try { await pool.query(q); } catch (e) { console.error('[ROTA] coluna:', e.message); } }
@@ -65,6 +67,7 @@ module.exports = function instalarRotaIfood(ctx) {
   async function cfg() { const r = await pool.query('SELECT * FROM settings WHERE id=1'); return r.rows[0] || {}; }
   const rotaLigada = (c) => !!(c && c.rota_ifood_ativa === true);
   function valorPonto(c) { const v = parseFloat(c.rota_valor_ponto); return isNaN(v) || v < 0 ? 3 : v; }
+  function prazoLoja(c) { const v = parseInt(c.rota_prazo_loja_min); return isNaN(v) || v < 1 ? 5 : Math.min(v, 60); }
   function minNaoAtendeAuto(c) { const v = parseInt(c.rota_nao_atende_auto_min); return isNaN(v) || v < 1 ? 15 : Math.min(v, 120); }
   function maxPontos(c) { const v = parseInt(c.rota_max_pontos); return isNaN(v) || v < 2 ? 4 : Math.min(v, 10); }
   async function pedidosDaRota(rotaId, db) { const r = await (db || pool).query('SELECT * FROM orders WHERE rota_id=$1 ORDER BY rota_ordem NULLS LAST, id', [rotaId]); return r.rows; }
@@ -490,9 +493,10 @@ module.exports = function instalarRotaIfood(ctx) {
     if (!q || (q.papel === 'motoboy' && String(q.id) !== String(o.motoboy_id)) || q.papel === 'loja') throw erro('Esta entrega não está com você.', 403);
     if (!['coletado', 'no_cliente'].includes(o.status) || o.rota_retorno) throw erro('Só dá para avisar "cliente não atende" depois de coletar e antes de finalizar.', 409);
     if (o.rota_nao_atende_em) return res.json({ ok: true, ja_avisado: true });
-    await pool.query('UPDATE orders SET rota_nao_atende_em=NOW(), rota_nao_atende_admin=false WHERE id=$1 AND rota_nao_atende_em IS NULL', [o.id]);
-    ctx.registrarEvento(o.id, o.motoboy_id, o.motoboy_name, 'nao_atende', 'Motoboy avisou: cliente não atende. A loja tem 15 min para decidir.');
-    res.json({ ok: true, prazo_min: PRAZO_NAO_ATENDE_MIN });
+    const prazo = prazoLoja(await cfg());
+    await pool.query('UPDATE orders SET rota_nao_atende_em=NOW(), rota_nao_atende_admin=false, rota_nao_atende_prazo_min=$2 WHERE id=$1 AND rota_nao_atende_em IS NULL', [o.id, prazo]);
+    ctx.registrarEvento(o.id, o.motoboy_id, o.motoboy_name, 'nao_atende', 'Motoboy avisou: cliente não atende. A loja tem ' + prazo + ' min para decidir.');
+    res.json({ ok: true, prazo_min: prazo });
   }));
   async function valorRetorno(c, o) {
     const ps = vivos(await pedidosDaRota(o.rota_id)); const ultimo = ps[ps.length - 1] || o;
@@ -543,23 +547,23 @@ module.exports = function instalarRotaIfood(ctx) {
   // a entrega esta em coletado/no_cliente e a decisao recusa entrega finalizada).
   async function gatilhoNaoAtende() {
     try {
-      const c = await cfg(); const min = minNaoAtendeAuto(c);
+      const c = await cfg(); const min = minNaoAtendeAuto(c), prazo = prazoLoja(c);
       // Janela de 30 min depois do prazo: entrega parada ha muito mais tempo (ex.: de antes deste gatilho existir) fica como esta
       const limite = new Date(Date.now() - min * 60000).toISOString(), desde = new Date(Date.now() - (min + 30) * 60000).toISOString();
-      const r = await pool.query("UPDATE orders SET rota_nao_atende_em=NOW(), rota_nao_atende_admin=false, rota_nao_atende_auto_min=$2 WHERE rota_id IS NOT NULL AND status='no_cliente' AND t_no_cliente IS NOT NULL AND t_no_cliente < $1 AND t_no_cliente > $3 AND rota_nao_atende_em IS NULL AND rota_decisao IS NULL AND rota_retorno IS NULL RETURNING id, rota_id, motoboy_id, motoboy_name", [limite, min, desde]);
+      const r = await pool.query("UPDATE orders SET rota_nao_atende_em=NOW(), rota_nao_atende_admin=false, rota_nao_atende_auto_min=$2, rota_nao_atende_prazo_min=$4 WHERE rota_id IS NOT NULL AND status='no_cliente' AND t_no_cliente IS NOT NULL AND t_no_cliente < $1 AND t_no_cliente > $3 AND rota_nao_atende_em IS NULL AND rota_decisao IS NULL AND rota_retorno IS NULL RETURNING id, rota_id, motoboy_id, motoboy_name", [limite, min, desde, prazo]);
       r.rows.forEach((o) => {
-        ctx.registrarEvento(o.id, o.motoboy_id, o.motoboy_name, 'nao_atende', 'No cliente há ' + min + ' min sem finalizar: loja chamada para decidir (automático). A loja tem 15 min.');
+        ctx.registrarEvento(o.id, o.motoboy_id, o.motoboy_name, 'nao_atende', 'No cliente há ' + min + ' min sem finalizar: loja chamada para decidir (automático). A loja tem ' + prazo + ' min.');
         if (o.motoboy_id) pushMotoboy(o.motoboy_id, '⏱️ Pedido #' + o.id + ': a loja foi chamada', 'Você está no cliente há ' + min + ' min e ainda não finalizou. A loja foi chamada para decidir se o pedido fica com você ou volta para a loja. Se conseguir entregar, finalize normalmente.');
         console.log('[ROTA] Pedido #' + o.id + ': ' + min + ' min no cliente sem finalizar -> decisão da loja (automático).');
       });
     } catch (e) { console.error('[ROTA] gatilho nao atende:', e.message); }
   }
-  // Passou o prazo de 15 min sem a loja decidir: vai para o admin
+  // Passou o prazo da loja (o que valeu para o pedido; padrao 5 min, antigos 15) sem decisao: vai para o admin
   async function verificarNaoAtende() {
     await gatilhoNaoAtende();
     try {
-      const r = await pool.query("UPDATE orders SET rota_nao_atende_admin=true WHERE rota_nao_atende_em IS NOT NULL AND rota_decisao IS NULL AND rota_nao_atende_admin IS NOT TRUE AND rota_nao_atende_em < NOW() - ($1 * INTERVAL '1 minute') AND status IN ('coletado','no_cliente') RETURNING id, rota_id, loja_name, loja_user, motoboy_name", [PRAZO_NAO_ATENDE_MIN]);
-      r.rows.forEach((o) => { avisarAdmin('⏰ Cliente não atende - a loja não decidiu em 15 min\nPedido #' + o.id + ' (rota iFood #' + o.rota_id + ')\nLoja: ' + (ctx.txtPuro(o.loja_name) || o.loja_user) + '\nMotoboy: ' + (o.motoboy_name || '-') + '\nResolva no painel admin (aba Rota iFood).'); console.log('[ROTA] Pedido #' + o.id + ': cliente não atende sem decisão da loja em 15 min -> admin.'); });
+      const r = await pool.query("UPDATE orders SET rota_nao_atende_admin=true WHERE rota_nao_atende_em IS NOT NULL AND rota_decisao IS NULL AND rota_nao_atende_admin IS NOT TRUE AND rota_nao_atende_em < NOW() - (COALESCE(rota_nao_atende_prazo_min, 15) * INTERVAL '1 minute') AND status IN ('coletado','no_cliente') RETURNING id, rota_id, loja_name, loja_user, motoboy_name, COALESCE(rota_nao_atende_prazo_min, 15) AS prazo");
+      r.rows.forEach((o) => { avisarAdmin('⏰ Cliente não atende - a loja não decidiu em ' + o.prazo + ' min\nPedido #' + o.id + ' (rota iFood #' + o.rota_id + ')\nLoja: ' + (ctx.txtPuro(o.loja_name) || o.loja_user) + '\nMotoboy: ' + (o.motoboy_name || '-') + '\nResolva no painel admin (aba Rota iFood).'); console.log('[ROTA] Pedido #' + o.id + ': cliente não atende sem decisão da loja em ' + o.prazo + ' min -> admin.'); });
     } catch (e) { console.error('[ROTA] verificar nao atende:', e.message); }
   }
 
@@ -628,9 +632,9 @@ module.exports = function instalarRotaIfood(ctx) {
     const c = await cfg();
     const ativas = (await pool.query("SELECT * FROM orders WHERE rota_id IN (SELECT DISTINCT rota_id FROM orders WHERE rota_id IS NOT NULL AND status IN ('em_preparo','rota_espera','pendente','aceito','na_loja','coletado','no_cliente')) ORDER BY rota_id DESC, rota_ordem NULLS LAST, id")).rows;
     const rotas = {}; ativas.forEach((o) => { (rotas[o.rota_id] = rotas[o.rota_id] || []).push(o); });
-    const casos = (await pool.query("SELECT id, rota_id, loja_name, loja_user, motoboy_name, nome_cliente, rota_nao_atende_em, rota_nao_atende_admin, rota_nao_atende_auto_min, status FROM orders WHERE rota_nao_atende_em IS NOT NULL AND rota_decisao IS NULL AND status IN ('coletado','no_cliente') ORDER BY rota_nao_atende_em")).rows;
+    const casos = (await pool.query("SELECT id, rota_id, loja_name, loja_user, motoboy_name, nome_cliente, rota_nao_atende_em, rota_nao_atende_admin, rota_nao_atende_auto_min, rota_nao_atende_prazo_min, status FROM orders WHERE rota_nao_atende_em IS NOT NULL AND rota_decisao IS NULL AND status IN ('coletado','no_cliente') ORDER BY rota_nao_atende_em")).rows;
     const socorros = (await pool.query("SELECT id, name, custom_id, socorros_count FROM users WHERE role='motoboy' AND COALESCE(socorros_count,0) > 0 ORDER BY socorros_count DESC, name")).rows;
-    res.json({ config: { ativa: rotaLigada(c), valor_ponto: valorPonto(c), max_pontos: maxPontos(c), nao_atende_min: minNaoAtendeAuto(c) }, rotas: Object.keys(rotas).map((k) => ({ rota_id: parseInt(k), entregas: rotas[k] })).sort((a, b) => b.rota_id - a.rota_id), casos_nao_atende: casos, motoboys_socorros: socorros });
+    res.json({ config: { ativa: rotaLigada(c), valor_ponto: valorPonto(c), max_pontos: maxPontos(c), nao_atende_min: minNaoAtendeAuto(c), prazo_loja_min: prazoLoja(c) }, rotas: Object.keys(rotas).map((k) => ({ rota_id: parseInt(k), entregas: rotas[k] })).sort((a, b) => b.rota_id - a.rota_id), casos_nao_atende: casos, motoboys_socorros: socorros });
   }));
   app.put('/settings/rota-ifood', h(async (req, res) => {
     const q = exigirAdmin(req, 'Só o admin pode mudar a Rota iFood.');
@@ -642,9 +646,11 @@ module.exports = function instalarRotaIfood(ctx) {
     if (isNaN(mp) || mp < 2 || mp > 10) throw erro('Máximo de pontos inválido (2 a 10).');
     const na = b.nao_atende_min === undefined ? minNaoAtendeAuto(c) : parseInt(b.nao_atende_min);
     if (isNaN(na) || na < 1 || na > 120) throw erro('Tempo do "cliente não atende" automático inválido (1 a 120 min).');
-    const r = await pool.query('UPDATE settings SET rota_ifood_ativa=$1, rota_valor_ponto=$2, rota_max_pontos=$3, rota_nao_atende_auto_min=$4 WHERE id=1 RETURNING rota_ifood_ativa, rota_valor_ponto, rota_max_pontos, rota_nao_atende_auto_min', [ativa, vp, mp, na]);
+    const pl = b.prazo_loja_min === undefined ? prazoLoja(c) : parseInt(b.prazo_loja_min);
+    if (isNaN(pl) || pl < 1 || pl > 60) throw erro('Prazo da loja para decidir inválido (1 a 60 min).');
+    const r = await pool.query('UPDATE settings SET rota_ifood_ativa=$1, rota_valor_ponto=$2, rota_max_pontos=$3, rota_nao_atende_auto_min=$4, rota_prazo_loja_min=$5 WHERE id=1 RETURNING rota_ifood_ativa, rota_valor_ponto, rota_max_pontos, rota_nao_atende_auto_min, rota_prazo_loja_min', [ativa, vp, mp, na, pl]);
     console.log('[ROTA] Configuração: ligada=' + ativa + ', valor por ponto=' + vp + ', máx pontos=' + mp + ', não atende automático=' + na + ' min');
-    res.json({ ok: true, ativa: r.rows[0].rota_ifood_ativa, valor_ponto: parseFloat(r.rows[0].rota_valor_ponto), max_pontos: r.rows[0].rota_max_pontos, nao_atende_min: r.rows[0].rota_nao_atende_auto_min });
+    res.json({ ok: true, ativa: r.rows[0].rota_ifood_ativa, valor_ponto: parseFloat(r.rows[0].rota_valor_ponto), max_pontos: r.rows[0].rota_max_pontos, nao_atende_min: r.rows[0].rota_nao_atende_auto_min, prazo_loja_min: r.rows[0].rota_prazo_loja_min });
   }));
 
   const intervalo = setInterval(verificarNaoAtende, 60 * 1000); if (intervalo.unref) intervalo.unref();
