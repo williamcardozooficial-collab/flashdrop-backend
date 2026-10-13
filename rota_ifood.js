@@ -623,6 +623,8 @@ module.exports = function instalarRotaIfood(ctx) {
     pushMotoboy(mbId, '🆘 Socorro a caminho', 'As ' + faltam.length + ' entregas que faltavam foram passadas para outro motoboy. Aguarde no local para entregar os pedidos a ele.');
     console.log('[ROTA] Socorro: rota #' + rotaId + ' -> nova rota #' + novaRota + ' (' + faltam.length + ' entregas, ' + fmtR(cot.total) + ' pago pelo caixa).');
     avisarRotaDisponivel(novaRota, 'socorro');
+    // a rota original terminou (o que faltava foi para o socorro): promocoes contam 1 para quem entregou nela
+    if (ctx.premiacaoRota) await ctx.premiacaoRota(rotaId);
     res.json({ ok: true, rota_nova: novaRota, ids: novos, total: cot.total });
   }));
 
