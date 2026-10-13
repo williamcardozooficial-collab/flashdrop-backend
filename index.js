@@ -4019,7 +4019,10 @@ async function _confirmarEntregaIfoodRobo(localizador, codigoCliente, orderId) {
         const btn = btns.find(b => b.textContent.includes('Confirmar') || b.type === 'submit');
         if (btn) btn.click();
       });
-      await page.waitForTimeout(3000);
+      // espera a tela do codigo sair (o site troca de pagina ao confirmar) ou ate 8 s
+      const urlCodigo = page.url();
+      try { await page.waitForFunction((u) => location.href !== u, { timeout: 8000 }, urlCodigo); } catch (eEspera) {}
+      await page.waitForTimeout(1500);
       // Verifica sucesso
       // Obs: palavras genericas como "sucesso"/"confirmado" tambem aparecem em
       // mensagens de ERRO do proprio site do iFood (ex: "pedido ja foi confirmado
@@ -4032,12 +4035,17 @@ async function _confirmarEntregaIfoodRobo(localizador, codigoCliente, orderId) {
         const body = bodyRaw.toLowerCase();
         const frasesErro = ['nao foi possivel', 'não foi possível', 'invalido', 'inválido', 'incorreto', 'incorreta', 'nao encontrado', 'não encontrado', 'ja foi confirmado', 'já foi confirmado', 'expirou', 'expirado', 'tente novamente', 'erro ao'];
         const temErro = frasesErro.some(f => body.includes(f));
-        const fraseForteSucesso = body.includes('entrega confirmada');
-        const fraseFracaSucesso = body.includes('sucesso') || body.includes('confirmado');
-        return { temErro, fraseForteSucesso, fraseFracaSucesso };
+        // 'finalizada/entregue' (o site pede para "finalizar a entrega") e 'ja foi confirmado/finalizado' (confirmado antes,
+        // ex.: tentativa anterior que confirmou no iFood mas caiu antes de finalizar aqui) tambem contam como entrega confirmada
+        const fraseForteSucesso = ['entrega confirmada', 'entrega finalizada', 'pedido finalizado', 'pedido entregue', 'entregue com sucesso', 'finalizada com sucesso', 'confirmada com sucesso'].some(f => body.includes(f));
+        const jaConfirmadoAntes = ['ja foi confirmad', 'já foi confirmad', 'ja foi finalizad', 'já foi finalizad', 'ja foi entregue', 'já foi entregue'].some(f => body.includes(f));
+        const fraseFracaSucesso = body.includes('sucesso') || body.includes('confirmado') || body.includes('finalizad');
+        return { temErro, fraseForteSucesso, fraseFracaSucesso, jaConfirmadoAntes, url: location.href, texto: bodyRaw.replace(/\s+/g, ' ').trim().slice(0, 300) };
       });
+      // registro para diagnostico (a tela final do iFood nao pode ser vista sem uma entrega real)
+      console.log('[iFood bot] resultado pedido #' + (orderId || '-') + ': ' + JSON.stringify(resultadoPagina));
       await page.close();
-      const sucesso = resultadoPagina.fraseForteSucesso || (resultadoPagina.fraseFracaSucesso && !resultadoPagina.temErro);
+      const sucesso = resultadoPagina.fraseForteSucesso || resultadoPagina.jaConfirmadoAntes || (resultadoPagina.fraseFracaSucesso && !resultadoPagina.temErro);
       if (sucesso) {
         // Registra no proprio pedido que a confirmacao no iFood realmente aconteceu.
         // Isso e o que a rota PUT /orders/:id exige antes de aceitar finalizar um
