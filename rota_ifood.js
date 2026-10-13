@@ -29,7 +29,7 @@ module.exports = function instalarRotaIfood(ctx) {
   async function criarColunas() {
     const qs = [
       'ALTER TABLE settings ADD COLUMN IF NOT EXISTS rota_ifood_ativa BOOLEAN DEFAULT false',
-      'ALTER TABLE settings ADD COLUMN IF NOT EXISTS rota_valor_ponto DECIMAL DEFAULT 4',
+      'ALTER TABLE settings ADD COLUMN IF NOT EXISTS rota_valor_ponto DECIMAL DEFAULT 3',
       'ALTER TABLE settings ADD COLUMN IF NOT EXISTS rota_max_pontos INTEGER DEFAULT 4',
       'ALTER TABLE orders ADD COLUMN IF NOT EXISTS rota_id INTEGER',
       'ALTER TABLE orders ADD COLUMN IF NOT EXISTS rota_ordem INTEGER',
@@ -49,13 +49,16 @@ module.exports = function instalarRotaIfood(ctx) {
       'ALTER TABLE orders ADD COLUMN IF NOT EXISTS rota_socorro_pedido_em TIMESTAMP',
       'ALTER TABLE orders ADD COLUMN IF NOT EXISTS rota_socorro_info TEXT',
       'ALTER TABLE users ADD COLUMN IF NOT EXISTS socorros_count INTEGER DEFAULT 0',
-      'CREATE INDEX IF NOT EXISTS idx_orders_rota_id ON orders(rota_id)'
+      'CREATE INDEX IF NOT EXISTS idx_orders_rota_id ON orders(rota_id)',
+      // Formula nova do preco (13/10): o valor por ponto passa a R$ 3,00 UMA vez (depois continua ajustavel no admin)
+      'ALTER TABLE settings ADD COLUMN IF NOT EXISTS rota_preco_v2 BOOLEAN DEFAULT false',
+      'UPDATE settings SET rota_valor_ponto=3, rota_preco_v2=true WHERE id=1 AND rota_preco_v2 IS NOT TRUE'
     ];
     for (const q of qs) { try { await pool.query(q); } catch (e) { console.error('[ROTA] coluna:', e.message); } }
   }
   async function cfg() { const r = await pool.query('SELECT * FROM settings WHERE id=1'); return r.rows[0] || {}; }
   const rotaLigada = (c) => !!(c && c.rota_ifood_ativa === true);
-  function valorPonto(c) { const v = parseFloat(c.rota_valor_ponto); return isNaN(v) || v < 0 ? 4 : v; }
+  function valorPonto(c) { const v = parseFloat(c.rota_valor_ponto); return isNaN(v) || v < 0 ? 3 : v; }
   function maxPontos(c) { const v = parseInt(c.rota_max_pontos); return isNaN(v) || v < 2 ? 4 : Math.min(v, 10); }
   async function pedidosDaRota(rotaId, db) { const r = await (db || pool).query('SELECT * FROM orders WHERE rota_id=$1 ORDER BY rota_ordem NULLS LAST, id', [rotaId]); return r.rows; }
   const vivos = (ps) => ps.filter((p) => p.status !== 'cancelado').sort((a, b) => (a.rota_ordem || 99) - (b.rota_ordem || 99));
@@ -66,10 +69,13 @@ module.exports = function instalarRotaIfood(ctx) {
     const lim = parseFloat(c.km_limite_faixa) || 0, acima = parseFloat(c.price_per_km_acima) || 0;
     return (lim > 0 && acima > 0 && km > lim) ? acima : (parseFloat(c.price_per_km) || 2.5);
   }
-  // 1o ponto: preco normal da tele (arrancada + km, com minimo)
-  function precoPrimeiro(c, km) { const min = parseFloat(c.min_fee) || 8, arr = parseFloat(c.arrancada) || 5; return ceil(Math.max(min, arr + km * tarifaKm(c, km))); }
-  // 2o ponto em diante: km do trecho (sem arrancada) + valor por ponto
-  function precoExtra(c, km) { return ceil(km * tarifaKm(c, km) + valorPonto(c)); }
+  // Preco da rota (decisao do William, 13/10): arrancada + km TOTAL (soma dos trechos, na ordem da loja) x tarifa do km
+  // (faixa acima do limite como na tele normal, pelo km total) + valor por ponto para cada cliente a partir do 2o.
+  // Sem minimo por trecho: o minimo da tele normal vale so para o total. Arredonda uma vez, no total, para cima ao real.
+  function precoRota(c, kmTotal, n) {
+    const min = parseFloat(c.min_fee) || 8, arr = parseFloat(c.arrancada) || 5;
+    return ceil(Math.max(min, arr + kmTotal * tarifaKm(c, kmTotal) + valorPonto(c) * Math.max(0, n - 1)));
+  }
   function comissaoDe(c, total) {
     const raw = parseFloat(c.commission) || 0;
     const v = c.commission_type === 'percentual' ? Math.max(total * raw / 100, parseFloat(c.commission_min) || 0) : raw;
@@ -126,10 +132,11 @@ module.exports = function instalarRotaIfood(ctx) {
   // Cotacao: origem -> p1 -> p2 ... (na ordem da loja). extrasFixos: no recalculo usa as taxas da criacao.
   async function cotar(c, origem, pontos, extrasFixos) {
     const kms = await trechosKm([origem].concat(pontos.slice(0, -1)), pontos);
-    const precos = kms.map((km, i) => (i === 0 ? precoPrimeiro(c, km) : precoExtra(c, km)));
+    const kmTotal = r2(kms.reduce((a, b) => a + b, 0));
+    const base = precoRota(c, kmTotal, kms.length);
     const ext = extrasFixos || taxasExtrasAgora(c);
-    const total = r2(precos.reduce((a, b) => a + b, 0) + ext.noturna + ext.chuva);
-    return { kms, precos, extras: ext, total, comissao: comissaoDe(c, total), km_total: r2(kms.reduce((a, b) => a + b, 0)) };
+    const total = r2(base + ext.noturna + ext.chuva); // noturna/chuva: uma vez por rota
+    return { kms, base, extras: ext, total, comissao: comissaoDe(c, total), km_total: kmTotal };
   }
   // Valor de cada entrega: total e comissao divididos igual; ganho do motoboy = valor - comissao
   function porEntrega(cot) { const n = cot.kms.length, vt = dividir(cot.total, n), cm = dividir(cot.comissao, n); return vt.map((v, i) => ({ valor_total: v, comissao: cm[i], valor_motoboy: r2(v - cm[i]), distancia: cot.kms[i] })); }
