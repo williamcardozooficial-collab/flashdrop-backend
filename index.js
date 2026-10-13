@@ -584,6 +584,22 @@ async function _enviarPushPenalidade(motoboyId, motivo, p, temAtivo) {
     [{ to: token, title: '⚠️ Penalidade aplicada', body: corpo, sound: 'default', priority: 'high', data: { tipo: 'penalidade' } }],
     { headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, timeout: 10000 });
 }
+// Push para o motoboy quando ele chega no cliente (manual ou automatico): orienta a falar DIRETO com a loja em caso de problema.
+// Notificacao comum (sem botao "Aceitar", sem orderId e sem abrirApp), igual ao aviso de penalidade.
+function _fmtTelefoneBR(t) { const d = String(t || '').replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, ''); if (d.length === 11) return '(' + d.slice(0, 2) + ') ' + d.slice(2, 3) + ' ' + d.slice(3, 7) + '-' + d.slice(7); if (d.length === 10) return '(' + d.slice(0, 2) + ') ' + d.slice(2, 6) + '-' + d.slice(6); return String(t || '').trim(); }
+async function _enviarPushChegadaCliente(order) {
+  if (!order || !order.motoboy_id) return;
+  const tRes = await pool.query('SELECT push_token FROM users WHERE id=$1', [order.motoboy_id]);
+  const token = tRes.rows.length > 0 ? tRes.rows[0].push_token : null;
+  if (!token) return;
+  let lojaNome = _txtPuro(order.loja_name) || order.loja_user || 'loja'; let lojaTel = order.telefone_loja || null;
+  try { const lRes = await pool.query('SELECT name, phone FROM users WHERE username=$1', [order.loja_user]); if (lRes.rows.length) { lojaNome = _txtPuro(order.loja_name) || lRes.rows[0].name || lojaNome; lojaTel = lojaTel || lRes.rows[0].phone; } } catch (eLoja) {}
+  const telFmt = _fmtTelefoneBR(lojaTel);
+  const corpo = 'Algum problema com a entrega? Fale direto com a loja: ' + lojaNome + (telFmt ? ' \u2013 ' + telFmt : ' (fale com a loja pelo telefone dela)');
+  await axios.post('https://exp.host/--/api/v2/push/send',
+    [{ to: token, title: '\uD83C\uDFE0 Chegou no cliente \u2013 pedido #' + order.id, body: corpo, sound: 'default', priority: 'high', data: { tipo: 'chegada_cliente' } }],
+    { headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, timeout: 10000 });
+}
 async function _motoboyTemPedidoAtivo(motoboyId) { const r = await pool.query(SQL_PEDIDO_ATIVO_MOTOBOY, [motoboyId]); return (parseInt(r.rows[0].count) || 0) > 0; }
 async function aplicarPenalidadeMotoboy(motoboyId, motivo) {
   const hoje = _hojeSP();
@@ -1974,6 +1990,9 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
           }
       } catch(eLojaBotCol) { console.error('[LOJA BOT] Erro geral coletado mb:', eLojaBotCol.message); }  }
   // Notificar cliente via WhatsApp quando motoboy chegou no cliente
+  if (fields.status === 'no_cliente' && order && order.motoboy_id) {
+    _enviarPushChegadaCliente(order).catch(function (ePushCh) { console.error('[CHEGADA-CLIENTE] Erro push motoboy:', ePushCh.message); });
+  }
   if (fields.status === 'no_cliente' && order.tipo_pagamento !== 'ifood') {
     try {
       const botUrlNoCliente = process.env.BOT_URL;
