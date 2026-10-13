@@ -1360,8 +1360,24 @@ app.put('/orders/:id', async (req, res) => {
     // qualquer tela que tente finalizar (app do motoboy, painel admin, etc),
     // fechando a brecha de finalizar um pedido iFood com codigo errado ou
     // sem confirmar de verdade no iFood.
+    // O app do motoboy (Android) nao tem a etapa de confirmacao no iFood: ele so manda o codigo do cliente em observacao_entrega.
+    // Nesse caso o servidor confirma no iFood aqui mesmo (mesmo robo da pagina web) e so finaliza se o iFood confirmar.
     if (fields.status === 'entregue' && prevOrderRes.rows.length > 0 && prevOrderRes.rows[0].tipo_pagamento === 'ifood' && !prevOrderRes.rows[0].ifood_confirmado_em) {
-      return res.status(400).json({ error: 'Este pedido iFood ainda nao teve a entrega confirmada no site do iFood. Confirme a entrega (localizador + codigo do cliente) antes de finalizar.' });
+      const codIfood = String(fields.observacao_entrega || '').replace(/\D/g, '');
+      if (codIfood.length !== 4) {
+        return res.status(400).json({ error: 'Este pedido iFood ainda nao teve a entrega confirmada no site do iFood. Confirme a entrega (localizador + codigo do cliente) antes de finalizar.' });
+      }
+      const locRes = await pool.query('SELECT ifood_localizador FROM orders WHERE id=$1', [req.params.id]);
+      const locIfood = locRes.rows.length ? locRes.rows[0].ifood_localizador : null;
+      if (!locIfood) {
+        return res.status(400).json({ error: 'Este pedido iFood esta sem o localizador cadastrado. Avise a loja/suporte antes de finalizar.' });
+      }
+      console.log('[iFood] Confirmando no iFood ao finalizar o pedido #' + req.params.id + ' (sem confirmacao previa)');
+      const confIfood = await _confirmarEntregaIfoodRobo(locIfood, codIfood, req.params.id);
+      if (!confIfood.ok) {
+        console.log('[iFood] Pedido #' + req.params.id + ' NAO confirmado no iFood: ' + confIfood.erro);
+        return res.status(confIfood.status === 409 ? 409 : 400).json({ error: 'iFood nao confirmou a entrega: ' + confIfood.erro });
+      }
     }
 
     // Para status que tem guarda anti-duplicidade de notificacao (na_loja/coletado/
@@ -3960,78 +3976,95 @@ app.post('/ifood/verificar-localizador', async (req, res) => {
 // POST /ifood/confirmar-entrega
 // Body: { localizador: "12345678", codigoCliente: "1234", orderId: 123 }
 // Retorna: { ok: true } ou { ok: false, erro: "..." }
-app.post('/ifood/confirmar-entrega', async (req, res) => {
-  const { localizador, codigoCliente, orderId } = req.body;
-  if (!localizador || localizador.length !== 8) return res.status(400).json({ ok: false, erro: 'Localizador deve ter 8 digitos' });
-  if (!codigoCliente || codigoCliente.length !== 4) return res.status(400).json({ ok: false, erro: 'Codigo do cliente deve ter 4 digitos' });
+// Confirma a entrega no site do iFood (Entrega Propria) com o robo: localizador (8 digitos) + codigo do cliente (4 digitos).
+// Usado pela rota abaixo (pagina web do motoboy) e pelo PUT /orders/:id ao finalizar (app do motoboy, que nao tem essa etapa).
+// So grava ifood_confirmado_em quando a confirmacao realmente aconteceu. Um pedido por vez (evita dois robos no mesmo pedido).
+const _ifoodConfirmando = new Set();
+async function _confirmarEntregaIfoodRobo(localizador, codigoCliente, orderId) {
+  localizador = String(localizador || '').replace(/\D/g, ''); codigoCliente = String(codigoCliente || '').replace(/\D/g, '');
+  if (localizador.length !== 8) return { ok: false, status: 400, erro: 'Localizador deve ter 8 digitos' };
+  if (codigoCliente.length !== 4) return { ok: false, status: 400, erro: 'Codigo do cliente deve ter 4 digitos' };
+  const chave = String(orderId || localizador);
+  if (_ifoodConfirmando.has(chave)) return { ok: false, status: 409, erro: 'A confirmacao deste pedido no iFood ja esta em andamento. Aguarde alguns segundos.' };
+  _ifoodConfirmando.add(chave);
   let page;
   try {
-    const browser = await getBrowser();
-    page = await browser.newPage();
-    await page.goto('https://confirmacao-entrega-propria.ifood.com.br/numero-pedido', { waitUntil: 'networkidle2', timeout: 30000 });
-    // Passo 1: digita localizador
-    const inputs1 = await page.$$('input');
-    const digits1 = localizador.split('');
-    for (let i = 0; i < 8 && i < inputs1.length; i++) {
-      await inputs1[i].click();
-      await inputs1[i].type(digits1[i]);
-      await page.waitForTimeout(100);
-    }
-    await page.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll('button'));
-      const btn = btns.find(b => b.textContent.includes('Continuar') || b.type === 'submit');
-      if (btn) btn.click();
-    });
-    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 });
-    // Passo 2: digita codigo do cliente (4 digitos)
-    const inputs2 = await page.$$('input');
-    const digits2 = codigoCliente.split('');
-    for (let i = 0; i < 4 && i < inputs2.length; i++) {
-      await inputs2[i].click();
-      await inputs2[i].type(digits2[i]);
-      await page.waitForTimeout(100);
-    }
-    await page.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll('button'));
-      const btn = btns.find(b => b.textContent.includes('Confirmar') || b.type === 'submit');
-      if (btn) btn.click();
-    });
-    await page.waitForTimeout(3000);
-    // Verifica sucesso
-    // Obs: palavras genericas como "sucesso"/"confirmado" tambem aparecem em
-    // mensagens de ERRO do proprio site do iFood (ex: "pedido ja foi confirmado
-    // anteriormente", "nao foi possivel confirmar"). Por isso, so aceitamos essas
-    // palavras genericas quando NAO houver nenhum indicio de erro na pagina -
-    // caso contrario um erro do iFood poderia ser lido como sucesso e o pedido
-    // seria finalizado no FlashDrop sem a entrega ter sido confirmada de verdade.
-    const resultadoPagina = await page.evaluate(() => {
-      const bodyRaw = document.body.textContent || '';
-      const body = bodyRaw.toLowerCase();
-      const frasesErro = ['nao foi possivel', 'não foi possível', 'invalido', 'inválido', 'incorreto', 'incorreta', 'nao encontrado', 'não encontrado', 'ja foi confirmado', 'já foi confirmado', 'expirou', 'expirado', 'tente novamente', 'erro ao'];
-      const temErro = frasesErro.some(f => body.includes(f));
-      const fraseForteSucesso = body.includes('entrega confirmada');
-      const fraseFracaSucesso = body.includes('sucesso') || body.includes('confirmado');
-      return { temErro, fraseForteSucesso, fraseFracaSucesso };
-    });
-    await page.close();
-    const sucesso = resultadoPagina.fraseForteSucesso || (resultadoPagina.fraseFracaSucesso && !resultadoPagina.temErro);
-    if (sucesso) {
-      // Registra no proprio pedido que a confirmacao no iFood realmente aconteceu.
-      // Isso e o que a rota PUT /orders/:id exige antes de aceitar finalizar um
-      // pedido iFood - assim nenhuma tela (app do motoboy, painel admin, etc)
-      // consegue marcar um pedido iFood como entregue sem essa confirmacao real.
-      if (orderId) {
-        try { await pool.query('UPDATE orders SET ifood_confirmado_em = NOW() WHERE id=$1', [orderId]); }
-        catch (eSalvarConf) { console.error('[iFood bot] erro ao salvar confirmacao no pedido:', eSalvarConf.message); }
+      const browser = await getBrowser();
+      page = await browser.newPage();
+      await page.goto('https://confirmacao-entrega-propria.ifood.com.br/numero-pedido', { waitUntil: 'networkidle2', timeout: 30000 });
+      // Passo 1: digita localizador
+      const inputs1 = await page.$$('input');
+      const digits1 = localizador.split('');
+      for (let i = 0; i < 8 && i < inputs1.length; i++) {
+        await inputs1[i].click();
+        await inputs1[i].type(digits1[i]);
+        await page.waitForTimeout(100);
       }
-      return res.json({ ok: true });
-    }
-    return res.status(400).json({ ok: false, erro: 'Nao foi possivel confirmar a entrega no iFood. Verifique o localizador e o codigo do cliente e tente novamente.' });
+      await page.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll('button'));
+        const btn = btns.find(b => b.textContent.includes('Continuar') || b.type === 'submit');
+        if (btn) btn.click();
+      });
+      await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 });
+      // Passo 2: digita codigo do cliente (4 digitos)
+      const inputs2 = await page.$$('input');
+      const digits2 = codigoCliente.split('');
+      for (let i = 0; i < 4 && i < inputs2.length; i++) {
+        await inputs2[i].click();
+        await inputs2[i].type(digits2[i]);
+        await page.waitForTimeout(100);
+      }
+      await page.evaluate(() => {
+        const btns = Array.from(document.querySelectorAll('button'));
+        const btn = btns.find(b => b.textContent.includes('Confirmar') || b.type === 'submit');
+        if (btn) btn.click();
+      });
+      await page.waitForTimeout(3000);
+      // Verifica sucesso
+      // Obs: palavras genericas como "sucesso"/"confirmado" tambem aparecem em
+      // mensagens de ERRO do proprio site do iFood (ex: "pedido ja foi confirmado
+      // anteriormente", "nao foi possivel confirmar"). Por isso, so aceitamos essas
+      // palavras genericas quando NAO houver nenhum indicio de erro na pagina -
+      // caso contrario um erro do iFood poderia ser lido como sucesso e o pedido
+      // seria finalizado no FlashDrop sem a entrega ter sido confirmada de verdade.
+      const resultadoPagina = await page.evaluate(() => {
+        const bodyRaw = document.body.textContent || '';
+        const body = bodyRaw.toLowerCase();
+        const frasesErro = ['nao foi possivel', 'não foi possível', 'invalido', 'inválido', 'incorreto', 'incorreta', 'nao encontrado', 'não encontrado', 'ja foi confirmado', 'já foi confirmado', 'expirou', 'expirado', 'tente novamente', 'erro ao'];
+        const temErro = frasesErro.some(f => body.includes(f));
+        const fraseForteSucesso = body.includes('entrega confirmada');
+        const fraseFracaSucesso = body.includes('sucesso') || body.includes('confirmado');
+        return { temErro, fraseForteSucesso, fraseFracaSucesso };
+      });
+      await page.close();
+      const sucesso = resultadoPagina.fraseForteSucesso || (resultadoPagina.fraseFracaSucesso && !resultadoPagina.temErro);
+      if (sucesso) {
+        // Registra no proprio pedido que a confirmacao no iFood realmente aconteceu.
+        // Isso e o que a rota PUT /orders/:id exige antes de aceitar finalizar um
+        // pedido iFood - assim nenhuma tela (app do motoboy, painel admin, etc)
+        // consegue marcar um pedido iFood como entregue sem essa confirmacao real.
+        if (orderId) {
+          try { await pool.query('UPDATE orders SET ifood_confirmado_em = NOW() WHERE id=$1', [orderId]); }
+          catch (eSalvarConf) { console.error('[iFood bot] erro ao salvar confirmacao no pedido:', eSalvarConf.message); }
+        }
+        return { ok: true, status: 200 };
+      }
+      return { ok: false, status: 400, erro: 'Nao foi possivel confirmar a entrega no iFood. Verifique o localizador e o codigo do cliente e tente novamente.' };
   } catch (err) {
     if (page) await page.close().catch(() => {});
     console.error('[iFood bot] confirmar erro:', err.message);
-    return res.status(500).json({ ok: false, erro: 'Erro ao confirmar entrega: ' + err.message });
-  }
+    return { ok: false, status: 500, erro: 'Erro ao confirmar entrega: ' + err.message };
+  } finally { _ifoodConfirmando.delete(chave); }
+}
+
+// POST /ifood/confirmar-entrega
+// Body: { localizador: "12345678", codigoCliente: "1234", orderId: 123 }
+// Retorna: { ok: true } ou { ok: false, erro: "..." }
+app.post('/ifood/confirmar-entrega', async (req, res) => {
+  const { localizador, codigoCliente, orderId } = req.body || {};
+  const r = await _confirmarEntregaIfoodRobo(localizador, codigoCliente, orderId);
+  if (r.ok) return res.json({ ok: true });
+  return res.status(r.status || 400).json({ ok: false, erro: r.erro });
 });
 
 // ===== MODULO FINANCEIRO (perfil financeiro - relatorios detalhados) =====
