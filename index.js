@@ -13,6 +13,8 @@ app.use('/admin/avisos-loja', express.json({ limit: '2mb' })); // avisos com ima
 app.use(express.json());
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+// Rota iFood com varios pontos (rota_ifood.js): instalada antes do app.listen. So age em pedidos com rota_id.
+let _rota = null;
 
 // Registra um evento de aceite/cancelamento/timeout de motoboy num pedido, para
 // manter o historico completo mesmo quando motoboy_id/motoboy_name do pedido
@@ -936,7 +938,7 @@ app.put('/users/:id/referrer', async (req, res) => {
 
 app.get('/orders', async (req, res) => {
   const r = await pool.query('SELECT * FROM orders ORDER BY created_at DESC');
-  res.json(r.rows);
+  res.json(req.query.raw || !_rota ? r.rows : _rota.paraApp(r.rows));
 });
 
 app.post('/orders/consultar', async (req, res) => { try { const telefoneDigits = String((req.body && req.body.telefone) || '').replace(/\D/g, ''); const cpfDigits = String((req.body && req.body.cpf) || '').replace(/\D/g, ''); if (!telefoneDigits || !cpfDigits) return res.status(400).json({ error: 'Informe telefone e CPF.' }); const r = await pool.query(`SELECT id, loja_name, status, valor_pedido, valor_total, endereco_entrega, complemento_entrega, obs_coleta, obs_entrega_loja, previsao, distancia, delivery_code, created_at, cod_pedido FROM orders WHERE regexp_replace(telefone_cliente, '\\D', '', 'g') = $1 AND regexp_replace(cpf_cliente, '\\D', '', 'g') = $2 ORDER BY created_at DESC LIMIT 1`, [telefoneDigits, cpfDigits]); if (r.rows.length === 0) return res.json({ found: false }); res.json({ found: true, pedido: r.rows[0] }); } catch (e) { res.status(500).json({ error: e.message }); } }); app.post('/avaliacoes/validar', async (req, res) => { try { const codPedido = String((req.body && req.body.cod_pedido) || '').trim(); const deliveryCode = String((req.body && req.body.delivery_code) || '').trim(); if (!codPedido || !deliveryCode) return res.status(400).json({ error: 'Informe o numero do pedido e o codigo de entrega.' }); const numeroPedido = parseInt(codPedido, 10); if (!numeroPedido) return res.json({ ok: false, error: 'Numero do pedido invalido.' }); const r = await pool.query('SELECT id, loja_user, loja_name, status, cod_pedido, obs_coleta, created_at, t_entregue FROM orders WHERE id=$1 AND delivery_code=$2', [numeroPedido, deliveryCode]); if (r.rows.length === 0) return res.json({ ok: false, error: 'Pedido nao encontrado ou codigo de entrega incorreto.' }); const order = r.rows[0]; if (order.status !== 'entregue') return res.json({ ok: false, error: 'Este pedido ainda nao foi entregue.' }); if (order.t_entregue && (Date.now() - new Date(order.t_entregue).getTime()) > 24*60*60*1000) return res.json({ ok: false, error: 'O prazo de 24 horas para avaliar este pedido expirou.' }); const avRes = await pool.query('SELECT id FROM avaliacoes WHERE order_id=$1', [order.id]); if (avRes.rows.length > 0) return res.json({ ok: false, error: 'Este pedido ja foi avaliado.' }); res.json({ ok: true, pedido: { id: order.id, loja_name: order.loja_name, cod_pedido: order.cod_pedido, obs_coleta: order.obs_coleta, created_at: order.created_at } }); } catch (e) { res.status(500).json({ error: e.message }); } }); app.post('/avaliacoes', async (req, res) => { try { const codPedido = String((req.body && req.body.cod_pedido) || '').trim(); const deliveryCode = String((req.body && req.body.delivery_code) || '').trim(); const nota = parseInt(req.body && req.body.nota); let comentario = String((req.body && req.body.comentario) || '').trim(); if (comentario.length > 500) comentario = comentario.slice(0, 500); if (!codPedido || !deliveryCode) return res.status(400).json({ error: 'Informe o numero do pedido e o codigo de entrega.' }); if (!nota || nota < 1 || nota > 5) return res.status(400).json({ error: 'Nota invalida. Escolha de 1 a 5.' }); const numeroPedido = parseInt(codPedido, 10); if (!numeroPedido) return res.status(400).json({ error: 'Numero do pedido invalido.' }); const r = await pool.query('SELECT id, loja_user, status, t_entregue FROM orders WHERE id=$1 AND delivery_code=$2', [numeroPedido, deliveryCode]); if (r.rows.length === 0) return res.status(404).json({ error: 'Pedido nao encontrado ou codigo de entrega incorreto.' }); const order = r.rows[0]; if (order.status !== 'entregue') return res.status(400).json({ error: 'Este pedido ainda nao foi entregue.' }); if (order.t_entregue && (Date.now() - new Date(order.t_entregue).getTime()) > 24*60*60*1000) return res.status(400).json({ error: 'O prazo de 24 horas para avaliar este pedido expirou.' }); const avRes = await pool.query('SELECT id FROM avaliacoes WHERE order_id=$1', [order.id]); if (avRes.rows.length > 0) return res.status(400).json({ error: 'Este pedido ja foi avaliado.' }); await pool.query('INSERT INTO avaliacoes (order_id, loja_user, cod_pedido, nota, comentario) VALUES ($1,$2,$3,$4,$5)', [order.id, order.loja_user, codPedido, nota, comentario || null]); await pool.query('DELETE FROM avaliacoes WHERE loja_user=$1 AND id NOT IN (SELECT id FROM avaliacoes WHERE loja_user=$1 ORDER BY created_at DESC LIMIT 500)', [order.loja_user]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } }); app.get('/avaliacoes/media/:loja_user', async (req, res) => { try { const r = await pool.query('SELECT AVG(nota)::numeric(10,2) as media, COUNT(*) as total FROM (SELECT nota FROM avaliacoes WHERE loja_user=$1 ORDER BY created_at DESC LIMIT 500) sub', [req.params.loja_user]); const row = r.rows[0] || {}; res.json({ media: row.media ? parseFloat(row.media) : null, total: parseInt(row.total) || 0 }); } catch (e) { res.status(500).json({ error: e.message }); } }); app.get('/orders/entregues-total/:loja_user', async (req, res) => { try { const r = await pool.query("SELECT COUNT(*) as total FROM orders WHERE loja_user=$1 AND status='entregue'", [req.params.loja_user]); res.json({ total: parseInt(r.rows[0].total) || 0 }); } catch (e) { res.status(500).json({ error: e.message }); } }); app.get('/avaliacoes/lista/:loja_user', async (req, res) => { try { const r = await pool.query('SELECT nota, comentario, cod_pedido, created_at FROM avaliacoes WHERE loja_user=$1 ORDER BY created_at DESC LIMIT 50', [req.params.loja_user]); res.json(r.rows); } catch (e) { res.status(500).json({ error: e.message }); } });
@@ -1315,6 +1317,7 @@ app.put('/orders/:id', async (req, res) => {
     if (_desistencia && ['aceito', 'na_loja'].indexOf(_statusAtual) === -1) {
       return res.status(403).json({ error: 'Não é possível desistir deste pedido agora (status: ' + _statusAtual + ').', nao_e_seu: true });
     }
+    if (_rota && await _rota.antesDoPut(req, res, fields)) return;
     if (fields.status === 'em_preparo' && !fields.t_em_preparo) { fields.t_em_preparo = new Date().toISOString(); }
     // Marcador interno da chegada agrupada (nao e coluna): evita repropagar a partir dos pedidos irmaos
     const _chegadaAgrupada = fields._chegada_agrupada === true; delete fields._chegada_agrupada;
@@ -1381,7 +1384,7 @@ app.put('/orders/:id', async (req, res) => {
     // sem confirmar de verdade no iFood.
     // O app do motoboy (Android) nao tem a etapa de confirmacao no iFood: ele so manda o codigo do cliente em observacao_entrega.
     // Nesse caso o servidor confirma no iFood aqui mesmo (mesmo robo da pagina web) e so finaliza se o iFood confirmar.
-    if (fields.status === 'entregue' && prevOrderRes.rows.length > 0 && prevOrderRes.rows[0].tipo_pagamento === 'ifood' && !prevOrderRes.rows[0].ifood_confirmado_em) {
+    if (fields.status === 'entregue' && !req._rotaSemIfood && prevOrderRes.rows.length > 0 && prevOrderRes.rows[0].tipo_pagamento === 'ifood' && !prevOrderRes.rows[0].ifood_confirmado_em) {
       const codIfood = String(fields.observacao_entrega || '').replace(/\D/g, '');
       if (codIfood.length !== 4) {
         return res.status(400).json({ error: 'Este pedido iFood ainda nao teve a entrega confirmada no site do iFood. Confirme a entrega (localizador + codigo do cliente) antes de finalizar.' });
@@ -1533,6 +1536,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
     if (fields.status === 'na_loja' && prevOrderRes.rows[0] && prevOrderRes.rows[0].status === 'na_loja') { return res.json(order); }
     if (fields.status === 'coletado' && prevOrderRes.rows[0] && prevOrderRes.rows[0].status === 'coletado') { return res.json(order); }
     if (fields.status === 'no_cliente' && prevOrderRes.rows[0] && prevOrderRes.rows[0].status === 'no_cliente') { return res.json(order); }
+    if (_rota) await _rota.depoisDoPut(req, order, fields);
 
     // Chegada agrupada: o motoboy chegou na loja (automatico ou manual) -> marca tambem os outros
     // pedidos ativos dele na MESMA loja que ainda estao 'aceito' sem chegada. Roda em segundo plano.
@@ -1541,7 +1545,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
     }
 
     // Inatividade de clientes: pedido entregue reinicia o contador do cliente (mesmo celular) nesta loja
-    if (fields.status === 'entregue' && order.loja_user && String(order.telefone_cliente || '').replace(/\D/g, '')) {
+    if (fields.status === 'entregue' && !req._rotaSemAvisoCliente && order.loja_user && String(order.telefone_cliente || '').replace(/\D/g, '')) {
       try { await pool.query("UPDATE clientes_loja SET contador_desde=$1 WHERE loja_id IN (SELECT id FROM users WHERE username=$2) AND regexp_replace(celular,'[^0-9]','','g')=regexp_replace($3,'[^0-9]','','g')", [Date.now(), order.loja_user, order.telefone_cliente]); } catch(eCliInat) { console.error('[CLIENTE_INATIVIDADE] Erro:', eCliInat.message); }
     }
 
@@ -1990,10 +1994,10 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
           }
       } catch(eLojaBotCol) { console.error('[LOJA BOT] Erro geral coletado mb:', eLojaBotCol.message); }  }
   // Notificar cliente via WhatsApp quando motoboy chegou no cliente
-  if (fields.status === 'no_cliente' && order && order.motoboy_id) {
+  if (fields.status === 'no_cliente' && order && order.motoboy_id && !req._rotaRetornoChegada) {
     _enviarPushChegadaCliente(order).catch(function (ePushCh) { console.error('[CHEGADA-CLIENTE] Erro push motoboy:', ePushCh.message); });
   }
-  if (fields.status === 'no_cliente' && order.tipo_pagamento !== 'ifood') {
+  if (fields.status === 'no_cliente' && order.tipo_pagamento !== 'ifood' && !req._rotaRetornoChegada) {
     try {
       const botUrlNoCliente = process.env.BOT_URL;
       const botSecretNoCliente = process.env.BOT_SECRET;
@@ -2025,7 +2029,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
           }
       } catch(eLojaBotChegou) { console.error('[LOJA BOT] Erro geral chegou:', eLojaBotChegou.message); }  }
   // Notificar cliente via WhatsApp quando pedido foi entregue
-  if (fields.status === 'entregue') {
+  if (fields.status === 'entregue' && !req._rotaSemAvisoCliente) {
     try {
       const botUrlEntregue = process.env.BOT_URL;
       const botSecretEntregue = process.env.BOT_SECRET;
@@ -2753,6 +2757,7 @@ async function checkLateArrivals() {
       [cutoff]
     );
     for (const order of r.rows) {
+      if (order.rota_id && _rota) { try { await _rota.timeoutRota(order); } catch (eRotaT) { console.error('[ROTA] timeout:', eRotaT.message); } continue; }
       // Protecao: se o mesmo motoboy ja tem chegada registrada em outro pedido ativo da MESMA loja,
       // ele esta na loja -> marca a chegada deste pedido em vez de devolver o pedido e penalizar.
       if (order.motoboy_id && order.loja_user) {
@@ -2831,6 +2836,7 @@ async function checkLateArrivals() {
 
 app.post('/orders/:id/launch', async (req, res) => {
   try {
+    try { const _rl = await pool.query('SELECT rota_id FROM orders WHERE id=$1', [req.params.id]); if (_rl.rows.length && _rl.rows[0].rota_id) return res.status(409).json({ error: 'Rota iFood: marque "Pronto" em cada entrega; a rota é lançada quando a última ficar pronta.' }); } catch (eRl) {}
     const r = await pool.query("UPDATE orders SET status='pendente', launch_at=0, pending_until=$1 WHERE id=$2 AND status='em_preparo' RETURNING *", [Date.now()+15000, req.params.id]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Pedido nao encontrado ou ja lancado.' });
     const pedido = r.rows[0];
@@ -3906,11 +3912,11 @@ async function verificarChegadaAutomaticaMotoboy(motoboyId, lat, lng, orderIdExt
   try {
     const latN = parseFloat(lat), lngN = parseFloat(lng);
     if (isNaN(latN) || isNaN(lngN) || !motoboyId) return;
-    const r = await pool.query("SELECT id, status, coleta_lat, coleta_lng, entrega_lat, entrega_lng FROM orders WHERE motoboy_id=$1 AND status IN ('aceito','coletado') ORDER BY id", [motoboyId]);
+    const r = await pool.query("SELECT id, status, coleta_lat, coleta_lng, entrega_lat, entrega_lng, rota_retorno FROM orders WHERE motoboy_id=$1 AND status IN ('aceito','coletado') ORDER BY id", [motoboyId]);
     for (const ord of r.rows) {
       let alvo = null, la = null, ln = null;
       if (ord.status === 'aceito') { alvo = 'na_loja'; la = ord.coleta_lat; ln = ord.coleta_lng; }
-      else if (ord.status === 'coletado') { alvo = 'no_cliente'; la = ord.entrega_lat; ln = ord.entrega_lng; }
+      else if (ord.status === 'coletado') { alvo = 'no_cliente'; la = ord.rota_retorno === 'pendente' ? ord.coleta_lat : ord.entrega_lat; ln = ord.rota_retorno === 'pendente' ? ord.coleta_lng : ord.entrega_lng; }
       if (!alvo || la === null || la === undefined || ln === null || ln === undefined) continue;
       const dist = haversineMetros(latN, lngN, parseFloat(la), parseFloat(ln));
       if (!(dist <= RAIO_CHEGADA_AUTO)) continue;
@@ -3984,7 +3990,7 @@ app.get('/orders/motoboy-eventos', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/rastrear/:order_id', async (req, res) => { try { const oid = parseInt(req.params.order_id); const r = await pool.query("SELECT ml.lat, ml.lng, ml.updated_at, u.name AS nome_motoboy, o.status, o.nome_cliente FROM motoboy_localizacao ml JOIN users u ON u.id = ml.motoboy_id JOIN orders o ON o.id = ml.order_id WHERE ml.order_id = $1", [oid]); if (r.rows.length === 0) return res.status(404).json({ error: 'Rastreio nao disponivel' }); res.json(r.rows[0]); } catch(e) { res.status(500).json({ error: e.message }); } });
-initDB().then(() => { _corrigirEntidadesSalvas(); _colunasJurosEmprestimo(); });
+initDB().then(() => { _corrigirEntidadesSalvas(); _colunasJurosEmprestimo(); if (_rota) _rota.criarColunas(); });
 async function _colunasJurosEmprestimo() {
   try { await pool.query('ALTER TABLE settings ADD COLUMN IF NOT EXISTS emprestimo_juros_pct DECIMAL DEFAULT 20'); } catch (e) { console.error('[EMPRESTIMO] coluna settings:', e.message); }
   try { await pool.query('ALTER TABLE emprestimos_loja ADD COLUMN IF NOT EXISTS juros_pct DECIMAL DEFAULT NULL'); } catch (e) { console.error('[EMPRESTIMO] coluna emprestimos_loja:', e.message); }
@@ -4063,6 +4069,7 @@ app.post('/ifood/verificar-localizador', async (req, res) => {
 // Usado pela rota abaixo (pagina web do motoboy) e pelo PUT /orders/:id ao finalizar (app do motoboy, que nao tem essa etapa).
 // So grava ifood_confirmado_em quando a confirmacao realmente aconteceu. Um pedido por vez (evita dois robos no mesmo pedido).
 const _ifoodConfirmando = new Set();
+let _ifoodFila = Promise.resolve();
 async function _confirmarEntregaIfoodRobo(localizador, codigoCliente, orderId) {
   localizador = String(localizador || '').replace(/\D/g, ''); codigoCliente = String(codigoCliente || '').replace(/\D/g, '');
   if (localizador.length !== 8) return { ok: false, status: 400, erro: 'Localizador deve ter 8 digitos' };
@@ -4070,6 +4077,12 @@ async function _confirmarEntregaIfoodRobo(localizador, codigoCliente, orderId) {
   const chave = String(orderId || localizador);
   if (_ifoodConfirmando.has(chave)) return { ok: false, status: 409, erro: 'A confirmacao deste pedido no iFood ja esta em andamento. Aguarde alguns segundos.' };
   _ifoodConfirmando.add(chave);
+  // Um robo por vez: confirmacoes de pedidos diferentes esperam a anterior terminar
+  const vez = _ifoodFila.then(() => _confirmarEntregaIfoodRoboAgora(localizador, codigoCliente, orderId));
+  _ifoodFila = vez.catch(() => {});
+  try { return await vez; } finally { _ifoodConfirmando.delete(chave); }
+}
+async function _confirmarEntregaIfoodRoboAgora(localizador, codigoCliente, orderId) {
   let page;
   try {
       const browser = await getBrowser();
@@ -4145,7 +4158,7 @@ async function _confirmarEntregaIfoodRobo(localizador, codigoCliente, orderId) {
     if (page) await page.close().catch(() => {});
     console.error('[iFood bot] confirmar erro:', err.message);
     return { ok: false, status: 500, erro: 'Erro ao confirmar entrega: ' + err.message };
-  } finally { _ifoodConfirmando.delete(chave); }
+  }
 }
 
 // POST /ifood/confirmar-entrega
@@ -4666,6 +4679,9 @@ app.get('/motoboys/auto-offline/status', function(req, res) {
   res.json(Object.assign({ regras: { online_max_min: MOTOBOY_ONLINE_MAX_MIN, fantasma_min: MOTOBOY_FANTASMA_MIN, pedido_parado_h: MOTOBOY_PEDIDO_PARADO_H } }, _autoOfflineStatus));
 });
 
+_rota = require('./rota_ifood')({ app, pool, axios, bot, PORT, ADMIN_ID, sanitize, txtPuro: _txtPuro, tokenDe: _tokenDe, aplicarPenalidadeMotoboy, descPenalidade: _descPenalidade, registrarEvento: registrarEventoMotoboyPedido, bairroColeta: _bairroColeta, msgDisponivelSecundario: _msgDisponivelSecundario, sendPushToOnlineMotoboys, bloqueioFuncionamento: _bloqueioFuncionamento });
+// Testes automatizados (so com FD_TEST=1): acesso aos jobs para simular o tempo
+if (process.env.FD_TEST === '1') global.__fdTest = { checkLateArrivals, checkAndLaunchOrders, rota: () => _rota };
 app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
   setInterval(checkLateArrivals, 60 * 1000);
   
