@@ -53,11 +53,11 @@ module.exports = function instalarRotaIfood(ctx) {
       // Formula nova do preco (13/10): o valor por ponto passa a R$ 3,00 UMA vez (depois continua ajustavel no admin)
       'ALTER TABLE settings ADD COLUMN IF NOT EXISTS rota_preco_v2 BOOLEAN DEFAULT false',
       // Gatilho automatico do "cliente nao atende" (o app Android nao tem o botao): minutos em no_cliente sem finalizar
-      'ALTER TABLE settings ADD COLUMN IF NOT EXISTS rota_nao_atende_auto_min INTEGER DEFAULT 10',
+      'ALTER TABLE settings ADD COLUMN IF NOT EXISTS rota_nao_atende_auto_min INTEGER DEFAULT 15',
+      // Padrao do William: 15 min (passa de 10 para 15 UMA vez; depois continua ajustavel no admin)
+      'ALTER TABLE settings ADD COLUMN IF NOT EXISTS rota_nao_atende_v15 BOOLEAN DEFAULT false',
+      'UPDATE settings SET rota_nao_atende_auto_min=15, rota_nao_atende_v15=true WHERE id=1 AND rota_nao_atende_v15 IS NOT TRUE',
       'ALTER TABLE orders ADD COLUMN IF NOT EXISTS rota_nao_atende_auto_min INTEGER',
-      // Desfaz disparos automaticos indevidos (entrega que ja estava parada no cliente antes do gatilho existir) ainda sem decisao
-      "DELETE FROM pedido_motoboy_eventos e USING orders o WHERE e.order_id=o.id AND e.evento='nao_atende' AND e.descricao LIKE 'No cliente há % (automático)%' AND o.rota_nao_atende_auto_min IS NOT NULL AND o.rota_decisao IS NULL AND o.t_no_cliente < o.rota_nao_atende_em - ((o.rota_nao_atende_auto_min + 30) * INTERVAL '1 minute')",
-      "UPDATE orders SET rota_nao_atende_em=NULL, rota_nao_atende_admin=false, rota_nao_atende_auto_min=NULL WHERE rota_nao_atende_auto_min IS NOT NULL AND rota_decisao IS NULL AND t_no_cliente < rota_nao_atende_em - ((rota_nao_atende_auto_min + 30) * INTERVAL '1 minute')",
       'UPDATE settings SET rota_valor_ponto=3, rota_preco_v2=true WHERE id=1 AND rota_preco_v2 IS NOT TRUE'
     ];
     for (const q of qs) { try { await pool.query(q); } catch (e) { console.error('[ROTA] coluna:', e.message); } }
@@ -65,7 +65,7 @@ module.exports = function instalarRotaIfood(ctx) {
   async function cfg() { const r = await pool.query('SELECT * FROM settings WHERE id=1'); return r.rows[0] || {}; }
   const rotaLigada = (c) => !!(c && c.rota_ifood_ativa === true);
   function valorPonto(c) { const v = parseFloat(c.rota_valor_ponto); return isNaN(v) || v < 0 ? 3 : v; }
-  function minNaoAtendeAuto(c) { const v = parseInt(c.rota_nao_atende_auto_min); return isNaN(v) || v < 1 ? 10 : Math.min(v, 120); }
+  function minNaoAtendeAuto(c) { const v = parseInt(c.rota_nao_atende_auto_min); return isNaN(v) || v < 1 ? 15 : Math.min(v, 120); }
   function maxPontos(c) { const v = parseInt(c.rota_max_pontos); return isNaN(v) || v < 2 ? 4 : Math.min(v, 10); }
   async function pedidosDaRota(rotaId, db) { const r = await (db || pool).query('SELECT * FROM orders WHERE rota_id=$1 ORDER BY rota_ordem NULLS LAST, id', [rotaId]); return r.rows; }
   const vivos = (ps) => ps.filter((p) => p.status !== 'cancelado').sort((a, b) => (a.rota_ordem || 99) - (b.rota_ordem || 99));
@@ -518,7 +518,7 @@ module.exports = function instalarRotaIfood(ctx) {
     }
     if (dec === 'retornar') {
       const c = await cfg(); const ret = await valorRetorno(c, o);
-      if (!(req.body || {}).confirmar) return res.json({ ok: true, preview: true, valor_retorno: ret.valor, km: ret.km, mensagem: 'O motoboy irá cobrar ' + fmtR(ret.valor) + ' para retornar. Confirmar?' });
+      if (!(req.body || {}).confirmar) return res.json({ ok: true, preview: true, valor_retorno: ret.valor, mensagem: 'O motoboy irá cobrar ' + fmtR(ret.valor) + ' para retornar. Confirmar?' });
       const com = c.commission_type === 'percentual' ? r2(ret.valor * (parseFloat(c.commission) || 0) / 100) : 0;
       const cli = await pool.connect();
       try {
@@ -527,7 +527,7 @@ module.exports = function instalarRotaIfood(ctx) {
         if (!up.rows.length) throw erro('Esta entrega já foi decidida.', 409);
         await cli.query('UPDATE users SET credit = credit - $1 WHERE username=$2', [ret.valor, o.loja_user]);
         const lid = await cli.query('SELECT id FROM users WHERE username=$1', [o.loja_user]);
-        if (lid.rows.length) await cli.query('INSERT INTO loja_wallet_events (loja_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)', [lid.rows[0].id, 'debito_pedido', ret.valor, 'Retorno à loja - pedido #' + o.id + ' (cliente não atendeu, ' + fmtKm(ret.km) + ')', o.id]);
+        if (lid.rows.length) await cli.query('INSERT INTO loja_wallet_events (loja_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)', [lid.rows[0].id, 'debito_pedido', ret.valor, 'Retorno à loja - pedido #' + o.id + ' (cliente não atendeu)', o.id]);
         await cli.query('COMMIT');
       } catch (e) { try { await cli.query('ROLLBACK'); } catch (e2) {} throw e; }
       finally { cli.release(); }
