@@ -2623,7 +2623,16 @@ app.post('/distance', async (req, res) => {
 // o id da loja vem do token, nao do corpo). lojas_alvo NULL = todas as lojas. Expirado ou pausado nao aparece.
 const AVISO_IMAGEM_MAX_BYTES = 1024 * 1024;
 function _tokenDe(req, papel) {
+  if (papel === 'admin') { const a = _adminDe(req); return a.user || null; }
   try { const h = req.headers['authorization']; const t = h && h.split(' ')[1]; if (!t) return null; const d = jwt.verify(t, process.env.JWT_SECRET || 'flashdrop_secret_2024'); return d && d.role === papel && d.id ? d : null; } catch (e) { return null; }
+}
+// Admin: o mesmo jeito das abas que funcionam (authMiddleware + role === 'admin'), com o motivo quando recusa
+function _adminDe(req) {
+  const h = req.headers['authorization']; const t = h && h.split(' ')[1];
+  if (!t || t === 'undefined' || t === 'null') return { erro: 'sem_token' };
+  let d; try { d = jwt.verify(t, process.env.JWT_SECRET || 'flashdrop_secret_2024'); } catch (e) { return { erro: e && e.name === 'TokenExpiredError' ? 'token_expirado' : 'token_invalido' }; }
+  if (!d || d.role !== 'admin') return { erro: 'nao_admin' };
+  return { user: d };
 }
 function _somenteAdmin(req, res) { const d = _tokenDe(req, 'admin'); if (!d) { res.status(req.headers['authorization'] ? 403 : 401).json({ error: 'Apenas o admin pode gerenciar os avisos com imagem.' }); return null; } return d; }
 app.post('/admin/avisos-loja', async (req, res) => {
@@ -4679,7 +4688,7 @@ app.get('/motoboys/auto-offline/status', function(req, res) {
   res.json(Object.assign({ regras: { online_max_min: MOTOBOY_ONLINE_MAX_MIN, fantasma_min: MOTOBOY_FANTASMA_MIN, pedido_parado_h: MOTOBOY_PEDIDO_PARADO_H } }, _autoOfflineStatus));
 });
 
-_rota = require('./rota_ifood')({ app, pool, axios, bot, PORT, ADMIN_ID, sanitize, txtPuro: _txtPuro, tokenDe: _tokenDe, aplicarPenalidadeMotoboy, descPenalidade: _descPenalidade, registrarEvento: registrarEventoMotoboyPedido, bairroColeta: _bairroColeta, msgDisponivelSecundario: _msgDisponivelSecundario, sendPushToOnlineMotoboys, bloqueioFuncionamento: _bloqueioFuncionamento });
+_rota = require('./rota_ifood')({ app, pool, axios, bot, PORT, ADMIN_ID, sanitize, txtPuro: _txtPuro, tokenDe: _tokenDe, adminDe: _adminDe, aplicarPenalidadeMotoboy, descPenalidade: _descPenalidade, registrarEvento: registrarEventoMotoboyPedido, bairroColeta: _bairroColeta, msgDisponivelSecundario: _msgDisponivelSecundario, sendPushToOnlineMotoboys, bloqueioFuncionamento: _bloqueioFuncionamento });
 // Testes automatizados (so com FD_TEST=1): acesso aos jobs para simular o tempo
 if (process.env.FD_TEST === '1') global.__fdTest = { checkLateArrivals, checkAndLaunchOrders, rota: () => _rota };
 app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));

@@ -136,10 +136,15 @@ module.exports = function instalarRotaIfood(ctx) {
 
   // ---------- quem esta pedindo ----------
   function quem(req) {
-    const adm = ctx.tokenDe(req, 'admin'); if (adm) return { papel: 'admin', id: adm.id, nome: 'Flash Drop (admin)' };
+    const adm = ctx.adminDe(req).user; if (adm) return { papel: 'admin', id: adm.id, nome: 'Flash Drop (admin)' };
     const lj = ctx.tokenDe(req, 'loja'); if (lj) return { papel: 'loja', id: lj.id, username: lj.username, nome: 'loja' };
     const mb = ctx.tokenDe(req, 'motoboy'); if (mb) return { papel: 'motoboy', id: mb.id, nome: 'motoboy' };
     return null;
+  }
+  // Rotas so do admin: recusa com o motivo (sem_token, token_expirado, token_invalido, nao_admin) para a tela explicar
+  function exigirAdmin(req, msg) {
+    const a = ctx.adminDe(req); if (a.user) return { papel: 'admin', id: a.user.id, nome: 'Flash Drop (admin)' };
+    throw erro(msg, a.erro === 'nao_admin' ? 403 : 401, { motivo: a.erro });
   }
   function exigirLojaDona(q, ps) {
     if (!q || (q.papel !== 'loja' && q.papel !== 'admin')) throw erro('Faça login de novo na loja.', 401);
@@ -535,7 +540,7 @@ module.exports = function instalarRotaIfood(ctx) {
     res.json({ ok: true });
   }));
   app.post('/admin/rotas/:rotaId/socorro', h(async (req, res) => {
-    const q = quem(req); if (!q || q.papel !== 'admin') throw erro('Só o admin pode acionar o socorro.', q ? 403 : 401);
+    const q = exigirAdmin(req, 'Só o admin pode acionar o socorro.');
     const rotaId = parseInt(req.params.rotaId) || 0;
     const faltam = vivos(await pedidosDaRota(rotaId)).filter((p) => STATUS_ATIVOS.includes(p.status));
     if (!faltam.length) throw erro('Não há entregas pendentes nesta rota.', 409);
@@ -586,7 +591,7 @@ module.exports = function instalarRotaIfood(ctx) {
 
   // ---------- admin ----------
   app.get('/admin/rotas', h(async (req, res) => {
-    const q = quem(req); if (!q || q.papel !== 'admin') throw erro('Só o admin.', q ? 403 : 401);
+    const q = exigirAdmin(req, 'Só o admin.');
     const c = await cfg();
     const ativas = (await pool.query("SELECT * FROM orders WHERE rota_id IN (SELECT DISTINCT rota_id FROM orders WHERE rota_id IS NOT NULL AND status IN ('em_preparo','rota_espera','pendente','aceito','na_loja','coletado','no_cliente')) ORDER BY rota_id DESC, rota_ordem NULLS LAST, id")).rows;
     const rotas = {}; ativas.forEach((o) => { (rotas[o.rota_id] = rotas[o.rota_id] || []).push(o); });
@@ -595,7 +600,7 @@ module.exports = function instalarRotaIfood(ctx) {
     res.json({ config: { ativa: rotaLigada(c), valor_ponto: valorPonto(c), max_pontos: maxPontos(c) }, rotas: Object.keys(rotas).map((k) => ({ rota_id: parseInt(k), entregas: rotas[k] })).sort((a, b) => b.rota_id - a.rota_id), casos_nao_atende: casos, motoboys_socorros: socorros });
   }));
   app.put('/settings/rota-ifood', h(async (req, res) => {
-    const q = quem(req); if (!q || q.papel !== 'admin') throw erro('Só o admin pode mudar a Rota iFood.', q ? 403 : 401);
+    const q = exigirAdmin(req, 'Só o admin pode mudar a Rota iFood.');
     const b = req.body || {}; const c = await cfg();
     const ativa = b.ativa === undefined ? rotaLigada(c) : (b.ativa === true || b.ativa === 'true');
     const vp = b.valor_ponto === undefined ? valorPonto(c) : parseFloat(String(b.valor_ponto).replace(',', '.'));
