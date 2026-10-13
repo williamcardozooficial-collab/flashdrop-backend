@@ -210,6 +210,7 @@ module.exports = function instalarRotaIfood(ctx) {
     const ativos = ps.filter((p) => p.status === 'aceito' || p.status === 'na_loja'); if (!ativos.length || !ps.length) return null;
     const mbId = ativos[0].motoboy_id, mbNome = ativos[0].motoboy_name;
     await pool.query("UPDATE orders SET status=CASE WHEN id=$2 THEN 'pendente' ELSE 'rota_espera' END, motoboy_id=NULL, motoboy_name=NULL, t_aceito=NULL, t_na_loja=NULL, chegada_loja_auto=false, pending_until=$3 WHERE rota_id=$1 AND status IN ('aceito','na_loja')", [rotaId, ps[0].id, Date.now() + 15000]);
+    if (ctx.motivoDisponivel) await ctx.motivoDisponivel(ps[0].id, motivo === 'timeout' ? 'Voltou para disponível (motoboy não chegou na loja em 15 min · rota iFood)' : 'Voltou para disponível (motoboy desistiu da rota iFood)');
     let pen = null;
     if (mbId) { try { pen = await ctx.aplicarPenalidadeMotoboy(mbId, motivo === 'timeout' ? 'Você não chegou na loja em 15 minutos.' : 'Você desistiu de uma rota iFood.'); } catch (e) { console.error('[ROTA] penalidade:', e.message); } }
     const desc = (motivo === 'timeout' ? 'Motoboy nao chegou na loja em 15 minutos' : 'Motoboy desistiu da rota') + ' - a rota iFood voltou inteira para o sistema (' + (ctx.descPenalidade(pen) || 'penalidade') + ')';

@@ -2788,6 +2788,7 @@ async function checkLateArrivals() {
         "UPDATE orders SET status='pendente', motoboy_id=NULL, motoboy_name=NULL, t_aceito=NULL, pending_until=$1 WHERE id=$2",
         [Date.now() + 15000, order.id]
       );
+      await _motivoDisponivel(order.id, 'Voltou para disponível (motoboy não chegou na loja em 15 min)');
       // Penalidade progressiva tambem no timeout (mesma contagem do dia da desistencia)
       let penTimeout = null;
       if (order.motoboy_id) { try { penTimeout = await aplicarPenalidadeMotoboy(order.motoboy_id, 'Você não chegou na loja em 15 minutos.'); } catch (ePenTimeout) { console.error('[PENALIDADE] Erro timeout:', ePenTimeout.message); } }
@@ -3999,7 +4000,49 @@ app.get('/orders/motoboy-eventos', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/rastrear/:order_id', async (req, res) => { try { const oid = parseInt(req.params.order_id); const r = await pool.query("SELECT ml.lat, ml.lng, ml.updated_at, u.name AS nome_motoboy, o.status, o.nome_cliente FROM motoboy_localizacao ml JOIN users u ON u.id = ml.motoboy_id JOIN orders o ON o.id = ml.order_id WHERE ml.order_id = $1", [oid]); if (r.rows.length === 0) return res.status(404).json({ error: 'Rastreio nao disponivel' }); res.json(r.rows[0]); } catch(e) { res.status(500).json({ error: e.message }); } });
-initDB().then(() => { _corrigirEntidadesSalvas(); _colunasJurosEmprestimo(); if (_rota) _rota.criarColunas(); });
+initDB().then(() => { _corrigirEntidadesSalvas(); _colunasJurosEmprestimo(); if (_rota) _rota.criarColunas(); _histDisponivel(); });
+// Historico do pedido: "Motoboy solicitado (disponivel)" com data/hora toda vez que o pedido vira 'pendente'.
+// Quem grava e o proprio banco (gatilho na tabela orders), entao vale para todos os caminhos: lancamento manual da loja,
+// lancamento automatico pelo tempo de preparo, "Pronto" da rota iFood, pedido criado ja disponivel e volta para o
+// sistema (desistencia/atraso do motoboy). Fica em orders.hist_disponivel = [{ ts, tipo: 'solicitado'|'voltou', txt }].
+async function _histDisponivel() {
+  try {
+    await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS hist_disponivel JSONB DEFAULT NULL');
+    await pool.query(`CREATE OR REPLACE FUNCTION fd_hist_disponivel() RETURNS trigger AS $fd$
+      DECLARE tipo TEXT := 'solicitado'; txt TEXT := 'Motoboy solicitado (disponível)';
+      BEGIN
+        IF NEW.status = 'pendente' AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM 'pendente') THEN
+          IF TG_OP = 'UPDATE' THEN
+            IF OLD.status = 'em_preparo' AND NEW.rota_id IS NOT NULL THEN txt := 'Motoboy solicitado (disponível) · rota iFood pronta';
+            ELSIF OLD.status = 'rota_espera' THEN txt := 'Motoboy solicitado (disponível) · rota iFood';
+            ELSIF OLD.status IN ('novo', 'em_preparo') THEN
+              IF COALESCE(OLD.launch_at, 0) > 0 AND COALESCE(NEW.launch_at, 0) = COALESCE(OLD.launch_at, 0) AND (OLD.t_em_preparo IS NULL OR OLD.launch_at >= EXTRACT(EPOCH FROM OLD.t_em_preparo) * 1000 + 60000) THEN txt := 'Motoboy solicitado (disponível) · lançamento automático'; END IF;
+            ELSE
+              tipo := 'voltou';
+              txt := CASE WHEN OLD.motoboy_id IS NOT NULL THEN 'Voltou para disponível (motoboy desistiu)' ELSE 'Voltou para disponível' END;
+            END IF;
+          END IF;
+          NEW.hist_disponivel := COALESCE(NEW.hist_disponivel, '[]'::jsonb) || jsonb_build_array(jsonb_build_object('ts', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'), 'tipo', tipo, 'txt', txt));
+        END IF;
+        RETURN NEW;
+      END $fd$ LANGUAGE plpgsql`);
+    await pool.query('DROP TRIGGER IF EXISTS fd_hist_disponivel ON orders');
+    await pool.query('CREATE TRIGGER fd_hist_disponivel BEFORE INSERT OR UPDATE ON orders FOR EACH ROW EXECUTE PROCEDURE fd_hist_disponivel()');
+    // Pedidos antigos: so quando da para saber com seguranca. pending_until = momento em que ficou disponivel + 15 s
+    // (gravado na criacao e em todo lancamento). Sem desistencia/atraso registrado, esse e o unico momento em que ele
+    // ficou disponivel; precisa estar entre a criacao e o aceite. Nos outros casos fica como esta.
+    const r = await pool.query(`UPDATE orders o SET hist_disponivel = jsonb_build_array(jsonb_build_object('ts', to_char(GREATEST(to_timestamp((o.pending_until - 15000) / 1000.0) AT TIME ZONE 'UTC', o.created_at), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'), 'tipo', 'solicitado', 'txt', 'Motoboy solicitado (disponível)', 'inferido', true))
+      WHERE o.hist_disponivel IS NULL AND o.pending_until > 0 AND (o.t_aceito IS NOT NULL OR o.status = 'pendente')
+        AND (to_timestamp((o.pending_until - 15000) / 1000.0) AT TIME ZONE 'UTC') >= o.created_at - INTERVAL '5 seconds'
+        AND (o.t_aceito IS NULL OR (to_timestamp((o.pending_until - 15000) / 1000.0) AT TIME ZONE 'UTC') <= o.t_aceito + INTERVAL '5 seconds')
+        AND NOT EXISTS (SELECT 1 FROM pedido_motoboy_eventos e WHERE e.order_id = o.id AND e.evento IN ('cancelado', 'timeout'))`);
+    if (r.rowCount) console.log('[HIST_DISPONIVEL] Pedidos antigos preenchidos: ' + r.rowCount);
+  } catch (e) { console.error('[HIST_DISPONIVEL] Erro:', e.message); }
+}
+// Troca o texto da ultima volta para disponivel (ex.: atraso do motoboy em vez de desistencia). Nunca derruba o fluxo.
+async function _motivoDisponivel(orderId, txt) {
+  try { await pool.query("UPDATE orders SET hist_disponivel = jsonb_set(hist_disponivel, ARRAY[(jsonb_array_length(hist_disponivel) - 1)::text, 'txt'], to_jsonb($2::text)) WHERE id=$1 AND jsonb_typeof(hist_disponivel) = 'array' AND jsonb_array_length(hist_disponivel) > 0 AND hist_disponivel->-1->>'tipo' = 'voltou'", [orderId, txt]); } catch (e) { console.error('[HIST_DISPONIVEL] motivo:', e.message); }
+}
 async function _colunasJurosEmprestimo() {
   try { await pool.query('ALTER TABLE settings ADD COLUMN IF NOT EXISTS emprestimo_juros_pct DECIMAL DEFAULT 20'); } catch (e) { console.error('[EMPRESTIMO] coluna settings:', e.message); }
   try { await pool.query('ALTER TABLE emprestimos_loja ADD COLUMN IF NOT EXISTS juros_pct DECIMAL DEFAULT NULL'); } catch (e) { console.error('[EMPRESTIMO] coluna emprestimos_loja:', e.message); }
@@ -4688,9 +4731,9 @@ app.get('/motoboys/auto-offline/status', function(req, res) {
   res.json(Object.assign({ regras: { online_max_min: MOTOBOY_ONLINE_MAX_MIN, fantasma_min: MOTOBOY_FANTASMA_MIN, pedido_parado_h: MOTOBOY_PEDIDO_PARADO_H } }, _autoOfflineStatus));
 });
 
-_rota = require('./rota_ifood')({ app, pool, axios, bot, PORT, ADMIN_ID, sanitize, txtPuro: _txtPuro, tokenDe: _tokenDe, adminDe: _adminDe, aplicarPenalidadeMotoboy, descPenalidade: _descPenalidade, registrarEvento: registrarEventoMotoboyPedido, bairroColeta: _bairroColeta, msgDisponivelSecundario: _msgDisponivelSecundario, sendPushToOnlineMotoboys, bloqueioFuncionamento: _bloqueioFuncionamento });
+_rota = require('./rota_ifood')({ app, pool, axios, bot, PORT, ADMIN_ID, sanitize, txtPuro: _txtPuro, tokenDe: _tokenDe, adminDe: _adminDe, motivoDisponivel: _motivoDisponivel, aplicarPenalidadeMotoboy, descPenalidade: _descPenalidade, registrarEvento: registrarEventoMotoboyPedido, bairroColeta: _bairroColeta, msgDisponivelSecundario: _msgDisponivelSecundario, sendPushToOnlineMotoboys, bloqueioFuncionamento: _bloqueioFuncionamento });
 // Testes automatizados (so com FD_TEST=1): acesso aos jobs para simular o tempo
-if (process.env.FD_TEST === '1') global.__fdTest = { checkLateArrivals, checkAndLaunchOrders, rota: () => _rota };
+if (process.env.FD_TEST === '1') global.__fdTest = { checkLateArrivals, checkAndLaunchOrders, histDisponivel: _histDisponivel, rota: () => _rota };
 app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
   setInterval(checkLateArrivals, 60 * 1000);
   
