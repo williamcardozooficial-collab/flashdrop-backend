@@ -541,8 +541,9 @@ module.exports = function instalarRotaIfood(ctx) {
   async function gatilhoNaoAtende() {
     try {
       const c = await cfg(); const min = minNaoAtendeAuto(c);
-      const limite = new Date(Date.now() - min * 60000).toISOString();
-      const r = await pool.query("UPDATE orders SET rota_nao_atende_em=NOW(), rota_nao_atende_admin=false, rota_nao_atende_auto_min=$2 WHERE rota_id IS NOT NULL AND status='no_cliente' AND t_no_cliente IS NOT NULL AND t_no_cliente < $1 AND rota_nao_atende_em IS NULL AND rota_decisao IS NULL AND rota_retorno IS NULL RETURNING id, rota_id, motoboy_id, motoboy_name", [limite, min]);
+      // Janela de 30 min depois do prazo: entrega parada ha muito mais tempo (ex.: de antes deste gatilho existir) fica como esta
+      const limite = new Date(Date.now() - min * 60000).toISOString(), desde = new Date(Date.now() - (min + 30) * 60000).toISOString();
+      const r = await pool.query("UPDATE orders SET rota_nao_atende_em=NOW(), rota_nao_atende_admin=false, rota_nao_atende_auto_min=$2 WHERE rota_id IS NOT NULL AND status='no_cliente' AND t_no_cliente IS NOT NULL AND t_no_cliente < $1 AND t_no_cliente > $3 AND rota_nao_atende_em IS NULL AND rota_decisao IS NULL AND rota_retorno IS NULL RETURNING id, rota_id, motoboy_id, motoboy_name", [limite, min, desde]);
       r.rows.forEach((o) => {
         ctx.registrarEvento(o.id, o.motoboy_id, o.motoboy_name, 'nao_atende', 'No cliente há ' + min + ' min sem finalizar: loja chamada para decidir (automático). A loja tem 15 min.');
         if (o.motoboy_id) pushMotoboy(o.motoboy_id, '⏱️ Pedido #' + o.id + ': a loja foi chamada', 'Você está no cliente há ' + min + ' min e ainda não finalizou. A loja foi chamada para decidir se o pedido fica com você ou volta para a loja. Se conseguir entregar, finalize normalmente.');
