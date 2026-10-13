@@ -3898,6 +3898,34 @@ async function marcarChegadaPedidosMesmaLoja(motoboyId, lojaUser, pedidoOrigemId
 // usada pelo botao manual (mesma logica, mesmas notificacoes). Nunca deve derrubar
 // o ping de localizacao caso algo de errado aqui - por isso tudo fica em try/catch
 // e e chamado sem travar a resposta do ping.
+// Chegada automatica para TODOS os pedidos ativos do motoboy (o app manda so um order_id junto com a localizacao).
+// aceito -> na_loja (perto da coleta) e coletado -> no_cliente (perto da entrega de CADA pedido), em qualquer ordem.
+// Um pedido por vez (evita duas transicoes simultaneas do mesmo pedido); o PUT ja nao repete avisos se o status nao mudou.
+const _chegadaEmAndamento = new Set();
+async function verificarChegadaAutomaticaMotoboy(motoboyId, lat, lng, orderIdExtra) {
+  try {
+    const latN = parseFloat(lat), lngN = parseFloat(lng);
+    if (isNaN(latN) || isNaN(lngN) || !motoboyId) return;
+    const r = await pool.query("SELECT id, status, coleta_lat, coleta_lng, entrega_lat, entrega_lng FROM orders WHERE motoboy_id=$1 AND status IN ('aceito','coletado') ORDER BY id", [motoboyId]);
+    for (const ord of r.rows) {
+      let alvo = null, la = null, ln = null;
+      if (ord.status === 'aceito') { alvo = 'na_loja'; la = ord.coleta_lat; ln = ord.coleta_lng; }
+      else if (ord.status === 'coletado') { alvo = 'no_cliente'; la = ord.entrega_lat; ln = ord.entrega_lng; }
+      if (!alvo || la === null || la === undefined || ln === null || ln === undefined) continue;
+      const dist = haversineMetros(latN, lngN, parseFloat(la), parseFloat(ln));
+      if (!(dist <= RAIO_CHEGADA_AUTO)) continue;
+      const chave = ord.id + ':' + alvo;
+      if (_chegadaEmAndamento.has(chave)) continue;
+      _chegadaEmAndamento.add(chave);
+      try {
+        const corpo = alvo === 'na_loja' ? { status: 'na_loja', t_na_loja: new Date().toISOString(), chegada_loja_auto: true } : { status: 'no_cliente', t_no_cliente: new Date().toISOString(), chegada_cliente_auto: true };
+        await axios.put('http://localhost:' + PORT + '/orders/' + ord.id, corpo);
+        console.log('[CHEGADA-AUTO] Pedido #' + ord.id + ' -> ' + alvo + ' automatico (' + Math.round(dist) + 'm, motoboy ' + motoboyId + (String(orderIdExtra || '') !== String(ord.id) ? ', sem order_id deste pedido' : '') + ')');
+      } catch (ePut) { console.error('[CHEGADA-AUTO] Erro ao avancar #' + ord.id + ' para ' + alvo + ':', ePut.message); }
+      finally { _chegadaEmAndamento.delete(chave); }
+    }
+  } catch (e) { console.error('[CHEGADA-AUTO] Erro geral (motoboy ' + motoboyId + '):', e.message); }
+}
 async function verificarChegadaAutomatica(orderId, lat, lng) {
   try {
     const latN = parseFloat(lat), lngN = parseFloat(lng);
@@ -3926,7 +3954,7 @@ async function verificarChegadaAutomatica(orderId, lat, lng) {
   } catch (e) { console.error('[CHEGADA-AUTO] Erro geral:', e.message); }
 }
 
-app.post('/motoboys/:id/localizacao', async (req, res) => { try { const mid = parseInt(req.params.id); const { lat, lng, order_id } = req.body; if (!lat || !lng) return res.status(400).json({ error: 'lat/lng obrigatorios' }); await pool.query('INSERT INTO motoboy_localizacao (motoboy_id, order_id, lat, lng, updated_at) VALUES ($1, $2, $3, $4, NOW()) ON CONFLICT (motoboy_id) DO UPDATE SET lat=$3, lng=$4, order_id=$2, updated_at=NOW()', [mid, order_id||null, lat, lng]); res.json({ ok: true }); if (order_id) { verificarChegadaAutomatica(order_id, lat, lng); } } catch(e) { res.status(500).json({ error: e.message }); } });
+app.post('/motoboys/:id/localizacao', async (req, res) => { try { const mid = parseInt(req.params.id); const { lat, lng, order_id } = req.body; if (!lat || !lng) return res.status(400).json({ error: 'lat/lng obrigatorios' }); await pool.query('INSERT INTO motoboy_localizacao (motoboy_id, order_id, lat, lng, updated_at) VALUES ($1, $2, $3, $4, NOW()) ON CONFLICT (motoboy_id) DO UPDATE SET lat=$3, lng=$4, order_id=$2, updated_at=NOW()', [mid, order_id||null, lat, lng]); res.json({ ok: true }); verificarChegadaAutomaticaMotoboy(mid, lat, lng, order_id); } catch(e) { res.status(500).json({ error: e.message }); } });
 
 // GET /orders/mapa-ativos - pontos de coleta/entrega dos pedidos ativos, para exibir no mapa do admin
 app.get('/orders/mapa-ativos', async (req, res) => {
