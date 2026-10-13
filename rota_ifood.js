@@ -55,6 +55,9 @@ module.exports = function instalarRotaIfood(ctx) {
       // Gatilho automatico do "cliente nao atende" (o app Android nao tem o botao): minutos em no_cliente sem finalizar
       'ALTER TABLE settings ADD COLUMN IF NOT EXISTS rota_nao_atende_auto_min INTEGER DEFAULT 10',
       'ALTER TABLE orders ADD COLUMN IF NOT EXISTS rota_nao_atende_auto_min INTEGER',
+      // Desfaz disparos automaticos indevidos (entrega que ja estava parada no cliente antes do gatilho existir) ainda sem decisao
+      "DELETE FROM pedido_motoboy_eventos e USING orders o WHERE e.order_id=o.id AND e.evento='nao_atende' AND e.descricao LIKE 'No cliente há % (automático)%' AND o.rota_nao_atende_auto_min IS NOT NULL AND o.rota_decisao IS NULL AND o.t_no_cliente < o.rota_nao_atende_em - ((o.rota_nao_atende_auto_min + 30) * INTERVAL '1 minute')",
+      "UPDATE orders SET rota_nao_atende_em=NULL, rota_nao_atende_admin=false, rota_nao_atende_auto_min=NULL WHERE rota_nao_atende_auto_min IS NOT NULL AND rota_decisao IS NULL AND t_no_cliente < rota_nao_atende_em - ((rota_nao_atende_auto_min + 30) * INTERVAL '1 minute')",
       'UPDATE settings SET rota_valor_ponto=3, rota_preco_v2=true WHERE id=1 AND rota_preco_v2 IS NOT TRUE'
     ];
     for (const q of qs) { try { await pool.query(q); } catch (e) { console.error('[ROTA] coluna:', e.message); } }
