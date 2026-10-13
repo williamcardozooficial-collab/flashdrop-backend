@@ -27,15 +27,18 @@ async function registrarEventoMotoboyPedido(orderId, motoboyId, motoboyName, eve
 }
 
 // SANITIZACAO DE INPUT - protecao XSS e SQL Injection
+// Decodifica as entidades HTML que o sanitize antigo gravava no banco (&#x27; &#39; &quot; &lt; &gt; &amp;) -> texto puro
+function _txtPuro(v) {
+  if (v === null || v === undefined || typeof v !== 'string') return v;
+  return v.replace(/&#x27;|&#39;/gi, "'").replace(/&quot;/gi, '"').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&#x2F;/gi, '/').replace(/&amp;/gi, '&');
+}
 function sanitize(val) {
   if (val === null || val === undefined) return val;
   if (typeof val !== 'string') return val;
-  return val
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#x27;')
+  // Texto e salvo PURO (sem entidades HTML como &#x27;): quem exibe em HTML escapa na hora de exibir.
+  // < e > sao removidos (nome/endereco/obs nao precisam deles), entao nenhum texto salvo vira tag em tela nenhuma.
+  return _txtPuro(val)
+    .replace(/[<>]/g, '')
     .replace(/\/\//g, '')
     .replace(/--/g, '')
     .replace(/\/\*/g, '')
@@ -1429,7 +1432,7 @@ app.put('/orders/:id', async (req, res) => {
     if (fields.status === 'em_preparo' && bot) {
       try {
         const motoboys = await pool.query("SELECT telegram_id FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL AND (blocked IS NOT TRUE) AND (blocked_until IS NULL OR blocked_until <= (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT)");
-        let lojaNome = order.loja_name;
+        let lojaNome = _txtPuro(order.loja_name);
         if (!lojaNome && order.loja_user) {
           const lojaRes = await pool.query("SELECT name FROM users WHERE username=$1", [order.loja_user]);
           if (lojaRes.rows.length > 0) lojaNome = lojaRes.rows[0].name;
@@ -1466,7 +1469,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
           const botUrlGroup = process.env.BOT_URL;
           const botSecretGroup = process.env.BOT_SECRET;
           if (botUrlGroup && botSecretGroup) {
-            let lojaNomeGroup = order.loja_name || order.loja_user;
+            let lojaNomeGroup = _txtPuro(order.loja_name || order.loja_user);
             const pagLabelGroup = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX',pix_direto:'PIX'}[order.tipo_pagamento] || order.tipo_pagamento || '-');
             const precisaSaldoGrp = order.tipo_pagamento === 'dinheiro';
             const saldoNecessarioGrp = precisaSaldoGrp ? (parseFloat(order.valor_pedido||0) + parseFloat(order.comissao||0)).toFixed(2) : '';
@@ -1505,7 +1508,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
             ).catch(e => console.error('[LOJA BOT] Erro em_preparo cliente:', e.message));
           }
       } catch(eLojaBotPrep) { console.error('[LOJA BOT] Erro geral em_preparo:', eLojaBotPrep.message); }    }
-    if (fields.launch_at !== undefined && fields.status === undefined && bot) { try { const motoboysHT = await pool.query("SELECT telegram_id FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL AND (blocked IS NOT TRUE) AND (blocked_until IS NULL OR blocked_until <= (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT)"); let lojaNomeHT = order.loja_name || order.loja_user; const horaNovaHT = new Date(parseInt(order.launch_at)).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); const msgHorarioHT = `🔄 Horario Atualizado! Pedido #${order.id} - ${lojaNomeHT} - Novo lançamento automático: ${horaNovaHT}`; const groupIdHT = process.env.TELEGRAM_GROUP_ID; if (groupIdHT) bot.sendMessage(groupIdHT, msgHorarioHT).catch(() => {}); motoboysHT.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgHorarioHT).catch(() => {})); } catch(eHorarioBot) { console.error('[HORARIO] Erro:', eHorarioBot.message); } }  if (fields.launch_at !== undefined && fields.status === undefined) { try { const botUrlHT = process.env.BOT_URL; const botSecretHT = process.env.BOT_SECRET; if (botUrlHT && botSecretHT) { let lojaNomeHTW = order.loja_name || order.loja_user; const horaNovaHTW = new Date(parseInt(order.launch_at)).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); const msgHorarioHTW = `🔄 Horario Atualizado! Pedido #${order.id} - ${lojaNomeHTW} - Novo lançamento automático: ${horaNovaHTW}`; axios.post(botUrlHT + '/api/send-group-message', { message: msgHorarioHTW, mentionAll: true }, { headers: { 'x-bot-secret': botSecretHT } }).catch(e => console.error('[BOT] Erro msg grupo horario:', e.message)); axios.post(botUrlHT + '/api/send-group-message', { message: msgHorarioHTW, grupo: 'secundario' }, { headers: { 'x-bot-secret': botSecretHT } }).catch(e => console.error('[BOT] Erro msg grupo2 horario:', e.message)); } } catch(eHorarioBotW) { console.error('[HORARIO] Erro WhatsApp:', eHorarioBotW.message); } }if (fields.status === 'entregue' && prevOrderRes.rows[0] && prevOrderRes.rows[0].status === 'entregue') { return res.json(order); }
+    if (fields.launch_at !== undefined && fields.status === undefined && bot) { try { const motoboysHT = await pool.query("SELECT telegram_id FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL AND (blocked IS NOT TRUE) AND (blocked_until IS NULL OR blocked_until <= (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT)"); let lojaNomeHT = _txtPuro(order.loja_name || order.loja_user); const horaNovaHT = new Date(parseInt(order.launch_at)).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); const msgHorarioHT = `🔄 Horario Atualizado! Pedido #${order.id} - ${lojaNomeHT} - Novo lançamento automático: ${horaNovaHT}`; const groupIdHT = process.env.TELEGRAM_GROUP_ID; if (groupIdHT) bot.sendMessage(groupIdHT, msgHorarioHT).catch(() => {}); motoboysHT.rows.forEach(mb => bot.sendMessage(mb.telegram_id, msgHorarioHT).catch(() => {})); } catch(eHorarioBot) { console.error('[HORARIO] Erro:', eHorarioBot.message); } }  if (fields.launch_at !== undefined && fields.status === undefined) { try { const botUrlHT = process.env.BOT_URL; const botSecretHT = process.env.BOT_SECRET; if (botUrlHT && botSecretHT) { let lojaNomeHTW = _txtPuro(order.loja_name || order.loja_user); const horaNovaHTW = new Date(parseInt(order.launch_at)).toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit'}); const msgHorarioHTW = `🔄 Horario Atualizado! Pedido #${order.id} - ${lojaNomeHTW} - Novo lançamento automático: ${horaNovaHTW}`; axios.post(botUrlHT + '/api/send-group-message', { message: msgHorarioHTW, mentionAll: true }, { headers: { 'x-bot-secret': botSecretHT } }).catch(e => console.error('[BOT] Erro msg grupo horario:', e.message)); axios.post(botUrlHT + '/api/send-group-message', { message: msgHorarioHTW, grupo: 'secundario' }, { headers: { 'x-bot-secret': botSecretHT } }).catch(e => console.error('[BOT] Erro msg grupo2 horario:', e.message)); } } catch(eHorarioBotW) { console.error('[HORARIO] Erro WhatsApp:', eHorarioBotW.message); } }if (fields.status === 'entregue' && prevOrderRes.rows[0] && prevOrderRes.rows[0].status === 'entregue') { return res.json(order); }
     // Mesma protecao contra reprocessamento duplicado (e reenvio de notificacao ao
     // cliente/loja) quando o mesmo status chega mais de uma vez para o pedido - por
     // exemplo, o motoboy aperta "Cheguei no Cliente" manualmente quase ao mesmo tempo
@@ -1575,7 +1578,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
             }
           }
         }
-      } catch(eEstorno) { console.error('[ESTORNO] Erro ao estornar cancelamento:', eEstorno.message); } if (fields.status === 'cancelado' && fields.cancelado_por === 'loja') { try { const fullOrderRes2 = await pool.query('SELECT * FROM orders WHERE id=$1', [req.params.id]); if (fullOrderRes2.rows.length > 0) { const ord2 = fullOrderRes2.rows[0]; if (ord2.loja_user) { const setRes = await pool.query('SELECT taxa_cancelamento FROM settings WHERE id=1'); const taxaCanc = parseFloat(setRes.rows[0] && setRes.rows[0].taxa_cancelamento) || 0; if (taxaCanc > 0) { await pool.query('UPDATE users SET credit = credit - $1 WHERE username=$2', [taxaCanc, ord2.loja_user]); const lojaEvRes2 = await pool.query('SELECT id FROM users WHERE username=$1', [ord2.loja_user]); if (lojaEvRes2.rows.length > 0) { await pool.query('INSERT INTO loja_wallet_events (loja_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)', [lojaEvRes2.rows[0].id, 'taxa_cancelamento', taxaCanc, 'Taxa de cancelamento - pedido #' + req.params.id + ' (cobrada pelo uso de dados e recursos do sistema neste cancelamento)', req.params.id]); } } } } } catch(eTaxaCanc) { console.error('[TAXA_CANCELAMENTO] Erro:', eTaxaCanc.message); } } try { const botUrlGC = process.env.BOT_URL; const botSecretGC = process.env.BOT_SECRET; if (botUrlGC && botSecretGC) { const lojaNomeGC = order.loja_name || order.loja_user; const msgGC = '\u274c Pedido Cancelado!\nPedido #' + order.id + ' - ' + lojaNomeGC + '\nEste pedido foi cancelado. Motoboys nao precisam mais aguardar por ele.'; axios.post(botUrlGC + '/api/send-group-message', { message: msgGC }, { headers: { 'x-bot-secret': botSecretGC } }).catch(e => console.error('[BOT] Erro grupo cancelado:', e.message)); axios.post(botUrlGC + '/api/send-group-message', { message: msgGC, grupo: 'secundario' }, { headers: { 'x-bot-secret': botSecretGC } }).catch(e => console.error('[BOT] Erro grupo2 cancelado:', e.message)); } } catch(eGroupCancel) { console.error('[BOT] Erro geral grupo cancelado:', eGroupCancel.message); }
+      } catch(eEstorno) { console.error('[ESTORNO] Erro ao estornar cancelamento:', eEstorno.message); } if (fields.status === 'cancelado' && fields.cancelado_por === 'loja') { try { const fullOrderRes2 = await pool.query('SELECT * FROM orders WHERE id=$1', [req.params.id]); if (fullOrderRes2.rows.length > 0) { const ord2 = fullOrderRes2.rows[0]; if (ord2.loja_user) { const setRes = await pool.query('SELECT taxa_cancelamento FROM settings WHERE id=1'); const taxaCanc = parseFloat(setRes.rows[0] && setRes.rows[0].taxa_cancelamento) || 0; if (taxaCanc > 0) { await pool.query('UPDATE users SET credit = credit - $1 WHERE username=$2', [taxaCanc, ord2.loja_user]); const lojaEvRes2 = await pool.query('SELECT id FROM users WHERE username=$1', [ord2.loja_user]); if (lojaEvRes2.rows.length > 0) { await pool.query('INSERT INTO loja_wallet_events (loja_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)', [lojaEvRes2.rows[0].id, 'taxa_cancelamento', taxaCanc, 'Taxa de cancelamento - pedido #' + req.params.id + ' (cobrada pelo uso de dados e recursos do sistema neste cancelamento)', req.params.id]); } } } } } catch(eTaxaCanc) { console.error('[TAXA_CANCELAMENTO] Erro:', eTaxaCanc.message); } } try { const botUrlGC = process.env.BOT_URL; const botSecretGC = process.env.BOT_SECRET; if (botUrlGC && botSecretGC) { const lojaNomeGC = _txtPuro(order.loja_name || order.loja_user); const msgGC = '\u274c Pedido Cancelado!\nPedido #' + order.id + ' - ' + lojaNomeGC + '\nEste pedido foi cancelado. Motoboys nao precisam mais aguardar por ele.'; axios.post(botUrlGC + '/api/send-group-message', { message: msgGC }, { headers: { 'x-bot-secret': botSecretGC } }).catch(e => console.error('[BOT] Erro grupo cancelado:', e.message)); axios.post(botUrlGC + '/api/send-group-message', { message: msgGC, grupo: 'secundario' }, { headers: { 'x-bot-secret': botSecretGC } }).catch(e => console.error('[BOT] Erro grupo2 cancelado:', e.message)); } } catch(eGroupCancel) { console.error('[BOT] Erro geral grupo cancelado:', eGroupCancel.message); }
     }
 
     if (fields.status === 'entregue' && order.motoboy_id) {
@@ -2757,7 +2760,7 @@ async function checkLateArrivals() {
       registrarEventoMotoboyPedido(order.id, order.motoboy_id, order.motoboy_name, 'timeout', 'Motoboy nao chegou na loja em 15 minutos, pedido voltou pro sistema' + (penTimeout ? ' (' + _descPenalidade(penTimeout) + ')' : ''));
       if (bot) {
         const groupId = process.env.TELEGRAM_GROUP_ID;
-        let lojaRepostNome = order.loja_name;
+        let lojaRepostNome = _txtPuro(order.loja_name);
         if (!lojaRepostNome && order.loja_user) {
           const lrRes = await pool.query("SELECT name FROM users WHERE username=$1", [order.loja_user]);
           if (lrRes.rows.length > 0) lojaRepostNome = lrRes.rows[0].name;
@@ -2812,7 +2815,7 @@ app.post('/orders/:id/launch', async (req, res) => {
     if (r.rows.length === 0) return res.status(404).json({ error: 'Pedido nao encontrado ou ja lancado.' });
     const pedido = r.rows[0];
     if (bot) {
-      let lojaNome = pedido.loja_name;
+      let lojaNome = _txtPuro(pedido.loja_name);
       if (!lojaNome && pedido.loja_user) {
         const lr = await pool.query("SELECT name FROM users WHERE username=$1", [pedido.loja_user]);
         if (lr.rows.length > 0) lojaNome = lr.rows[0].name;
@@ -2830,7 +2833,7 @@ app.post('/orders/:id/launch', async (req, res) => {
         const botUrlGroupL = process.env.BOT_URL;
         const botSecretGroupL = process.env.BOT_SECRET;
         if (botUrlGroupL && botSecretGroupL) {
-          let lojaNomePend = pedido.loja_name || pedido.loja_user;
+          let lojaNomePend = _txtPuro(pedido.loja_name || pedido.loja_user);
           const pagLabelPend = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX',pix_direto:'PIX'}[pedido.tipo_pagamento] || pedido.tipo_pagamento || '-');
           const msgGroupPend = '\uD83D\uDEF5 Pedido Dispon\u00EDvel!\n' +
             '\uD83D\uDCE6 Pedido #' + pedido.id + ' \u2014 ' + lojaNomePend + '\n' +
@@ -3215,7 +3218,7 @@ async function checkAndLaunchOrders() {
     for (const pedido of r.rows) {
       await pool.query("UPDATE orders SET status='pendente', pending_until=$1 WHERE id=$2", [now + 15000, pedido.id]);
       if (bot) {
-        let lojaNome = pedido.loja_name;
+        let lojaNome = _txtPuro(pedido.loja_name);
         if (!lojaNome && pedido.loja_user) {
           const lr = await pool.query("SELECT name FROM users WHERE username=$1", [pedido.loja_user]);
           if (lr.rows.length > 0) lojaNome = lr.rows[0].name;
@@ -3234,7 +3237,7 @@ async function checkAndLaunchOrders() {
             const botUrlGroupA = process.env.BOT_URL;
             const botSecretGroupA = process.env.BOT_SECRET;
             if (botUrlGroupA && botSecretGroupA) {
-              let lojaNomeAuto = pedido.loja_name || pedido.loja_user;
+              let lojaNomeAuto = _txtPuro(pedido.loja_name || pedido.loja_user);
               const pagLabelAuto = ({dinheiro:'Dinheiro',maquina:'Maquina',pix:'PIX',pix_direto:'PIX'}[pedido.tipo_pagamento] || pedido.tipo_pagamento || '-');
               const msgGroupAuto = '\uD83D\uDEF5 Pedido Dispon\u00EDvel!\n' +
                 '\uD83D\uDCE6 Pedido #' + pedido.id + ' \u2014 ' + lojaNomeAuto + '\n' +
@@ -3933,7 +3936,31 @@ app.get('/orders/motoboy-eventos', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/rastrear/:order_id', async (req, res) => { try { const oid = parseInt(req.params.order_id); const r = await pool.query("SELECT ml.lat, ml.lng, ml.updated_at, u.name AS nome_motoboy, o.status, o.nome_cliente FROM motoboy_localizacao ml JOIN users u ON u.id = ml.motoboy_id JOIN orders o ON o.id = ml.order_id WHERE ml.order_id = $1", [oid]); if (r.rows.length === 0) return res.status(404).json({ error: 'Rastreio nao disponivel' }); res.json(r.rows[0]); } catch(e) { res.status(500).json({ error: e.message }); } });
-initDB().then(() => {}); async function cleanupOldOrders() { try { const s = await pool.query('SELECT historico_limpeza_dias FROM settings WHERE id=1'); const dias = parseInt(s.rows[0] && s.rows[0].historico_limpeza_dias) || 30; const r = await pool.query("DELETE FROM orders WHERE status = 'cancelado' AND created_at < NOW() - ($1 || ' days')::interval RETURNING id", [dias]); /* pedidos entregues sao registros financeiros e nao sao mais apagados */ if (r.rows.length > 0) { console.log('[JOB] Limpeza automatica: ' + r.rows.length + ' pedido(s) removido(s) (prazo: ' + dias + ' dias)'); } } catch (e) { console.error('[JOB] Erro na limpeza automatica de pedidos:', e.message); } } app.put('/settings/cleanup-days', async (req, res) => { try { const dias = parseInt(req.body.historico_limpeza_dias) || 30; await pool.query('UPDATE settings SET historico_limpeza_dias=$1 WHERE id=1', [dias]); res.json({ ok: true, historico_limpeza_dias: dias }); } catch(e) { res.status(500).json({ error: e.message }); } });
+initDB().then(() => { _corrigirEntidadesSalvas(); });
+// Registros gravados com entidades pelo sanitize antigo (ex.: "Kylian&#x27;s"): volta para o texto puro e registra no log o que mudou
+async function _corrigirEntidadesSalvas() {
+  const alvos = { orders: ['loja_name', 'nome_cliente', 'endereco_entrega', 'complemento_entrega', 'obs'], users: ['name', 'username', 'vehicle', 'address'] };
+  const re = "&(#x27|#39|quot|amp|lt|gt|#x2F);";
+  for (const tabela of Object.keys(alvos)) {
+    for (const campo of alvos[tabela]) {
+      try {
+        const r = await pool.query('SELECT id, ' + campo + ' AS v FROM ' + tabela + ' WHERE ' + campo + ' ~* $1', [re]);
+        for (const row of r.rows) {
+          let novo;
+          if (campo === 'address') {
+            // endereco e JSON: decodifica cada campo (decodificar o texto inteiro quebraria o JSON com &quot;)
+            try { const obj = JSON.parse(row.v); Object.keys(obj).forEach(function(k) { if (typeof obj[k] === 'string') obj[k] = _txtPuro(obj[k]).replace(/[<>]/g, ''); }); novo = JSON.stringify(obj); }
+            catch (eJson) { novo = _txtPuro(row.v).replace(/[<>]/g, ''); }
+          } else { novo = _txtPuro(row.v).replace(/[<>]/g, ''); }
+          if (novo === row.v) continue;
+          if (tabela === 'users' && campo === 'username') { const dup = await pool.query('SELECT 1 FROM users WHERE username=$1 AND id<>$2', [novo, row.id]); if (dup.rows.length) { console.log('[ENTIDADES] users #' + row.id + ' username nao alterado (ja existe outro "' + novo + '")'); continue; } }
+          await pool.query('UPDATE ' + tabela + ' SET ' + campo + '=$1 WHERE id=$2', [novo, row.id]);
+          console.log('[ENTIDADES] ' + tabela + ' #' + row.id + ' ' + campo + ': ' + JSON.stringify(row.v).slice(0, 120) + ' -> ' + JSON.stringify(novo).slice(0, 120));
+        }
+      } catch (e) { console.error('[ENTIDADES] ' + tabela + '.' + campo + ':', e.message); }
+    }
+  }
+} async function cleanupOldOrders() { try { const s = await pool.query('SELECT historico_limpeza_dias FROM settings WHERE id=1'); const dias = parseInt(s.rows[0] && s.rows[0].historico_limpeza_dias) || 30; const r = await pool.query("DELETE FROM orders WHERE status = 'cancelado' AND created_at < NOW() - ($1 || ' days')::interval RETURNING id", [dias]); /* pedidos entregues sao registros financeiros e nao sao mais apagados */ if (r.rows.length > 0) { console.log('[JOB] Limpeza automatica: ' + r.rows.length + ' pedido(s) removido(s) (prazo: ' + dias + ' dias)'); } } catch (e) { console.error('[JOB] Erro na limpeza automatica de pedidos:', e.message); } } app.put('/settings/cleanup-days', async (req, res) => { try { const dias = parseInt(req.body.historico_limpeza_dias) || 30; await pool.query('UPDATE settings SET historico_limpeza_dias=$1 WHERE id=1', [dias]); res.json({ ok: true, historico_limpeza_dias: dias }); } catch(e) { res.status(500).json({ error: e.message }); } });
   
 // ============================================================
 // BOT iFOOD ENTREGA PROPRIA
