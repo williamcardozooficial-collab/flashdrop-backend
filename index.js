@@ -1468,7 +1468,7 @@ app.put('/orders/:id', async (req, res) => {
     /* VERIFICACAO DE LIMITE DE PEDIDOS SIMULTANEOS AO ACEITAR CORRIDA */ if (fields.status === 'aceito' && fields.motoboy_id) { try { const mbLimRes = await pool.query('SELECT max_pedidos_individual FROM users WHERE id=$1', [fields.motoboy_id]); const cfgLimRes = await pool.query('SELECT max_per_motoboy FROM settings WHERE id=1'); const individualMax = mbLimRes.rows[0] ? mbLimRes.rows[0].max_pedidos_individual : null; const defaultMax = parseInt(cfgLimRes.rows[0] && cfgLimRes.rows[0].max_per_motoboy) || 2; const effectiveMax = (individualMax !== null && individualMax !== undefined) ? parseInt(individualMax) : defaultMax; if (effectiveMax > 0) { const ativosRes = await pool.query("SELECT COUNT(*) FROM orders WHERE motoboy_id=$1 AND status NOT IN ('pendente','entregue','retornado','cancelado')", [fields.motoboy_id]); const ativos = parseInt(ativosRes.rows[0].count) || 0; if (ativos >= effectiveMax) { return res.status(403).json({ error: 'Voce atingiu o limite de ' + effectiveMax + ' pedido(s) simultaneo(s). Finalize uma entrega para poder aceitar outro.', limit_reached: true }); } } } catch(eLimitePedidos) { console.error('[LIMITE_PEDIDOS] Erro:', eLimitePedidos.message); } }     const sets = Object.keys(fields).map((k,i) => `${k}=$${i+2}`).join(',');
     const vals = Object.values(fields);
 
-    const prevOrderRes = await pool.query('SELECT motoboy_id, motoboy_name, status, delivery_code, valor_total, loja_user, tipo_pagamento, ifood_confirmado_em FROM orders WHERE id=$1', [req.params.id]);
+    const prevOrderRes = await pool.query('SELECT motoboy_id, motoboy_name, status, delivery_code, valor_total, loja_user, tipo_pagamento, ifood_confirmado_em, ifood_sem_confirmacao_admin FROM orders WHERE id=$1', [req.params.id]);
     const prevMotoboyId = prevOrderRes.rows.length > 0 ? prevOrderRes.rows[0].motoboy_id : null;
     const prevMotoboyName = prevOrderRes.rows.length > 0 ? prevOrderRes.rows[0].motoboy_name : null;
 
@@ -1490,7 +1490,8 @@ app.put('/orders/:id', async (req, res) => {
     // sem confirmar de verdade no iFood.
     // O app do motoboy (Android) nao tem a etapa de confirmacao no iFood: ele so manda o codigo do cliente em observacao_entrega.
     // Nesse caso o servidor confirma no iFood aqui mesmo (mesmo robo da pagina web) e so finaliza se o iFood confirmar.
-    if (fields.status === 'entregue' && !req._rotaSemIfood && prevOrderRes.rows.length > 0 && prevOrderRes.rows[0].tipo_pagamento === 'ifood' && !prevOrderRes.rows[0].ifood_confirmado_em) {
+    // Excecao: o admin mandou finalizar sem o iFood ("Finalizar sem iFood", marca ifood_sem_confirmacao_admin antes de chamar aqui)
+    if (fields.status === 'entregue' && !req._rotaSemIfood && prevOrderRes.rows.length > 0 && prevOrderRes.rows[0].tipo_pagamento === 'ifood' && !prevOrderRes.rows[0].ifood_confirmado_em && !prevOrderRes.rows[0].ifood_sem_confirmacao_admin) {
       const codIfood = String(fields.observacao_entrega || '').replace(/\D/g, '');
       if (codIfood.length !== 4) {
         return res.status(400).json({ error: 'Este pedido iFood ainda nao teve a entrega confirmada no site do iFood. Confirme a entrega (localizador + codigo do cliente) antes de finalizar.' });
@@ -4027,7 +4028,7 @@ app.get('/orders/motoboy-eventos', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/rastrear/:order_id', async (req, res) => { try { const oid = parseInt(req.params.order_id); const r = await pool.query("SELECT ml.lat, ml.lng, ml.updated_at, u.name AS nome_motoboy, o.status, o.nome_cliente FROM motoboy_localizacao ml JOIN users u ON u.id = ml.motoboy_id JOIN orders o ON o.id = ml.order_id WHERE ml.order_id = $1", [oid]); if (r.rows.length === 0) return res.status(404).json({ error: 'Rastreio nao disponivel' }); res.json(r.rows[0]); } catch(e) { res.status(500).json({ error: e.message }); } });
-initDB().then(() => { _corrigirEntidadesSalvas(); _colunasJurosEmprestimo(); if (_rota) _rota.criarColunas(); _histDisponivel(); pool.query('CREATE TABLE IF NOT EXISTS rota_premiacao (rota_id INTEGER NOT NULL, motoboy_id INTEGER NOT NULL, criado_em TIMESTAMP DEFAULT NOW(), PRIMARY KEY (rota_id, motoboy_id))').catch((e) => console.error('[PROMO] tabela rota_premiacao:', e.message)); });
+initDB().then(() => { _corrigirEntidadesSalvas(); _colunasJurosEmprestimo(); if (_rota) _rota.criarColunas(); _histDisponivel(); _colunasSemIfood(); pool.query('CREATE TABLE IF NOT EXISTS rota_premiacao (rota_id INTEGER NOT NULL, motoboy_id INTEGER NOT NULL, criado_em TIMESTAMP DEFAULT NOW(), PRIMARY KEY (rota_id, motoboy_id))').catch((e) => console.error('[PROMO] tabela rota_premiacao:', e.message)); });
 // Historico do pedido: "Motoboy solicitado (disponivel)" com data/hora toda vez que o pedido vira 'pendente'.
 // Quem grava e o proprio banco (gatilho na tabela orders), entao vale para todos os caminhos: lancamento manual da loja,
 // lancamento automatico pelo tempo de preparo, "Pronto" da rota iFood, pedido criado ja disponivel e volta para o
@@ -4066,6 +4067,48 @@ async function _histDisponivel() {
     if (r.rowCount) console.log('[HIST_DISPONIVEL] Pedidos antigos preenchidos: ' + r.rowCount);
   } catch (e) { console.error('[HIST_DISPONIVEL] Erro:', e.message); }
 }
+// ===== "Finalizar sem iFood" (so admin) =====
+// Pedido iFood travado (o robo/iFood nao confirma): o admin finaliza pela MESMA finalizacao normal do servidor
+// (PUT /orders/:id status entregue: credito ao motoboy, carteira, contagens, avisos), pulando so a confirmacao no iFood.
+const TXT_SEM_IFOOD = 'Entregue — finalizado manualmente pelo admin (sem confirmação no iFood)';
+async function _colunasSemIfood() {
+  try {
+    await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS ifood_sem_confirmacao_admin TIMESTAMP');
+    await pool.query('ALTER TABLE orders ADD COLUMN IF NOT EXISTS ifood_sem_confirmacao_por VARCHAR(100)');
+  } catch (e) { console.error('[SEM IFOOD] colunas:', e.message); }
+}
+async function _finalizarSemIfood(orderId, por) {
+  const o = (await pool.query('SELECT id, status, tipo_pagamento, motoboy_id, motoboy_name, ifood_confirmado_em FROM orders WHERE id=$1', [orderId])).rows[0];
+  if (!o) return { st: 404, error: 'Pedido não encontrado.' };
+  if (o.tipo_pagamento !== 'ifood') return { st: 409, error: 'Só para pedidos iFood.' };
+  if (!['coletado', 'no_cliente'].includes(o.status)) return { st: 409, error: 'O pedido precisa estar com o motoboy em entrega (coletado ou no cliente). Status atual: ' + o.status + '.' };
+  if (!o.motoboy_id) return { st: 409, error: 'O pedido está sem motoboy.' };
+  await pool.query('UPDATE orders SET ifood_sem_confirmacao_admin=NOW(), ifood_sem_confirmacao_por=$2 WHERE id=$1', [o.id, String(por || 'admin').slice(0, 100)]);
+  const r = await axios.put('http://localhost:' + PORT + '/orders/' + o.id, { status: 'entregue', t_entregue: new Date().toISOString(), observacao_entrega: TXT_SEM_IFOOD }, { validateStatus: () => true });
+  if (r.status >= 300) {
+    await pool.query('UPDATE orders SET ifood_sem_confirmacao_admin=NULL, ifood_sem_confirmacao_por=NULL WHERE id=$1', [o.id]);
+    return { st: r.status, error: (r.data && r.data.error) || 'Não foi possível finalizar.' };
+  }
+  registrarEventoMotoboyPedido(o.id, o.motoboy_id, o.motoboy_name, 'entregue', TXT_SEM_IFOOD + ' (' + (por || 'admin') + ')');
+  console.log('[SEM IFOOD] Pedido #' + o.id + ' finalizado sem confirmação no iFood por ' + (por || 'admin'));
+  return { st: 200, ok: true };
+}
+app.post('/admin/orders/:id/finalizar-sem-ifood', async (req, res) => {
+  try {
+    const a = _adminDe(req); if (!a.user) return res.status(a.erro === 'nao_admin' ? 403 : 401).json({ error: 'Só o admin pode finalizar sem o iFood.', motivo: a.erro });
+    const r = await _finalizarSemIfood(parseInt(req.params.id) || 0, 'admin ' + (a.user.username || a.user.id));
+    res.status(r.st).json(r.ok ? { ok: true } : { error: r.error });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Pedido #1008 (13/10/2026): o William (admin) mandou finalizar sem o iFood. Roda uma vez ao subir, so se ainda estiver em entrega.
+setTimeout(async () => {
+  try {
+    const p = (await pool.query("SELECT id FROM orders WHERE id=1008 AND tipo_pagamento='ifood' AND status IN ('coletado','no_cliente') AND ifood_confirmado_em IS NULL AND ifood_sem_confirmacao_admin IS NULL")).rows[0];
+    if (!p) return;
+    const r = await _finalizarSemIfood(1008, 'William (admin) - pedido urgente 13/10');
+    console.log('[SEM IFOOD] #1008: ' + JSON.stringify(r));
+  } catch (e) { console.error('[SEM IFOOD] #1008:', e.message); }
+}, 20000).unref();
 // Troca o texto da ultima volta para disponivel (ex.: atraso do motoboy em vez de desistencia). Nunca derruba o fluxo.
 async function _motivoDisponivel(orderId, txt) {
   try { await pool.query("UPDATE orders SET hist_disponivel = jsonb_set(hist_disponivel, ARRAY[(jsonb_array_length(hist_disponivel) - 1)::text, 'txt'], to_jsonb($2::text)) WHERE id=$1 AND jsonb_typeof(hist_disponivel) = 'array' AND jsonb_array_length(hist_disponivel) > 0 AND hist_disponivel->-1->>'tipo' = 'voltou'", [orderId, txt]); } catch (e) { console.error('[HIST_DISPONIVEL] motivo:', e.message); }
