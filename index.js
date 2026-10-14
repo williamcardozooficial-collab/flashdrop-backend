@@ -4100,15 +4100,6 @@ app.post('/admin/orders/:id/finalizar-sem-ifood', async (req, res) => {
     res.status(r.st).json(r.ok ? { ok: true } : { error: r.error });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-// Pedido #1008 (13/10/2026): o William (admin) mandou finalizar sem o iFood. Roda uma vez ao subir, so se ainda estiver em entrega.
-setTimeout(async () => {
-  try {
-    const p = (await pool.query("SELECT id FROM orders WHERE id=1008 AND tipo_pagamento='ifood' AND status IN ('coletado','no_cliente') AND ifood_confirmado_em IS NULL AND ifood_sem_confirmacao_admin IS NULL")).rows[0];
-    if (!p) return;
-    const r = await _finalizarSemIfood(1008, 'William (admin) - pedido urgente 13/10');
-    console.log('[SEM IFOOD] #1008: ' + JSON.stringify(r));
-  } catch (e) { console.error('[SEM IFOOD] #1008:', e.message); }
-}, 20000).unref();
 // Troca o texto da ultima volta para disponivel (ex.: atraso do motoboy em vez de desistencia). Nunca derruba o fluxo.
 async function _motivoDisponivel(orderId, txt) {
   try { await pool.query("UPDATE orders SET hist_disponivel = jsonb_set(hist_disponivel, ARRAY[(jsonb_array_length(hist_disponivel) - 1)::text, 'txt'], to_jsonb($2::text)) WHERE id=$1 AND jsonb_typeof(hist_disponivel) = 'array' AND jsonb_array_length(hist_disponivel) > 0 AND hist_disponivel->-1->>'tipo' = 'voltou'", [orderId, txt]); } catch (e) { console.error('[HIST_DISPONIVEL] motivo:', e.message); }
