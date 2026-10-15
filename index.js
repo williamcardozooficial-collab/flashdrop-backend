@@ -767,20 +767,26 @@ function agendarExclusaoClientesInativos() {
 // Linha de retorno a loja (so pedidos pagos com maquina): bairro para onde o motoboy volta = bairro da loja
 function _linhaRetornoWpp(o) { return o.tipo_pagamento === 'maquina' ? ('\n\uD83D\uDD04 Retorno \u00e0 loja: ' + _bairroColeta(o)) : ''; }
 // Mensagem "Pedido Disponivel no App" do grupo SECUNDARIO do WhatsApp (divulgacao para lojistas/motoboys)
+const LINK_APP_MOTOBOY = 'https://play.google.com/store/apps/details?id=com.flashdrop.motoboy&pcampaignid=web_share';
+const LINK_CADASTRO_LOJA = 'https://flashdrop-frontend-six.vercel.app/register.html?ref=JULI0390';
 function _msgDisponivelSecundario(o, lojaNome) {
   return '\uD83D\uDEB4 Pedido Dispon\u00EDvel no App!\n' +
     '\uD83D\uDCE6 Pedido #' + o.id + ' \u2014 ' + lojaNome + '\n' +
     '\uD83D\uDCCD Coleta: ' + _bairroColeta(o) + '\n' +
     '\uD83C\uDFE0 Entrega: ' + (o.bairro_destino || '') + _linhaRetornoWpp(o) + '\n' +
     '\n' +
-    '\u26A1 Lojista sua loja tamb\u00E9m pode ter essa automa\u00E7\u00E3o para suas entregas!\n' +
-    '\n' +
-    '\uD83D\uDC49 Basta se cadastrar pelo link e come\u00E7ar a usar.\n' +
+    'Acesse:\n' +
+    LINK_APP_MOTOBOY;
+}
+// Mensagem "Pedido em Preparo" do grupo SECUNDARIO (hora = lancamento previsto, Brasilia). linhasEntrega: rota iFood (bairros 1a/2a...)
+function _msgPreparoSecundario(o, lojaNome, hora, linhasEntrega) {
+  return '\uD83D\uDD25 Pedido em Preparo!' + (hora ? ' \u23F0 Lan\u00E7amento previsto no aplicativo \u00E0s ' + hora : '') + '\n' +
+    '\uD83D\uDCE6 Pedido #' + o.id + ' \u2014 ' + lojaNome + '\n' +
+    '\uD83D\uDCCD Coleta: ' + _bairroColeta(o) + '\n' +
+    (linhasEntrega || ('\uD83C\uDFE0 Entrega: ' + (o.bairro_destino || '') + _linhaRetornoWpp(o))) + '\n' +
     '\n' +
     '\uD83D\uDD17 *Cadastre sua loja*\n' +
-    'https://flashdrop-frontend-six.vercel.app/register.html?ref=JULI0390\n' +
-    '\n' +
-    '\uD83D\uDCF2 D\u00FAvidas? Fale com o administrador do grupo. Motoboy tamb\u00E9m pode se cadastrar por esse link.';
+    LINK_CADASTRO_LOJA;
 }
 app.get('/debug/time', (req, res) => {
   const now = new Date();
@@ -1609,7 +1615,15 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
               { message: msgGroup },
               { headers: { 'x-bot-secret': botSecretGroup } }
             ).catch(e => console.error('[BOT] Erro msg grupo em_preparo:', e.message));
-            // Grupo secundario: nao recebe mais a mensagem de "em preparo" (so a de "Disponivel no App")
+            // Grupo secundario: "Pedido em Preparo" com o horario previsto de lancamento (so quando ha horario no futuro)
+            const lancPrev = parseInt(order.launch_at) || 0;
+            if (lancPrev > Date.now()) {
+              const horaPrev = new Date(lancPrev).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
+              axios.post(botUrlGroup + '/api/send-group-message',
+                { message: _msgPreparoSecundario(order, lojaNomeGroup, horaPrev), grupo: 'secundario' },
+                { headers: { 'x-bot-secret': botSecretGroup } }
+              ).catch(e => console.error('[BOT] Erro msg grupo2 em_preparo:', e.message));
+            }
           }
         } catch(eGroupPrep) { console.error('[BOT] Erro geral grupo em_preparo:', eGroupPrep.message); }
 
@@ -4792,9 +4806,9 @@ app.get('/motoboys/auto-offline/status', function(req, res) {
   res.json(Object.assign({ regras: { online_max_min: MOTOBOY_ONLINE_MAX_MIN, fantasma_min: MOTOBOY_FANTASMA_MIN, pedido_parado_h: MOTOBOY_PEDIDO_PARADO_H } }, _autoOfflineStatus));
 });
 
-_rota = require('./rota_ifood')({ app, pool, axios, bot, PORT, ADMIN_ID, sanitize, txtPuro: _txtPuro, tokenDe: _tokenDe, adminDe: _adminDe, motivoDisponivel: _motivoDisponivel, premiacaoRota: (id) => _premiacaoRota(id), aplicarPenalidadeMotoboy, descPenalidade: _descPenalidade, registrarEvento: registrarEventoMotoboyPedido, bairroColeta: _bairroColeta, msgDisponivelSecundario: _msgDisponivelSecundario, sendPushToOnlineMotoboys, bloqueioFuncionamento: _bloqueioFuncionamento });
+_rota = require('./rota_ifood')({ app, pool, axios, bot, PORT, ADMIN_ID, sanitize, txtPuro: _txtPuro, tokenDe: _tokenDe, adminDe: _adminDe, motivoDisponivel: _motivoDisponivel, premiacaoRota: (id) => _premiacaoRota(id), aplicarPenalidadeMotoboy, descPenalidade: _descPenalidade, registrarEvento: registrarEventoMotoboyPedido, bairroColeta: _bairroColeta, msgDisponivelSecundario: _msgDisponivelSecundario, sendPushToOnlineMotoboys, bloqueioFuncionamento: _bloqueioFuncionamento, msgPreparoSecundario: _msgPreparoSecundario });
 // Testes automatizados (so com FD_TEST=1): acesso aos jobs para simular o tempo
-if (process.env.FD_TEST === '1') global.__fdTest = { checkLateArrivals, checkAndLaunchOrders, histDisponivel: _histDisponivel, premiacaoRota: _premiacaoRota, rota: () => _rota };
+if (process.env.FD_TEST === '1') global.__fdTest = { msgDisponivelSecundario: _msgDisponivelSecundario, msgPreparoSecundario: _msgPreparoSecundario, checkLateArrivals, checkAndLaunchOrders, histDisponivel: _histDisponivel, premiacaoRota: _premiacaoRota, rota: () => _rota };
 app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
   setInterval(checkLateArrivals, 60 * 1000);
   

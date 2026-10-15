@@ -231,6 +231,17 @@ module.exports = function instalarRotaIfood(ctx) {
       }
     } catch (e) { console.error('[ROTA] aviso disponivel:', e.message); }
   }
+  // Grupo SECUNDARIO: "Pedido em Preparo" da rota (bairros 1a/2a...). A rota nao tem horario previsto: e lancada quando a loja marca Pronto
+  async function avisarRotaPreparo(rotaId) {
+    try {
+      const url = process.env.BOT_URL, sec = process.env.BOT_SECRET; if (!url || !sec || !ctx.msgPreparoSecundario) return;
+      const ps = vivos(await pedidosDaRota(rotaId)); if (!ps.length) return; const p1 = ps[0];
+      const loja = ctx.txtPuro(p1.loja_name) || p1.loja_user;
+      const linhas = ps.map((p, i) => '🏠 ' + (i + 1) + 'ª entrega: ' + (p.bairro_destino || '-')).join('\n');
+      const msg = ctx.msgPreparoSecundario(p1, loja + ' (rota com ' + ps.length + ' entregas)', null, linhas);
+      axios.post(url + '/api/send-group-message', { message: msg, grupo: 'secundario' }, { headers: { 'x-bot-secret': sec } }).catch((e) => console.error('[ROTA] grupo2 preparo:', e.message));
+    } catch (e) { console.error('[ROTA] aviso preparo:', e.message); }
+  }
   async function avisarCancelado(p) {
     try {
       const url = process.env.BOT_URL, sec = process.env.BOT_SECRET; if (!url || !sec) return;
@@ -428,6 +439,7 @@ module.exports = function instalarRotaIfood(ctx) {
       await cli.query('INSERT INTO loja_wallet_events (loja_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)', [loja.id, 'debito_pedido', cot.total, 'Débito rota iFood #' + rotaId + ' (' + pontos.length + ' entregas)', rotaId]);
       await cli.query('COMMIT');
       console.log('[ROTA] Rota #' + rotaId + ' criada por ' + loja.username + ': ' + pontos.length + ' entregas, ' + fmtR(cot.total) + '.');
+      avisarRotaPreparo(rotaId);
       res.json({ ok: true, rota_id: rotaId, ids, total: cot.total, n: pontos.length });
     } catch (e) { try { await cli.query('ROLLBACK'); } catch (e2) {} throw e; }
     finally { cli.release(); }
