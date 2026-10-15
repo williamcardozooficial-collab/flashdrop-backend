@@ -139,6 +139,35 @@ module.exports = function instalarRotaIfood(ctx) {
     if (d.status !== 'OK' || !d.rows) throw erro('Não foi possível calcular a rota agora. Tente de novo.', 502);
     return destinos.map((_, i) => { const el = d.rows[i] && d.rows[i].elements && d.rows[i].elements[i]; if (!el || el.status !== 'OK') throw erro('Não foi possível calcular o trecho até a ' + (i + 1) + 'ª entrega.'); return Math.round(el.distance.value / 10) / 100; });
   }
+  // ---------- ordem mais curta ----------
+  // km pela rota do Google entre todos os pares (origem + clientes), com cache de 6 h por par de coordenadas
+  const _cacheKm = new Map(); const CACHE_KM_MS = 6 * 60 * 60 * 1000;
+  const chaveCoord = (p) => (+p.lat).toFixed(5) + ',' + (+p.lng).toFixed(5);
+  async function matrizKm(locais) {
+    const n = locais.length, M = locais.map(() => new Array(n).fill(null)); let falta = false; const agora = Date.now();
+    for (let i = 0; i < n; i++) for (let j = 1; j < n; j++) { if (i === j) continue; const k = chaveCoord(locais[i]) + '|' + chaveCoord(locais[j]); const c2 = _cacheKm.get(k); if (c2 && agora - c2.em < CACHE_KM_MS) M[i][j] = c2.km; else falta = true; }
+    if (falta) {
+      if (!chaveMapas()) throw erro('Serviço de mapas indisponível no momento.', 503);
+      const txt = (p) => parseFloat(p.lat) + ',' + parseFloat(p.lng);
+      const r = await axios.get('https://maps.googleapis.com/maps/api/distancematrix/json?origins=' + encodeURIComponent(locais.map(txt).join('|')) + '&destinations=' + encodeURIComponent(locais.slice(1).map(txt).join('|')) + '&mode=driving&key=' + chaveMapas(), { timeout: 10000 });
+      const d = r.data || {}; if (d.status !== 'OK' || !d.rows) throw erro('Não foi possível calcular a rota agora. Tente de novo.', 502);
+      for (let i = 0; i < n; i++) for (let j = 1; j < n; j++) { if (i === j) continue; const el = d.rows[i] && d.rows[i].elements && d.rows[i].elements[j - 1]; if (!el || el.status !== 'OK') continue; const km = Math.round(el.distance.value / 10) / 100; M[i][j] = km; _cacheKm.set(chaveCoord(locais[i]) + '|' + chaveCoord(locais[j]), { km, em: agora }); }
+      if (_cacheKm.size > 5000) _cacheKm.clear();
+    }
+    return M;
+  }
+  function permutacoes(arr) { if (arr.length <= 1) return [arr.slice()]; const out = []; arr.forEach((x, i) => { permutacoes(arr.slice(0, i).concat(arr.slice(i + 1))).forEach((p) => out.push([x].concat(p))); }); return out; }
+  // Ordem dos clientes com menor km total saindo da loja (termina no ultimo cliente). Empate: fica a ordem da loja.
+  // Devolve { ordem: indices na lista recebida, km_atual, km_otimo }
+  async function ordemMaisCurta(origem, pontos) {
+    const n = pontos.length; const ident = pontos.map((_, i) => i);
+    if (n < 2 || n > 6) return { ordem: ident, km_atual: null, km_otimo: null };
+    const M = await matrizKm([origem].concat(pontos));
+    const kmDe = (ord) => { let t = 0, ant = 0; for (const i of ord) { const v = M[ant][i + 1]; if (v == null) return Infinity; t += v; ant = i + 1; } return r2(t); };
+    const kmAtual = kmDe(ident); let melhor = ident, kmMelhor = kmAtual;
+    permutacoes(ident).forEach((p) => { const k = kmDe(p); if (k < kmMelhor - 0.01) { melhor = p; kmMelhor = k; } });
+    return { ordem: melhor, km_atual: isFinite(kmAtual) ? kmAtual : null, km_otimo: isFinite(kmMelhor) ? kmMelhor : null };
+  }
   // Cotacao: origem -> p1 -> p2 ... (na ordem da loja). extrasFixos: no recalculo usa as taxas da criacao.
   async function cotar(c, origem, pontos, extrasFixos) {
     const kms = await trechosKm([origem].concat(pontos.slice(0, -1)), pontos);
@@ -352,9 +381,11 @@ module.exports = function instalarRotaIfood(ctx) {
   app.post('/rotas/ifood/cotar', h(async (req, res) => {
     const q = quem(req); if (!q || (q.papel !== 'loja' && q.papel !== 'admin')) throw erro('Faça login de novo na loja.', 401);
     const c = await cfg(); if (!rotaLigada(c)) throw erro('Rota iFood desligada.', 403);
-    const { origem, pontos } = await lerPontos(c, req.body || {});
-    const cot = await cotar(c, origem, pontos);
-    res.json({ ok: true, n: pontos.length, total: cot.total, km_total: cot.km_total });
+    const lidos = await lerPontos(c, req.body || {});
+    // ordem mais curta automatica: o preco ja sai na ordem otimizada; a tela reorganiza os clientes com "ordem"
+    const om = await ordemMaisCurta(lidos.origem, lidos.pontos); const pontos = om.ordem.map((i) => lidos.pontos[i]);
+    const cot = await cotar(c, lidos.origem, pontos);
+    res.json({ ok: true, n: pontos.length, total: cot.total, km_total: cot.km_total, ordem: om.ordem, km_ordem_loja: om.km_atual, economia_km: om.km_atual != null && om.km_otimo != null ? r2(om.km_atual - om.km_otimo) : 0 });
   }));
   app.post('/rotas/ifood', h(async (req, res) => {
     const q = quem(req); if (!q || q.papel !== 'loja') throw erro('Faça login de novo na loja.', 401);
@@ -363,7 +394,9 @@ module.exports = function instalarRotaIfood(ctx) {
     const lr = await pool.query("SELECT id, username, name, credit, phone FROM users WHERE id=$1 AND role='loja'", [q.id]); const loja = lr.rows[0]; if (!loja) throw erro('Loja não encontrada.', 404);
     const body = req.body || {};
     (body.pontos || []).forEach((p, i) => { if (String((p && p.ifood_localizador) || '').replace(/\D/g, '').length !== 8) throw erro('Verifique o localizador iFood (8 números) do ' + (i + 1) + 'º cliente.'); if (!String((p && p.nome_cliente) || '').trim()) throw erro('Informe o nome do ' + (i + 1) + 'º cliente.'); });
-    const { origem, pontos, coleta } = await lerPontos(c, body);
+    const lidos = await lerPontos(c, body); const { origem, coleta } = lidos;
+    // o servidor valida a ordem: cria sempre na ordem mais curta (rota_ordem = ordem otimizada), sem confiar so no navegador
+    const om = await ordemMaisCurta(origem, lidos.pontos); const pontos = om.ordem.map((i) => lidos.pontos[i]);
     const cot = await cotar(c, origem, pontos); const vals = porEntrega(cot);
     const cli = await pool.connect();
     try {
