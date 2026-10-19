@@ -862,10 +862,14 @@ app.get('/users/pending', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// Uso do app pelo motoboy (app/pagina aberta): a pagina chama GET /users/:id a cada 30 s (syncUser). A localizacao em
+// segundo plano NAO conta. Serve para o auto-offline tirar quem fechou o app (sem pedido ativo).
+function _marcarUsoApp(id) { if (!id) return; pool.query("UPDATE users SET last_app_activity=$1 WHERE id=$2 AND role='motoboy'", [Date.now(), parseInt(id) || 0]).catch(function(e) { console.error('[USO-APP]', e.message); }); }
 app.get('/users/:id', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM users WHERE id=$1', [req.params.id]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Nao encontrado' });
+    if (r.rows[0].role === 'motoboy') _marcarUsoApp(r.rows[0].id);
     res.json(r.rows[0]);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -1073,6 +1077,7 @@ app.get('/orders', async (req, res) => {
   // Motoboy identificado (login): pedidos disponiveis em dinheiro/cartao por aproximacao so aparecem se ele passaria na
   // verificacao de saldo do aceite. Sem login (app Android atual), a lista vem completa como antes.
   const mbLista = _motoboyDaRequisicao(req);
+  if (mbLista) _marcarUsoApp(mbLista);
   if (mbLista) {
     const exige = rows.filter(function(o) { return o.status === 'pendente' && !o.motoboy_id && _pedidoExigeSaldo(o); });
     if (exige.length) {
@@ -4091,7 +4096,7 @@ app.get('/orders/motoboy-eventos', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/rastrear/:order_id', async (req, res) => { try { const oid = parseInt(req.params.order_id); const r = await pool.query("SELECT ml.lat, ml.lng, ml.updated_at, u.name AS nome_motoboy, o.status, o.nome_cliente FROM motoboy_localizacao ml JOIN users u ON u.id = ml.motoboy_id JOIN orders o ON o.id = ml.order_id WHERE ml.order_id = $1", [oid]); if (r.rows.length === 0) return res.status(404).json({ error: 'Rastreio nao disponivel' }); res.json(r.rows[0]); } catch(e) { res.status(500).json({ error: e.message }); } });
-initDB().then(() => { _corrigirEntidadesSalvas(); _colunasJurosEmprestimo(); _colunasEmprestimoRota(); if (_rota) _rota.criarColunas(); _histDisponivel(); _colunasSemIfood(); pool.query('CREATE TABLE IF NOT EXISTS rota_premiacao (rota_id INTEGER NOT NULL, motoboy_id INTEGER NOT NULL, criado_em TIMESTAMP DEFAULT NOW(), PRIMARY KEY (rota_id, motoboy_id))').catch((e) => console.error('[PROMO] tabela rota_premiacao:', e.message)); });
+initDB().then(() => { _corrigirEntidadesSalvas(); _colunasJurosEmprestimo(); pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS last_app_activity BIGINT').catch(function(e) { console.error('[USO-APP] coluna:', e.message); }); _colunasEmprestimoRota(); if (_rota) _rota.criarColunas(); _histDisponivel(); _colunasSemIfood(); pool.query('CREATE TABLE IF NOT EXISTS rota_premiacao (rota_id INTEGER NOT NULL, motoboy_id INTEGER NOT NULL, criado_em TIMESTAMP DEFAULT NOW(), PRIMARY KEY (rota_id, motoboy_id))').catch((e) => console.error('[PROMO] tabela rota_premiacao:', e.message)); });
 // Historico do pedido: "Motoboy solicitado (disponivel)" com data/hora toda vez que o pedido vira 'pendente'.
 // Quem grava e o proprio banco (gatilho na tabela orders), entao vale para todos os caminhos: lancamento manual da loja,
 // lancamento automatico pelo tempo de preparo, "Pronto" da rota iFood, pedido criado ja disponivel e volta para o
@@ -4786,7 +4791,7 @@ async function checkMotoboyAutoOffline() {
   const hm = function(ms) { return _horaSP(ms) + ' ' + new Date(ms).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }); };
   try {
     const r = await pool.query(
-      "SELECT u.id, u.online_since, u.ultimo_login, (EXTRACT(EPOCH FROM ml.updated_at) * 1000)::BIGINT AS loc_ms " +
+      "SELECT u.id, u.online_since, u.ultimo_login, u.last_app_activity, (EXTRACT(EPOCH FROM ml.updated_at) * 1000)::BIGINT AS loc_ms " +
       "FROM users u LEFT JOIN motoboy_localizacao ml ON ml.motoboy_id=u.id " +
       "WHERE u.role='motoboy' AND u.online=true AND " + SQL_SEM_PEDIDO_ATIVO);
     for (const m of r.rows) {
@@ -4798,6 +4803,14 @@ async function checkMotoboyAutoOffline() {
         if (inicio && agora - inicio >= MOTOBOY_ONLINE_MAX_MIN * 60 * 1000) motivo = 'online ha mais de ' + (MOTOBOY_ONLINE_MAX_MIN / 60) + 'h (desde ' + hm(inicio) + (onlineSince ? '' : locMs ? ', pela ultima localizacao' : ', pelo ultimo login') + ')';
         else if (locMs && agora - locMs >= MOTOBOY_FANTASMA_MIN * 60 * 1000) motivo = 'sem enviar localizacao ha mais de ' + MOTOBOY_FANTASMA_MIN + 'min (ultima: ' + hm(locMs) + ')';
         else if (!locMs && onlineSince && agora - onlineSince >= MOTOBOY_FANTASMA_MIN * 60 * 1000) motivo = 'nunca enviou localizacao e esta online ha mais de ' + MOTOBOY_FANTASMA_MIN + 'min (desde ' + hm(onlineSince) + ')';
+        else {
+          // App fechado: o celular continua mandando localizacao em segundo plano, mas o motoboy nao abre o app ha 30 min.
+          // Conta o ultimo uso do app (ou a hora em que ficou online, se for mais recente).
+          // Sem registro de uso ainda (ex.: logo depois de publicar): comeca a contar agora, sem derrubar
+          if (!parseInt(m.last_app_activity)) { await pool.query('UPDATE users SET last_app_activity=$1 WHERE id=$2 AND last_app_activity IS NULL', [agora, m.id]); continue; }
+          const usoMs = Math.max(parseInt(m.last_app_activity) || 0, onlineSince);
+          if (usoMs && agora - usoMs >= MOTOBOY_FANTASMA_MIN * 60 * 1000) motivo = 'sem abrir o app ha mais de ' + MOTOBOY_FANTASMA_MIN + 'min (ultimo uso: ' + hm(usoMs) + ')';
+        }
         if (motivo && await _derrubarMotoboyOffline(m.id, motivo)) st.derrubados.push({ id: m.id, motivo: motivo });
       } catch (eM) { st.erros.push('motoboy ' + m.id + ': ' + eM.message); console.error('[JOB] auto-offline motoboy ' + m.id + ':', eM.message); }
     }
@@ -4857,7 +4870,7 @@ app.get('/motoboys/auto-offline/status', function(req, res) {
 
 _rota = require('./rota_ifood')({ app, pool, axios, bot, PORT, ADMIN_ID, sanitize, txtPuro: _txtPuro, tokenDe: _tokenDe, adminDe: _adminDe, motivoDisponivel: _motivoDisponivel, premiacaoRota: (id) => _premiacaoRota(id), aplicarPenalidadeMotoboy, descPenalidade: _descPenalidade, registrarEvento: registrarEventoMotoboyPedido, bairroColeta: _bairroColeta, msgDisponivelSecundario: _msgDisponivelSecundario, sendPushToOnlineMotoboys, bloqueioFuncionamento: _bloqueioFuncionamento, msgPreparoSecundario: _msgPreparoSecundario, linhasKmGanho: _linhasKmGanho });
 // Testes automatizados (so com FD_TEST=1): acesso aos jobs para simular o tempo
-if (process.env.FD_TEST === '1') global.__fdTest = { msgDisponivelSecundario: _msgDisponivelSecundario, msgPreparoSecundario: _msgPreparoSecundario, checkLateArrivals, checkAndLaunchOrders, histDisponivel: _histDisponivel, premiacaoRota: _premiacaoRota, rota: () => _rota };
+if (process.env.FD_TEST === '1') global.__fdTest = { autoOffline: checkMotoboyAutoOffline, offlineDiario: checkOfflineDiarioMotoboys, msgDisponivelSecundario: _msgDisponivelSecundario, msgPreparoSecundario: _msgPreparoSecundario, checkLateArrivals, checkAndLaunchOrders, histDisponivel: _histDisponivel, premiacaoRota: _premiacaoRota, rota: () => _rota };
 app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));
   setInterval(checkLateArrivals, 60 * 1000);
   
