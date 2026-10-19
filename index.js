@@ -694,6 +694,14 @@ async function _enviarPushPenalidade(motoboyId, motivo, p, temAtivo) {
 }
 // Push para o motoboy quando ele chega no cliente (manual ou automatico): orienta a falar DIRETO com a loja em caso de problema.
 // Notificacao comum (sem botao "Aceitar", sem orderId e sem abrirApp), igual ao aviso de penalidade.
+// Mensagens automaticas ao cliente (textos do William, 19/10/2026). Iguais no bot principal e no loja-bot.
+function _msgColetadoCliente(codigo, telLoja) {
+  return '\uD83D\uDCE6 Pedido coletado!\n\n' +
+    '\uD83D\uDD10 C\u00f3digo de entrega: *' + (codigo || '----') + '*\n\n' +
+    (telLoja ? '\uD83D\uDCDE Qualquer d\u00favida: ' + _fmtTelefoneBR(telLoja) + '\n\n' : '') +
+    '\uD83E\uDD16 _Esta \u00e9 uma mensagem autom\u00e1tica, n\u00e3o responder._';
+}
+function _msgChegouCliente() { return '\uD83D\uDEF5 O motoboy chegou!\n\n\uD83E\uDD16 _Esta \u00e9 uma mensagem autom\u00e1tica, n\u00e3o responder._'; }
 function _fmtTelefoneBR(t) { const d = String(t || '').replace(/\D/g, '').replace(/^55(?=\d{10,11}$)/, ''); if (d.length === 11) return '(' + d.slice(0, 2) + ') ' + d.slice(2, 3) + ' ' + d.slice(3, 7) + '-' + d.slice(7); if (d.length === 10) return '(' + d.slice(0, 2) + ') ' + d.slice(2, 6) + '-' + d.slice(6); return String(t || '').trim(); }
 async function _enviarPushChegadaCliente(order) {
   if (!order || !order.motoboy_id) return;
@@ -1996,11 +2004,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
       const botSecretColetado = process.env.BOT_SECRET;
       if (botUrlColetado && botSecretColetado && order.telefone_cliente) {
         const delivCode = order.delivery_code || '----'; let lojaPhoneColetado = null; try { const lRes = await pool.query('SELECT phone FROM users WHERE username=$1', [order.loja_user]); if (lRes.rows.length > 0) lojaPhoneColetado = lRes.rows[0].phone; } catch(eLpC) {} const lojaPhoneLineColetado = lojaPhoneColetado ? ('\n\n📞 Qualquer dúvida, entre em contato com a loja: ' + lojaPhoneColetado) : '';
-        const msgColetado = '\uD83D\uDCE6 Pedido coletado!\n\n' +
-                      'Quando o motoboy estiver pr\u00f3ximo ao seu endere\u00e7o, voc\u00ea receber\u00e1 uma nova notifica\u00e7\u00e3o, que ele chegou, *Fique Atento* \uD83D\uDCF2\n\n' +
-                      'Para receber o pedido, ser\u00e1 necess\u00e1rio informar o c\u00f3digo de entrega:\n\n' +
-                      '\uD83D\uDD10 C\u00f3digo: *' + delivCode + '*\n\n' +
-                      '\u26A0\uFE0F Guarde este c\u00f3digo em seguran\u00e7a e informe-o ao motoboy no momento da entrega. Sem o c\u00f3digo, a entrega n\u00e3o poder\u00e1 ser finalizada.' + lojaPhoneLineColetado + '\n\n🤖 _Esta é uma mensagem automática, não é necessário responder._';
+        const msgColetado = _msgColetadoCliente(delivCode, lojaPhoneColetado);
         axios.post(botUrlColetado + '/api/send-message',
           { phone: order.telefone_cliente, message: msgColetado },
           { headers: { 'x-bot-secret': botSecretColetado } }
@@ -2015,11 +2019,8 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
             const delivCode = order.delivery_code || '';
             const clientePhoneCol = order.telefone_cliente;
             if (clientePhoneCol) {
-                const msgColetadoLoja = '📦 Pedido coletado!\n\n' +
-                  'Quando o motoboy estiver próximo ao seu endereço, você receberá uma nova notificação, que ele chegou, *Fique Atento* 📲\n\n' +
-                  'Para receber o pedido, será necessário informar o código de entrega:\n\n' +
-                  '🔐 Código: *' + delivCode + '*\n\n' +
-                  '⚠️ Guarde este código em segurança e informe-o ao motoboy no momento da entrega. Sem o código, a entrega não poderá ser finalizada.';
+                let telLojaCol = null; try { const lrc = await pool.query('SELECT phone FROM users WHERE username=$1', [order.loja_user]); if (lrc.rows.length) telLojaCol = lrc.rows[0].phone; } catch (eTelCol) {}
+                const msgColetadoLoja = _msgColetadoCliente(delivCode, telLojaCol);
                 axios.post(lojaBotUrlCol + '/api/send-message',
                   { lojaId: String(order.loja_user), phone: clientePhoneCol, message: msgColetadoLoja },
                   { headers: { 'x-bot-secret': lojaBotSecretCol } }
@@ -2055,9 +2056,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
       const botUrlNoCliente = process.env.BOT_URL;
       const botSecretNoCliente = process.env.BOT_SECRET;
       if (botUrlNoCliente && botSecretNoCliente && order.telefone_cliente) { let lojaPhoneNoCliente = null; let lojaCustomIdNoCliente = null; try { const lResNc = await pool.query('SELECT phone, custom_id FROM users WHERE username=$1', [order.loja_user]); if (lResNc.rows.length > 0) { lojaPhoneNoCliente = lResNc.rows[0].phone; lojaCustomIdNoCliente = lResNc.rows[0].custom_id; } } catch(eLpNc) {} const lojaPhoneLineNoCliente = lojaPhoneNoCliente ? ('\n\n📞 Qualquer dúvida, entre em contato com a loja: ' + lojaPhoneNoCliente) : ''; const avaliarLinkLineNoCliente = lojaCustomIdNoCliente ? ('\n\n⭐ Depois de receber seu pedido, que tal avaliar a loja? Sua opinião ajuda outros clientes!\nhttps://flashdrop-frontend-six.vercel.app/cardapio.html?id=' + lojaCustomIdNoCliente) : '';
-        const msgNoCliente = '\uD83D\uDEF5 O motoboy chegou!\n' +
-          'Pedido #' + order.id + '\n' +
-          'Seu entregador est\u00e1 na porta. Por favor, v\u00e1 ao encontro dele para receber seu pedido. \uD83D\uDCE6\u2764\uFE0F' + lojaPhoneLineNoCliente + avaliarLinkLineNoCliente + '\n\n🤖 _Esta é uma mensagem automática, não é necessário responder._';
+        const msgNoCliente = _msgChegouCliente();
         axios.post(botUrlNoCliente + '/api/send-message',
           { phone: order.telefone_cliente, message: msgNoCliente },
           { headers: { 'x-bot-secret': botSecretNoCliente } }
@@ -2072,9 +2071,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
         const lojaBotSecret = 'flashdrop-loja-bot-secret';
         const clientePhone = order.telefone_cliente;
         if (clientePhone) {
-            const msgChegou = '\uD83D\uDEF5 O motoboy chegou!\n' +
-              'Pedido #' + order.id + '\n' +
-              'Seu entregador est\u00e1 na porta. Por favor, v\u00e1 ao encontro dele para receber seu pedido. \uD83C\uDFE0';
+            const msgChegou = _msgChegouCliente();
             axios.post(lojaBotUrl + '/api/send-message',
               { lojaId: String(order.loja_user), phone: clientePhone, message: msgChegou },
               { headers: { 'x-bot-secret': lojaBotSecret } }
