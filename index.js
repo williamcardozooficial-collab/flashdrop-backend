@@ -4788,6 +4788,7 @@ const _autoOfflineStatus = { ultima_rodada: null, derrubados: [], preenchidos: [
 async function checkMotoboyAutoOffline() {
   const agora = Date.now();
   const st = { ultima_rodada: new Date(agora).toISOString(), derrubados: [], preenchidos: [], pedidos_parados: [], erros: [] };
+  try { await pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS last_app_activity BIGINT'); } catch (eCol) {} // garante a coluna mesmo na 1a rodada ao iniciar
   const hm = function(ms) { return _horaSP(ms) + ' ' + new Date(ms).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }); };
   try {
     const r = await pool.query(
