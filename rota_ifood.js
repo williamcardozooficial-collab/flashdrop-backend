@@ -223,9 +223,10 @@ module.exports = function instalarRotaIfood(ctx) {
       const url = process.env.BOT_URL, sec = process.env.BOT_SECRET;
       if (url && sec) {
         const nomeRota = loja + ' (rota com ' + n + ' entregas)';
-        const msgG = '🛵 Pedido Disponível!\n📦 Pedido #' + p1.id + ' — ' + nomeRota + '\n📍 Coleta: ' + ctx.bairroColeta(p1) + '\n' + linhas;
+        const msgG = '🛵 Pedido Disponível!\n📦 Pedido #' + p1.id + ' — ' + nomeRota + '\n📍 Coleta: ' + ctx.bairroColeta(p1) + '\n' + linhas + ctx.linhasKmGanho(km, ganho);
         axios.post(url + '/api/send-group-message', { message: msgG, mentionAll: true }, { headers: { 'x-bot-secret': sec } }).catch((e) => console.error('[ROTA] grupo:', e.message));
-        const ls = ctx.msgDisponivelSecundario(p1, nomeRota).split('\n'); const k = ls.findIndex((l) => l.indexOf('🏠 Entrega:') === 0);
+        // secundario: Km total da rota; rota com 2+ entregas vai sem a linha R$
+        const ls = ctx.msgDisponivelSecundario(p1, nomeRota, { km, ganho, semGanho: n >= 2 }).split('\n'); const k = ls.findIndex((l) => l.indexOf('🏠 Entrega:') === 0);
         if (k >= 0) ls.splice(k, 1, ...linhas.split('\n'));
         axios.post(url + '/api/send-group-message', { message: ls.join('\n'), grupo: 'secundario' }, { headers: { 'x-bot-secret': sec } }).catch((e) => console.error('[ROTA] grupo2:', e.message));
       }
