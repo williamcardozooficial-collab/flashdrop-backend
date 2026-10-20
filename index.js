@@ -1086,6 +1086,14 @@ app.get('/orders', async (req, res) => {
       if (fora.size) rows = rows.filter(function(o) { return !fora.has(o.id); });
     }
   }
+  // motoboy_ocupado_outra_loja: pedido aceito (motoboy ainda nao chegou na loja) cujo motoboy tem pedido ativo de OUTRA loja.
+  // So o booleano: nada da outra loja nem do cliente vai junto. Rota iFood da mesma loja nao conta.
+  const lojasDoMb = {};
+  rows.forEach(function(o) { if (o.motoboy_id && ['aceito', 'na_loja', 'coletado', 'no_cliente'].indexOf(o.status) !== -1) (lojasDoMb[o.motoboy_id] = lojasDoMb[o.motoboy_id] || new Set()).add(o.loja_user); });
+  rows = rows.map(function(o) {
+    const outras = o.status === 'aceito' && o.motoboy_id && lojasDoMb[o.motoboy_id] && Array.from(lojasDoMb[o.motoboy_id]).some(function(l) { return l !== o.loja_user; });
+    return Object.assign({}, o, { motoboy_ocupado_outra_loja: !!outras });
+  });
   res.json(req.query.raw || !_rota ? rows : _rota.paraApp(rows));
 });
 
