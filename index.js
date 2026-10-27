@@ -1538,7 +1538,8 @@ app.put('/orders/:id', async (req, res) => {
     const prevMotoboyName = prevOrderRes.rows.length > 0 ? prevOrderRes.rows[0].motoboy_name : null;
 
     // Validacao do codigo de entrega ANTES do UPDATE
-    if (fields.status === 'entregue' && prevOrderRes.rows.length > 0 && prevOrderRes.rows[0].delivery_code && prevOrderRes.rows[0].tipo_pagamento !== 'ifood') {
+    // Rota PIX: "deixar com o motoboy" (decisao da loja) e o retorno (codigo ja conferido na rota) finalizam sem este codigo
+    if (fields.status === 'entregue' && !req._rotaSemCodigo && prevOrderRes.rows.length > 0 && prevOrderRes.rows[0].delivery_code && prevOrderRes.rows[0].tipo_pagamento !== 'ifood') {
       const obsInformada = (fields.observacao_entrega || '').trim();
       if (obsInformada !== String(prevOrderRes.rows[0].delivery_code)) {
         return res.status(400).json({ error: 'Codigo de entrega incorreto. Verifique o codigo com o cliente e tente novamente.' });
@@ -2952,7 +2953,7 @@ async function checkLateArrivals() {
 
 app.post('/orders/:id/launch', async (req, res) => {
   try {
-    try { const _rl = await pool.query('SELECT rota_id FROM orders WHERE id=$1', [req.params.id]); if (_rl.rows.length && _rl.rows[0].rota_id) return res.status(409).json({ error: 'Rota iFood: marque "Pronto" em cada entrega; a rota é lançada quando a última ficar pronta.' }); } catch (eRl) {}
+    try { const _rl = await pool.query('SELECT rota_id, tipo_pagamento FROM orders WHERE id=$1', [req.params.id]); if (_rl.rows.length && _rl.rows[0].rota_id) return res.status(409).json({ error: (_rl.rows[0].tipo_pagamento === 'pix' ? 'Rota PIX' : 'Rota iFood') + ': marque "Pronto" em cada entrega; a rota é lançada quando a última ficar pronta.' }); } catch (eRl) {}
     const r = await pool.query("UPDATE orders SET status='pendente', launch_at=0, pending_until=$1 WHERE id=$2 AND status='em_preparo' RETURNING *", [Date.now()+15000, req.params.id]);
     if (r.rows.length === 0) return res.status(404).json({ error: 'Pedido nao encontrado ou ja lancado.' });
     const pedido = r.rows[0];
@@ -4135,8 +4136,8 @@ async function _histDisponivel() {
       BEGIN
         IF NEW.status = 'pendente' AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM 'pendente') THEN
           IF TG_OP = 'UPDATE' THEN
-            IF OLD.status = 'em_preparo' AND NEW.rota_id IS NOT NULL THEN txt := 'Motoboy solicitado (disponível) · rota iFood pronta';
-            ELSIF OLD.status = 'rota_espera' THEN txt := 'Motoboy solicitado (disponível) · rota iFood';
+            IF OLD.status = 'em_preparo' AND NEW.rota_id IS NOT NULL THEN txt := 'Motoboy solicitado (disponível) · rota ' || CASE WHEN NEW.tipo_pagamento = 'pix' THEN 'PIX' ELSE 'iFood' END || ' pronta';
+            ELSIF OLD.status = 'rota_espera' THEN txt := 'Motoboy solicitado (disponível) · rota ' || CASE WHEN NEW.tipo_pagamento = 'pix' THEN 'PIX' ELSE 'iFood' END;
             ELSIF OLD.status IN ('novo', 'em_preparo') THEN
               IF COALESCE(OLD.launch_at, 0) > 0 AND COALESCE(NEW.launch_at, 0) = COALESCE(OLD.launch_at, 0) AND (OLD.t_em_preparo IS NULL OR OLD.launch_at >= EXTRACT(EPOCH FROM OLD.t_em_preparo) * 1000 + 60000) THEN txt := 'Motoboy solicitado (disponível) · lançamento automático'; END IF;
             ELSE
@@ -4895,7 +4896,31 @@ app.get('/motoboys/auto-offline/status', function(req, res) {
   res.json(Object.assign({ regras: { online_max_min: MOTOBOY_ONLINE_MAX_MIN, fantasma_min: MOTOBOY_FANTASMA_MIN, pedido_parado_h: MOTOBOY_PEDIDO_PARADO_H } }, _autoOfflineStatus));
 });
 
-_rota = require('./rota_ifood')({ app, pool, axios, bot, PORT, ADMIN_ID, sanitize, txtPuro: _txtPuro, tokenDe: _tokenDe, adminDe: _adminDe, motivoDisponivel: _motivoDisponivel, premiacaoRota: (id) => _premiacaoRota(id), aplicarPenalidadeMotoboy, descPenalidade: _descPenalidade, registrarEvento: registrarEventoMotoboyPedido, bairroColeta: _bairroColeta, msgDisponivelSecundario: _msgDisponivelSecundario, sendPushToOnlineMotoboys, bloqueioFuncionamento: _bloqueioFuncionamento, msgPreparoSecundario: _msgPreparoSecundario, linhasKmGanho: _linhasKmGanho });
+// Rota PIX: avisos ao cliente que o PIX normal recebe no PUT /orders ("em preparo" e "coletado" com o codigo de entrega).
+// A rota cria e coleta as entregas direto no banco, entao manda por aqui, com os mesmos textos e destinos do PUT /orders.
+const _LOJA_BOT_URL_ROTA = 'https://flashdrop-loja-bot-production.up.railway.app', _LOJA_BOT_SECRET_ROTA = 'flashdrop-loja-bot-secret';
+function _avisoClienteRotaPreparo(order) {
+  try {
+    if (!order || !order.telefone_cliente) return;
+    const endereco = [order.endereco_entrega, order.complemento_entrega, order.bairro_destino].filter(Boolean).join(', ');
+    const msgPrep = '📋 Pedido confirmado! #' + order.id + '\n\n' +
+      'Seu pedido foi recebido com sucesso e já está em preparação. 🧑‍🍳🍔\n\n' +
+      '📍 Endereço de entrega: ' + endereco + '\n' +
+      '💰 Forma de pagamento: ' + order.tipo_pagamento + '\n' + '⏱️ Tempo estimado de preparo: 40 a 90 minutos' + '\n\n' +
+      '⏳ Agora é só aguardar, em breve seu pedido ficará pronto para envio! 🎉';
+    axios.post(_LOJA_BOT_URL_ROTA + '/api/send-message', { lojaId: String(order.loja_user), phone: order.telefone_cliente, message: msgPrep }, { headers: { 'x-bot-secret': _LOJA_BOT_SECRET_ROTA } }).catch(e => console.error('[ROTA PIX] em_preparo cliente:', e.message));
+  } catch (e) { console.error('[ROTA PIX] aviso preparo cliente:', e.message); }
+}
+async function _avisoClienteRotaColetado(order) {
+  try {
+    if (!order || !order.telefone_cliente) return;
+    let telLoja = null; try { const l = await pool.query('SELECT phone FROM users WHERE username=$1', [order.loja_user]); if (l.rows.length) telLoja = l.rows[0].phone; } catch (e) {}
+    const url = process.env.BOT_URL, sec = process.env.BOT_SECRET;
+    if (url && sec) axios.post(url + '/api/send-message', { phone: order.telefone_cliente, message: _msgColetadoCliente(order.delivery_code || '----', telLoja) }, { headers: { 'x-bot-secret': sec } }).catch(e => console.error('[BOT] Erro WhatsApp coletado cliente (rota PIX):', e.message));
+    axios.post(_LOJA_BOT_URL_ROTA + '/api/send-message', { lojaId: String(order.loja_user), phone: order.telefone_cliente, message: _msgColetadoCliente(order.delivery_code || '', telLoja) }, { headers: { 'x-bot-secret': _LOJA_BOT_SECRET_ROTA } }).catch(e => console.error('[LOJA BOT] Erro coletado cliente loja (rota PIX):', e.message));
+  } catch (e) { console.error('[ROTA PIX] aviso coletado cliente:', e.message); }
+}
+_rota = require('./rota_ifood')({ app, pool, axios, bot, PORT, ADMIN_ID, sanitize, txtPuro: _txtPuro, tokenDe: _tokenDe, adminDe: _adminDe, motivoDisponivel: _motivoDisponivel, premiacaoRota: (id) => _premiacaoRota(id), aplicarPenalidadeMotoboy, descPenalidade: _descPenalidade, registrarEvento: registrarEventoMotoboyPedido, bairroColeta: _bairroColeta, msgDisponivelSecundario: _msgDisponivelSecundario, sendPushToOnlineMotoboys, bloqueioFuncionamento: _bloqueioFuncionamento, msgPreparoSecundario: _msgPreparoSecundario, linhasKmGanho: _linhasKmGanho, grupo2Permitido: _grupo2Permitido, avisoClienteRotaPreparo: _avisoClienteRotaPreparo, avisoClienteRotaColetado: _avisoClienteRotaColetado });
 // Testes automatizados (so com FD_TEST=1): acesso aos jobs para simular o tempo
 if (process.env.FD_TEST === '1') global.__fdTest = { autoOffline: checkMotoboyAutoOffline, offlineDiario: checkOfflineDiarioMotoboys, msgDisponivelSecundario: _msgDisponivelSecundario, msgPreparoSecundario: _msgPreparoSecundario, checkLateArrivals, checkAndLaunchOrders, histDisponivel: _histDisponivel, premiacaoRota: _premiacaoRota, rota: () => _rota };
 app.listen(PORT, () => console.log(`FlashDrop backend porta ${PORT}`));

@@ -60,12 +60,18 @@ module.exports = function instalarRotaIfood(ctx) {
       // Prazo da LOJA para decidir (contador do alerta), separado do gatilho: padrao 5 min. Cada pedido guarda o prazo que valeu
       'ALTER TABLE settings ADD COLUMN IF NOT EXISTS rota_prazo_loja_min INTEGER DEFAULT 5',
       'ALTER TABLE orders ADD COLUMN IF NOT EXISTS rota_nao_atende_prazo_min INTEGER',
+      // Rota PIX (mesmo motor, entregas "PIX (pago)"): chave propria no admin, comeca desligada
+      'ALTER TABLE settings ADD COLUMN IF NOT EXISTS rota_pix_ativa BOOLEAN DEFAULT false',
       'UPDATE settings SET rota_valor_ponto=3, rota_preco_v2=true WHERE id=1 AND rota_preco_v2 IS NOT TRUE'
     ];
     for (const q of qs) { try { await pool.query(q); } catch (e) { console.error('[ROTA] coluna:', e.message); } }
   }
   async function cfg() { const r = await pool.query('SELECT * FROM settings WHERE id=1'); return r.rows[0] || {}; }
   const rotaLigada = (c) => !!(c && c.rota_ifood_ativa === true);
+  // Rota PIX: entregas "PIX (pago)" (tipo_pagamento 'pix'), mesmo preco/limites da rota iFood; finaliza com o codigo Flash Drop
+  const pixLigada = (c) => !!(c && c.rota_pix_ativa === true);
+  const ehPix = (p) => !!p && p.tipo_pagamento === 'pix';
+  const nomeTipo = (p) => (ehPix(p) ? 'PIX' : 'iFood');
   function valorPonto(c) { const v = parseFloat(c.rota_valor_ponto); return isNaN(v) || v < 0 ? 3 : v; }
   function prazoLoja(c) { const v = parseInt(c.rota_prazo_loja_min); return isNaN(v) || v < 1 ? 5 : Math.min(v, 60); }
   function minNaoAtendeAuto(c) { const v = parseInt(c.rota_nao_atende_auto_min); return isNaN(v) || v < 1 ? 15 : Math.min(v, 120); }
@@ -211,7 +217,8 @@ module.exports = function instalarRotaIfood(ctx) {
       const ps = vivos(await pedidosDaRota(rotaId)); if (!ps.length) return; const p1 = ps[0];
       const loja = ctx.txtPuro(p1.loja_name) || p1.loja_user; const n = ps.length;
       const ganho = soma(ps, 'valor_motoboy'), km = soma(ps, 'distancia');
-      const titulo = p1.rota_socorro ? '🆘 SOCORRO – ROTA iFood' : (motivo === 'novamente' ? 'ROTA iFood disponível novamente' : 'ROTA iFood');
+      const T = 'ROTA ' + nomeTipo(p1);
+      const titulo = p1.rota_socorro ? '🆘 SOCORRO – ' + T : (motivo === 'novamente' ? T + ' disponível novamente' : T);
       const linhas = ps.map((p, i) => '🏠 ' + (i + 1) + 'ª entrega: ' + (p.bairro_destino || '-')).join('\n');
       const msgTg = titulo + ' – ' + n + ' entregas – ganho total ' + fmtR(ganho) + '\n\nPedido #' + p1.id + '\nLoja: ' + loja + '\n📍 Coleta: ' + ctx.bairroColeta(p1) + '\n' + linhas + '\nDistância total: ' + fmtKm(km) + '\n\nAceite pelo app.';
       if (bot) {
@@ -225,7 +232,8 @@ module.exports = function instalarRotaIfood(ctx) {
         const nomeRota = loja + ' (rota com ' + n + ' entregas)';
         const msgG = '🛵 Pedido Disponível!\n📦 Pedido #' + p1.id + ' — ' + nomeRota + '\n📍 Coleta: ' + ctx.bairroColeta(p1) + '\n' + linhas + ctx.linhasKmGanho(km, ganho);
         axios.post(url + '/api/send-group-message', { message: msgG, mentionAll: true }, { headers: { 'x-bot-secret': sec } }).catch((e) => console.error('[ROTA] grupo:', e.message));
-        // secundario: Km total da rota; rota com 2+ entregas vai sem a linha R$
+        // secundario: Km total da rota; rota com 2+ entregas vai sem a linha R$ (mesma regra de grupo do pedido normal)
+        if (ctx.grupo2Permitido && !ctx.grupo2Permitido(p1)) return;
         const ls = ctx.msgDisponivelSecundario(p1, nomeRota, { km, ganho, semGanho: n >= 2 }).split('\n'); const k = ls.findIndex((l) => l.indexOf('🏠 Entrega:') === 0);
         if (k >= 0) ls.splice(k, 1, ...linhas.split('\n'));
         axios.post(url + '/api/send-group-message', { message: ls.join('\n'), grupo: 'secundario' }, { headers: { 'x-bot-secret': sec } }).catch((e) => console.error('[ROTA] grupo2:', e.message));
@@ -237,6 +245,7 @@ module.exports = function instalarRotaIfood(ctx) {
     try {
       const url = process.env.BOT_URL, sec = process.env.BOT_SECRET; if (!url || !sec || !ctx.msgPreparoSecundario) return;
       const ps = vivos(await pedidosDaRota(rotaId)); if (!ps.length) return; const p1 = ps[0];
+      if (ctx.grupo2Permitido && !ctx.grupo2Permitido(p1)) return;
       const loja = ctx.txtPuro(p1.loja_name) || p1.loja_user;
       const linhas = ps.map((p, i) => '🏠 ' + (i + 1) + 'ª entrega: ' + (p.bairro_destino || '-')).join('\n');
       const msg = ctx.msgPreparoSecundario(p1, loja + ' (rota com ' + ps.length + ' entregas)', null, linhas);
@@ -268,10 +277,11 @@ module.exports = function instalarRotaIfood(ctx) {
     const ativos = ps.filter((p) => p.status === 'aceito' || p.status === 'na_loja'); if (!ativos.length || !ps.length) return null;
     const mbId = ativos[0].motoboy_id, mbNome = ativos[0].motoboy_name;
     await pool.query("UPDATE orders SET status=CASE WHEN id=$2 THEN 'pendente' ELSE 'rota_espera' END, motoboy_id=NULL, motoboy_name=NULL, t_aceito=NULL, t_na_loja=NULL, chegada_loja_auto=false, pending_until=$3 WHERE rota_id=$1 AND status IN ('aceito','na_loja')", [rotaId, ps[0].id, Date.now() + 15000]);
-    if (ctx.motivoDisponivel) await ctx.motivoDisponivel(ps[0].id, motivo === 'timeout' ? 'Voltou para disponível (motoboy não chegou na loja em 15 min · rota iFood)' : 'Voltou para disponível (motoboy desistiu da rota iFood)');
+    const tp = nomeTipo(ps[0]);
+    if (ctx.motivoDisponivel) await ctx.motivoDisponivel(ps[0].id, motivo === 'timeout' ? 'Voltou para disponível (motoboy não chegou na loja em 15 min · rota ' + tp + ')' : 'Voltou para disponível (motoboy desistiu da rota ' + tp + ')');
     let pen = null;
-    if (mbId) { try { pen = await ctx.aplicarPenalidadeMotoboy(mbId, motivo === 'timeout' ? 'Você não chegou na loja em 15 minutos.' : 'Você desistiu de uma rota iFood.'); } catch (e) { console.error('[ROTA] penalidade:', e.message); } }
-    const desc = (motivo === 'timeout' ? 'Motoboy nao chegou na loja em 15 minutos' : 'Motoboy desistiu da rota') + ' - a rota iFood voltou inteira para o sistema (' + (ctx.descPenalidade(pen) || 'penalidade') + ')';
+    if (mbId) { try { pen = await ctx.aplicarPenalidadeMotoboy(mbId, motivo === 'timeout' ? 'Você não chegou na loja em 15 minutos.' : 'Você desistiu de uma rota ' + tp + '.'); } catch (e) { console.error('[ROTA] penalidade:', e.message); } }
+    const desc = (motivo === 'timeout' ? 'Motoboy nao chegou na loja em 15 minutos' : 'Motoboy desistiu da rota') + ' - a rota ' + tp + ' voltou inteira para o sistema (' + (ctx.descPenalidade(pen) || 'penalidade') + ')';
     ativos.forEach((p) => ctx.registrarEvento(p.id, mbId, mbNome, motivo === 'timeout' ? 'timeout' : 'cancelado', desc));
     avisarRotaDisponivel(rotaId, 'novamente');
     return pedido(ps[0].id);
@@ -297,8 +307,8 @@ module.exports = function instalarRotaIfood(ctx) {
     if (aceiteNovo) {
       if (!o.rota_id) {
         // Rota e exclusiva: com uma rota em andamento, o motoboy nao aceita mais nada
-        const r = await pool.query('SELECT 1 FROM orders WHERE motoboy_id=$1 AND rota_id IS NOT NULL AND status = ANY($2) LIMIT 1', [fields.motoboy_id, STATUS_ATIVOS]);
-        if (r.rows.length) { res.status(403).json({ error: 'Você está com uma rota iFood. Termine as entregas da rota antes de aceitar outro pedido.', rota_em_andamento: true }); return true; }
+        const r = await pool.query('SELECT tipo_pagamento FROM orders WHERE motoboy_id=$1 AND rota_id IS NOT NULL AND status = ANY($2) LIMIT 1', [fields.motoboy_id, STATUS_ATIVOS]);
+        if (r.rows.length) { res.status(403).json({ error: 'Você está com uma rota ' + nomeTipo(r.rows[0]) + '. Termine as entregas da rota antes de aceitar outro pedido.', rota_em_andamento: true }); return true; }
         return false;
       }
       if (o.status !== 'pendente' || o.motoboy_id) { res.status(403).json({ error: 'Esta rota não está mais disponível.', ja_aceito: true }); return true; }
@@ -314,17 +324,17 @@ module.exports = function instalarRotaIfood(ctx) {
       const out = await devolverRota(o.rota_id, 'desistencia');
       res.json(out || o); return true;
     }
-    if (fields.status === 'cancelado') { res.status(409).json({ error: 'Este pedido faz parte de uma rota iFood. Use "Cancelar este cliente" ou "Cancelar rota inteira" no cartão da rota.', rota: true }); return true; }
+    if (fields.status === 'cancelado') { res.status(409).json({ error: 'Este pedido faz parte de uma rota ' + nomeTipo(o) + '. Use "Cancelar este cliente" ou "Cancelar rota inteira" no cartão da rota.', rota: true }); return true; }
     if (fields.status === 'entregue') {
       // Ja finalizada (ex.: dois "Entreguei" seguidos): nao finaliza de novo (nao paga o motoboy duas vezes)
       if (o.status === 'entregue') { res.json(o); return true; }
       // Loja decidiu "Deixar com o motoboy": finaliza sem codigo do iFood (sem robo)
-      if (o.rota_decisao === 'deixar') { req._rotaSemIfood = true; req._rotaSemAvisoCliente = true; return false; }
+      if (o.rota_decisao === 'deixar') { req._rotaSemIfood = true; req._rotaSemAvisoCliente = true; req._rotaSemCodigo = true; return false; }
       // Retorno para a loja: finaliza com o codigo de entrega da Flash Drop (que so a loja ve), sem robo
       if (o.rota_retorno === 'pendente' || o.rota_retorno === 'chegou') {
         const cod = String(fields.observacao_entrega || '').replace(/\D/g, '');
         if (!o.delivery_code || cod !== String(o.delivery_code)) { res.status(400).json({ error: 'Código incorreto. No retorno, use o código de entrega da Flash Drop que a loja passa quando recebe o pedido de volta.' }); return true; }
-        req._rotaSemIfood = true; req._rotaSemAvisoCliente = true;
+        req._rotaSemIfood = true; req._rotaSemAvisoCliente = true; req._rotaSemCodigo = true;
         fields.rota_retorno = 'finalizado'; fields.rota_retorno_finalizado_em = new Date().toISOString(); fields.rota_retorno_finalizado_por = String(o.motoboy_name || ('motoboy ' + o.motoboy_id));
         return false;
       }
@@ -342,12 +352,14 @@ module.exports = function instalarRotaIfood(ctx) {
     try {
       if (fields.status === 'aceito' && order.motoboy_id && String(order.motoboy_id) === String(fields.motoboy_id)) {
         const r = await pool.query("UPDATE orders SET status='aceito', motoboy_id=$1, motoboy_name=$2, t_aceito=$3 WHERE rota_id=$4 AND status='rota_espera' AND motoboy_id IS NULL RETURNING id", [order.motoboy_id, order.motoboy_name, order.t_aceito || new Date(), order.rota_id]);
-        r.rows.forEach((x) => ctx.registrarEvento(x.id, order.motoboy_id, order.motoboy_name, 'aceito', 'Aceito por ' + (order.motoboy_name || '') + ' junto com a rota iFood #' + order.rota_id));
+        r.rows.forEach((x) => ctx.registrarEvento(x.id, order.motoboy_id, order.motoboy_name, 'aceito', 'Aceito por ' + (order.motoboy_name || '') + ' junto com a rota ' + nomeTipo(order) + ' #' + order.rota_id));
         console.log('[ROTA] Rota #' + order.rota_id + ' aceita por ' + order.motoboy_name + ' (' + (r.rows.length + 1) + ' entregas).');
       }
       // Um "Coletei" marca todas como coletadas (so entao liberam os dados dos clientes)
       if (fields.status === 'coletado' && !order.rota_retorno) {
-        await pool.query("UPDATE orders SET status='coletado', t_coletado=COALESCE(t_coletado, NOW()), t_na_loja=COALESCE(t_na_loja, NOW()) WHERE rota_id=$1 AND id<>$2 AND motoboy_id=$3 AND status IN ('aceito','na_loja')", [order.rota_id, order.id, order.motoboy_id]);
+        const col = await pool.query("UPDATE orders SET status='coletado', t_coletado=COALESCE(t_coletado, NOW()), t_na_loja=COALESCE(t_na_loja, NOW()) WHERE rota_id=$1 AND id<>$2 AND motoboy_id=$3 AND status IN ('aceito','na_loja') RETURNING *", [order.rota_id, order.id, order.motoboy_id]);
+        // Rota PIX: cada cliente recebe o "Pedido coletado" com o seu codigo de entrega (a 1a ja recebeu pelo PUT normal)
+        if (ehPix(order) && ctx.avisoClienteRotaColetado) col.rows.forEach((x) => ctx.avisoClienteRotaColetado(x));
       }
     } catch (e) { console.error('[ROTA] depois do PUT:', e.message); }
   }
@@ -363,7 +375,7 @@ module.exports = function instalarRotaIfood(ctx) {
         const ps = vivos(porRota[o.rota_id] || []);
         if (ps.length > 1) {
           const bairros = ps.map((p) => p.bairro_destino || '-').join(' → ');
-          return Object.assign({}, o, { endereco_entrega: 'ROTA iFood · ' + ps.length + ' entregas: ' + bairros, bairro_destino: bairros, complemento_entrega: null, distancia: soma(ps, 'distancia'), valor_motoboy: soma(ps, 'valor_motoboy'), valor_total: soma(ps, 'valor_total'), loja_name: (o.loja_name || '') + ' · ROTA ' + ps.length + ' entregas' });
+          return Object.assign({}, o, { endereco_entrega: 'ROTA ' + nomeTipo(o) + ' · ' + ps.length + ' entregas: ' + bairros, bairro_destino: bairros, complemento_entrega: null, distancia: soma(ps, 'distancia'), valor_motoboy: soma(ps, 'valor_motoboy'), valor_total: soma(ps, 'valor_total'), loja_name: (o.loja_name || '') + ' · ROTA ' + ps.length + ' entregas' });
         }
       }
       if (o.rota_retorno === 'pendente' || o.rota_retorno === 'chegou') {
@@ -390,25 +402,42 @@ module.exports = function instalarRotaIfood(ctx) {
     }
     return { origem, pontos: out, coleta: col };
   }
-  app.post('/rotas/ifood/cotar', h(async (req, res) => {
+  // tipo: 'ifood' (rota iFood) ou 'pix' (rota PIX, entregas "PIX (pago)"): mesmo preco e limites, chaves separadas no admin
+  const cotarRota = (tipo) => h(async (req, res) => {
     const q = quem(req); if (!q || (q.papel !== 'loja' && q.papel !== 'admin')) throw erro('Faça login de novo na loja.', 401);
-    const c = await cfg(); if (!rotaLigada(c)) throw erro('Rota iFood desligada.', 403);
+    const c = await cfg();
+    if (tipo === 'pix') { if (!pixLigada(c)) throw erro('Rota PIX desligada.', 403); }
+    else if (!rotaLigada(c)) throw erro('Rota iFood desligada.', 403);
     const lidos = await lerPontos(c, req.body || {});
+    const om = await ordemMaisCurta(lidos.origem, lidos.pontos);
+    const economia = om.km_atual != null && om.km_otimo != null ? r2(om.km_atual - om.km_otimo) : 0;
+    // Rota PIX (decisao do William, 26/10): km e preco na ORDEM DA LOJA; a ordem mais curta volta so como sugestao
+    if (tipo === 'pix') {
+      const cot = await cotar(c, lidos.origem, lidos.pontos);
+      return res.json({ ok: true, n: lidos.pontos.length, total: cot.total, km_total: cot.km_total, ordem: lidos.pontos.map((_, i) => i), sugestao: om.ordem, economia_km: economia });
+    }
     // ordem mais curta automatica: o preco ja sai na ordem otimizada; a tela reorganiza os clientes com "ordem"
-    const om = await ordemMaisCurta(lidos.origem, lidos.pontos); const pontos = om.ordem.map((i) => lidos.pontos[i]);
+    const pontos = om.ordem.map((i) => lidos.pontos[i]);
     const cot = await cotar(c, lidos.origem, pontos);
-    res.json({ ok: true, n: pontos.length, total: cot.total, km_total: cot.km_total, ordem: om.ordem, km_ordem_loja: om.km_atual, economia_km: om.km_atual != null && om.km_otimo != null ? r2(om.km_atual - om.km_otimo) : 0 });
-  }));
-  app.post('/rotas/ifood', h(async (req, res) => {
+    res.json({ ok: true, n: pontos.length, total: cot.total, km_total: cot.km_total, ordem: om.ordem, km_ordem_loja: om.km_atual, economia_km: economia });
+  });
+  app.post('/rotas/ifood/cotar', cotarRota('ifood'));
+  app.post('/rotas/pix/cotar', cotarRota('pix'));
+  const criarRota = (tipo) => h(async (req, res) => {
+    const pix = tipo === 'pix', TN = pix ? 'PIX' : 'iFood';
     const q = quem(req); if (!q || q.papel !== 'loja') throw erro('Faça login de novo na loja.', 401);
-    const c = await cfg(); if (!rotaLigada(c)) throw erro('Rota iFood desligada.', 403);
+    const c = await cfg();
+    if (pix) { if (!pixLigada(c)) throw erro('Rota PIX desligada.', 403); }
+    else if (!rotaLigada(c)) throw erro('Rota iFood desligada.', 403);
     const fech = await ctx.bloqueioFuncionamento(req); if (fech) throw erro(fech.mensagem, 403, { fechado: true, proxima_abertura: fech.proxima_abertura });
     const lr = await pool.query("SELECT id, username, name, credit, phone FROM users WHERE id=$1 AND role='loja'", [q.id]); const loja = lr.rows[0]; if (!loja) throw erro('Loja não encontrada.', 404);
     const body = req.body || {};
-    (body.pontos || []).forEach((p, i) => { if (String((p && p.ifood_localizador) || '').replace(/\D/g, '').length !== 8) throw erro('Verifique o localizador iFood (8 números) do ' + (i + 1) + 'º cliente.'); if (!String((p && p.nome_cliente) || '').trim()) throw erro('Informe o nome do ' + (i + 1) + 'º cliente.'); });
+    if (pix) (body.pontos || []).forEach((p, i) => { if (!String((p && p.nome_cliente) || '').trim()) throw erro('Informe o nome do ' + (i + 1) + 'º cliente.'); if (String((p && p.telefone_cliente) || '').replace(/\D/g, '').length < 10) throw erro('Informe o celular do ' + (i + 1) + 'º cliente (com DDD).'); });
+    else (body.pontos || []).forEach((p, i) => { if (String((p && p.ifood_localizador) || '').replace(/\D/g, '').length !== 8) throw erro('Verifique o localizador iFood (8 números) do ' + (i + 1) + 'º cliente.'); if (!String((p && p.nome_cliente) || '').trim()) throw erro('Informe o nome do ' + (i + 1) + 'º cliente.'); });
     const lidos = await lerPontos(c, body); const { origem, coleta } = lidos;
-    // o servidor valida a ordem: cria sempre na ordem mais curta (rota_ordem = ordem otimizada), sem confiar so no navegador
-    const om = await ordemMaisCurta(origem, lidos.pontos); const pontos = om.ordem.map((i) => lidos.pontos[i]);
+    // iFood: o servidor cria sempre na ordem mais curta (rota_ordem = ordem otimizada), sem confiar so no navegador.
+    // PIX: cria na ordem enviada pela loja (km e preco somados nessa ordem; o motoboy recebe nessa ordem).
+    const pontos = pix ? lidos.pontos : (await ordemMaisCurta(origem, lidos.pontos)).ordem.map((i) => lidos.pontos[i]);
     const cot = await cotar(c, origem, pontos); const vals = porEntrega(cot);
     const cli = await pool.connect();
     try {
@@ -423,28 +452,32 @@ module.exports = function instalarRotaIfood(ctx) {
              nome_cliente, telefone_cliente, cod_pedido, cobrar_cliente, tipo_pagamento, valor_pedido, valor_total, valor_motoboy, comissao, distancia, status, pending_until, telefone_loja,
              launch_at, delivery_code, taxa_extra_chuva, taxa_extra_noturna, chuva_desconto_de, ifood_localizador, ifood_numero_pedido, ifood_nome_cliente,
              coleta_lat, coleta_lng, entrega_lat, entrega_lng, rota_id, rota_ordem, rota_pronto, t_em_preparo, created_at)
-           VALUES ($1,$2,'telegram',$3,$4,$5,$6,$7,$8,$9,$10,$11,'','nao','ifood',0,$12,$13,$14,$15,'em_preparo',$16,$17,0,$18,$19,$20,'admin',$21,$22,$23,$24,$25,$26,$27,$28,$29,false,NOW(), NOW() - ($30 * INTERVAL '1 second'))
+           VALUES ($1,$2,'telegram',$3,$4,$5,$6,$7,$8,$9,$10,$11,'','nao',$31,0,$12,$13,$14,$15,'em_preparo',$16,$17,0,$18,$19,$20,'admin',$21,$22,$23,$24,$25,$26,$27,$28,$29,false,NOW(), NOW() - ($30 * INTERVAL '1 second'))
            RETURNING id`,
           [loja.username, ctx.sanitize(loja.name), ctx.sanitize(coleta.endereco || ''), ctx.sanitize(coleta.bairro || '') || null, ctx.sanitize(coleta.complemento || '') || null, ctx.sanitize(coleta.obs || '') || null,
             ctx.sanitize(p.endereco_entrega), ctx.sanitize(p.bairro_destino || '') || null, ctx.sanitize(p.complemento_entrega || '') || null,
             ctx.sanitize(String(p.nome_cliente).trim()), String(p.telefone_cliente || '').replace(/\D/g, '') || null,
             v.valor_total, v.valor_motoboy, v.comissao, v.distancia, Date.now() + 15000, loja.phone || null,
             String(Math.floor(1000 + Math.random() * 9000)), i === 0 ? cot.extras.chuva : 0, i === 0 ? cot.extras.noturna : 0,
-            String(p.ifood_localizador).replace(/\D/g, ''), String(p.ifood_numero_pedido || '').replace(/[^\w-]/g, '') || null, ctx.sanitize(p.ifood_nome_cliente || '') || null,
-            origem.lat, origem.lng, p.lat, p.lng, rotaId, i + 1, i]
+            pix ? null : String(p.ifood_localizador).replace(/\D/g, ''), pix ? null : (String(p.ifood_numero_pedido || '').replace(/[^\w-]/g, '') || null), pix ? null : (ctx.sanitize(p.ifood_nome_cliente || '') || null),
+            origem.lat, origem.lng, p.lat, p.lng, rotaId, i + 1, i, tipo]
         );
         const id = ins.rows[0].id; ids.push(id);
         if (i === 0) { rotaId = id; await cli.query('UPDATE orders SET rota_id=$1 WHERE id=$1', [id]); }
       }
       await cli.query('UPDATE users SET credit = credit - $1 WHERE id=$2', [cot.total, loja.id]);
-      await cli.query('INSERT INTO loja_wallet_events (loja_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)', [loja.id, 'debito_pedido', cot.total, 'Débito rota iFood #' + rotaId + ' (' + pontos.length + ' entregas)', rotaId]);
+      await cli.query('INSERT INTO loja_wallet_events (loja_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)', [loja.id, 'debito_pedido', cot.total, 'Débito rota ' + TN + ' #' + rotaId + ' (' + pontos.length + ' entregas)', rotaId]);
       await cli.query('COMMIT');
-      console.log('[ROTA] Rota #' + rotaId + ' criada por ' + loja.username + ': ' + pontos.length + ' entregas, ' + fmtR(cot.total) + '.');
+      console.log('[ROTA] Rota ' + (pix ? 'PIX ' : '') + '#' + rotaId + ' criada por ' + loja.username + ': ' + pontos.length + ' entregas, ' + fmtR(cot.total) + '.');
       avisarRotaPreparo(rotaId);
+      // Rota PIX: cada cliente recebe o "Pedido confirmado" que o PIX normal recebe ao entrar em preparo
+      if (pix && ctx.avisoClienteRotaPreparo) { try { (await pedidosDaRota(rotaId)).forEach((o) => ctx.avisoClienteRotaPreparo(o)); } catch (e) { console.error('[ROTA PIX] aviso clientes:', e.message); } }
       res.json({ ok: true, rota_id: rotaId, ids, total: cot.total, n: pontos.length });
     } catch (e) { try { await cli.query('ROLLBACK'); } catch (e2) {} throw e; }
     finally { cli.release(); }
-  }));
+  });
+  app.post('/rotas/ifood', criarRota('ifood'));
+  app.post('/rotas/pix', criarRota('pix'));
   // Loja marca "Pronto" em cada entrega; quando a ultima fica pronta, a rota e lancada
   app.post('/rotas/:rotaId/pronto', h(async (req, res) => {
     const ps = await pedidosDaRota(parseInt(req.params.rotaId) || 0); exigirLojaDona(quem(req), ps);
@@ -498,10 +531,10 @@ module.exports = function instalarRotaIfood(ctx) {
       // Era a 1a de uma rota ja disponivel: a nova 1a fica disponivel no lugar dela
       if (alvo.status === 'pendente' && resto.length) await cli.query("UPDATE orders SET status='pendente', pending_until=$2 WHERE id=$1 AND status='rota_espera'", [resto[0].id, Date.now() + 15000]);
       const diff = r2(totalAntes - totalDepois);
-      await devolverDinheiro(cli, vv[0], diff, (diff >= 0 ? 'Estorno' : 'Diferença') + ' rota iFood #' + rotaId + ': cliente do pedido #' + alvo.id + ' cancelado (rota recalculada de ' + fmtR(totalAntes) + ' para ' + fmtR(totalDepois) + ')', rotaId);
+      await devolverDinheiro(cli, vv[0], diff, (diff >= 0 ? 'Estorno' : 'Diferença') + ' rota ' + nomeTipo(vv[0]) + ' #' + rotaId + ': cliente do pedido #' + alvo.id + ' cancelado (rota recalculada de ' + fmtR(totalAntes) + ' para ' + fmtR(totalDepois) + ')', rotaId);
       const taxa = await cobrarTaxaCancelamento(cli, vv[0], r2(parseFloat(c.taxa_cancelamento) || 0), alvo.id);
       await cli.query('COMMIT');
-      ctx.registrarEvento(alvo.id, alvo.motoboy_id, alvo.motoboy_name, 'cancelado', 'Cliente cancelado pela ' + (q.papel === 'admin' ? 'Flash Drop' : 'loja') + ' (rota iFood #' + rotaId + ' recalculada)');
+      ctx.registrarEvento(alvo.id, alvo.motoboy_id, alvo.motoboy_name, 'cancelado', 'Cliente cancelado pela ' + (q.papel === 'admin' ? 'Flash Drop' : 'loja') + ' (rota ' + nomeTipo(alvo) + ' #' + rotaId + ' recalculada)');
       if (alvo.motoboy_id) pushMotoboy(alvo.motoboy_id, '❌ Entrega cancelada pela loja', 'Pedido #' + alvo.id + ' saiu da sua rota. Os valores das outras entregas foram recalculados.');
       if (!resto.length && ['pendente', 'aceito', 'na_loja'].includes(alvo.status)) avisarCancelado(alvo);
       if (resto.length && resto.every((p) => p.status === 'em_preparo')) await lancarRota(rotaId);
@@ -521,11 +554,11 @@ module.exports = function instalarRotaIfood(ctx) {
       if (vv.some((p) => !ANTES_DA_COLETA.includes(p.status))) throw erro('Depois que o motoboy coleta, não dá para cancelar pela tela.', 409);
       const total = soma(vv, 'valor_total');
       await cli.query("UPDATE orders SET status='cancelado', cancelado_por=$2 WHERE rota_id=$1 AND status<>'cancelado'", [rotaId, q.papel === 'admin' ? 'admin' : 'loja']);
-      await devolverDinheiro(cli, vv[0], total, 'Estorno rota iFood #' + rotaId + ' (rota inteira cancelada)', rotaId);
+      await devolverDinheiro(cli, vv[0], total, 'Estorno rota ' + nomeTipo(vv[0]) + ' #' + rotaId + ' (rota inteira cancelada)', rotaId);
       const taxa = await cobrarTaxaCancelamento(cli, vv[0], r2(parseFloat(c.taxa_cancelamento) || 0), rotaId);
       await cli.query('COMMIT');
-      vv.forEach((p) => ctx.registrarEvento(p.id, p.motoboy_id, p.motoboy_name, 'cancelado', 'Rota iFood #' + rotaId + ' cancelada inteira pela ' + (q.papel === 'admin' ? 'Flash Drop' : 'loja')));
-      const mb = vv.find((p) => p.motoboy_id); if (mb) pushMotoboy(mb.motoboy_id, '❌ Rota cancelada pela loja', 'A rota iFood #' + rotaId + ' foi cancelada. Você não precisa mais buscá-la.');
+      vv.forEach((p) => ctx.registrarEvento(p.id, p.motoboy_id, p.motoboy_name, 'cancelado', 'Rota ' + nomeTipo(vv[0]) + ' #' + rotaId + ' cancelada inteira pela ' + (q.papel === 'admin' ? 'Flash Drop' : 'loja')));
+      const mb = vv.find((p) => p.motoboy_id); if (mb) pushMotoboy(mb.motoboy_id, '❌ Rota cancelada pela loja', 'A rota ' + nomeTipo(vv[0]) + ' #' + rotaId + ' foi cancelada. Você não precisa mais buscá-la.');
       if (vv.some((p) => ['pendente', 'aceito', 'na_loja'].includes(p.status))) avisarCancelado(vv[0]);
       res.json({ ok: true, estorno: total, taxa });
     } catch (e) { try { await cli.query('ROLLBACK'); } catch (e2) {} throw e; }
@@ -608,8 +641,8 @@ module.exports = function instalarRotaIfood(ctx) {
   async function verificarNaoAtende() {
     await gatilhoNaoAtende();
     try {
-      const r = await pool.query("UPDATE orders SET rota_nao_atende_admin=true WHERE rota_nao_atende_em IS NOT NULL AND rota_decisao IS NULL AND rota_nao_atende_admin IS NOT TRUE AND rota_nao_atende_em < NOW() - (COALESCE(rota_nao_atende_prazo_min, 15) * INTERVAL '1 minute') AND status IN ('coletado','no_cliente') RETURNING id, rota_id, loja_name, loja_user, motoboy_name, COALESCE(rota_nao_atende_prazo_min, 15) AS prazo");
-      r.rows.forEach((o) => { avisarAdmin('⏰ Cliente não atende - a loja não decidiu em ' + o.prazo + ' min\nPedido #' + o.id + ' (rota iFood #' + o.rota_id + ')\nLoja: ' + (ctx.txtPuro(o.loja_name) || o.loja_user) + '\nMotoboy: ' + (o.motoboy_name || '-') + '\nResolva no painel admin (aba Rota iFood).'); console.log('[ROTA] Pedido #' + o.id + ': cliente não atende sem decisão da loja em ' + o.prazo + ' min -> admin.'); });
+      const r = await pool.query("UPDATE orders SET rota_nao_atende_admin=true WHERE rota_nao_atende_em IS NOT NULL AND rota_decisao IS NULL AND rota_nao_atende_admin IS NOT TRUE AND rota_nao_atende_em < NOW() - (COALESCE(rota_nao_atende_prazo_min, 15) * INTERVAL '1 minute') AND status IN ('coletado','no_cliente') RETURNING id, rota_id, loja_name, loja_user, motoboy_name, tipo_pagamento, COALESCE(rota_nao_atende_prazo_min, 15) AS prazo");
+      r.rows.forEach((o) => { avisarAdmin('⏰ Cliente não atende - a loja não decidiu em ' + o.prazo + ' min\nPedido #' + o.id + ' (rota ' + nomeTipo(o) + ' #' + o.rota_id + ')\nLoja: ' + (ctx.txtPuro(o.loja_name) || o.loja_user) + '\nMotoboy: ' + (o.motoboy_name || '-') + '\nResolva no painel admin (aba Rota iFood).'); console.log('[ROTA] Pedido #' + o.id + ': cliente não atende sem decisão da loja em ' + o.prazo + ' min -> admin.'); });
     } catch (e) { console.error('[ROTA] verificar nao atende:', e.message); }
   }
 
@@ -619,7 +652,7 @@ module.exports = function instalarRotaIfood(ctx) {
     const q = quem(req); const meus = ps.filter((p) => STATUS_ATIVOS.includes(p.status));
     if (!q || q.papel !== 'motoboy' || !meus.length || String(meus[0].motoboy_id) !== String(q.id)) throw erro('Esta rota não está com você.', 403);
     await pool.query('UPDATE orders SET rota_socorro_pedido_em=NOW() WHERE rota_id=$1 AND status = ANY($2)', [rotaId, STATUS_ATIVOS]);
-    avisarAdmin('🆘 Motoboy pediu socorro na rota iFood #' + rotaId + '\nMotoboy: ' + (meus[0].motoboy_name || '-') + '\nLoja: ' + (ctx.txtPuro(meus[0].loja_name) || meus[0].loja_user) + '\nEntregas que faltam: ' + meus.length + '\nUse "Socorro do Motoboy" no painel admin (aba Rota iFood).');
+    avisarAdmin('🆘 Motoboy pediu socorro na rota ' + nomeTipo(meus[0]) + ' #' + rotaId + '\nMotoboy: ' + (meus[0].motoboy_name || '-') + '\nLoja: ' + (ctx.txtPuro(meus[0].loja_name) || meus[0].loja_user) + '\nEntregas que faltam: ' + meus.length + '\nUse "Socorro do Motoboy" no painel admin (aba Rota iFood).');
     res.json({ ok: true });
   }));
   app.post('/admin/rotas/:rotaId/socorro', h(async (req, res) => {
@@ -649,12 +682,13 @@ module.exports = function instalarRotaIfood(ctx) {
              nome_cliente, telefone_cliente, cod_pedido, cobrar_cliente, tipo_pagamento, valor_pedido, valor_total, valor_motoboy, comissao, distancia, status, pending_until, telefone_loja,
              launch_at, delivery_code, taxa_extra_chuva, taxa_extra_noturna, chuva_desconto_de, ifood_localizador, ifood_numero_pedido, ifood_nome_cliente,
              coleta_lat, coleta_lng, entrega_lat, entrega_lng, rota_id, rota_ordem, rota_pronto, rota_socorro, rota_socorro_de, rota_socorro_info, created_at)
-           VALUES ($1,'Socorro do Motoboy','socorro',$2,'Socorro',$3,$4,$5,$6,$7,$8,$9,'','nao','ifood',0,$10,$11,$12,$13,$14,$15,$16,0,$17,0,$18,'admin',$19,$20,$21,$22,$23,$24,$25,$26,$27,true,true,$28,$29, NOW() - ($30 * INTERVAL '1 second'))
+           VALUES ($1,'Socorro do Motoboy','socorro',$2,'Socorro',$3,$4,$5,$6,$7,$8,$9,'','nao',$31,0,$10,$11,$12,$13,$14,$15,$16,0,$17,0,$18,'admin',$19,$20,$21,$22,$23,$24,$25,$26,$27,true,true,$28,$29, NOW() - ($30 * INTERVAL '1 second'))
            RETURNING id`,
           [p.loja_user, coordTxt, 'Motoboy parado: ' + (mbNome || '') + (aprox ? ' (perto de ' + aprox + ')' : ''), 'Localização de ' + horaLoc + ' (há ' + minAtras + ' min) - pegue os pedidos com o motoboy parado',
             p.endereco_entrega, p.bairro_destino, p.complemento_entrega, p.nome_cliente, p.telefone_cliente, v.valor_total, v.valor_motoboy, v.comissao, v.distancia,
-            i === 0 ? 'pendente' : 'rota_espera', Date.now() + 15000, p.telefone_loja, String(Math.floor(1000 + Math.random() * 9000)), i === 0 ? cot.extras.noturna : 0,
-            p.ifood_localizador, p.ifood_numero_pedido, p.ifood_nome_cliente, loc.lat, loc.lng, p.entrega_lat, p.entrega_lng, novaRota, i + 1, mbId, 'Socorro da rota #' + rotaId + ' (pedido original #' + p.id + ')', i]
+            // Rota PIX: o cliente ja recebeu o codigo de entrega na coleta; a entrega do socorro usa o mesmo codigo
+            i === 0 ? 'pendente' : 'rota_espera', Date.now() + 15000, p.telefone_loja, (ehPix(p) && p.delivery_code) ? p.delivery_code : String(Math.floor(1000 + Math.random() * 9000)), i === 0 ? cot.extras.noturna : 0,
+            p.ifood_localizador, p.ifood_numero_pedido, p.ifood_nome_cliente, loc.lat, loc.lng, p.entrega_lat, p.entrega_lng, novaRota, i + 1, mbId, 'Socorro da rota #' + rotaId + ' (pedido original #' + p.id + ')', i, p.tipo_pagamento || 'ifood']
         );
         const id = ins.rows[0].id; novos.push(id);
         if (i === 0) { novaRota = id; await cli.query('UPDATE orders SET rota_id=$1 WHERE id=$1', [id]); }
@@ -682,7 +716,7 @@ module.exports = function instalarRotaIfood(ctx) {
     const rotas = {}; ativas.forEach((o) => { (rotas[o.rota_id] = rotas[o.rota_id] || []).push(o); });
     const casos = (await pool.query("SELECT id, rota_id, loja_name, loja_user, motoboy_name, nome_cliente, rota_nao_atende_em, rota_nao_atende_admin, rota_nao_atende_auto_min, rota_nao_atende_prazo_min, status FROM orders WHERE rota_nao_atende_em IS NOT NULL AND rota_decisao IS NULL AND status IN ('coletado','no_cliente') ORDER BY rota_nao_atende_em")).rows;
     const socorros = (await pool.query("SELECT id, name, custom_id, socorros_count FROM users WHERE role='motoboy' AND COALESCE(socorros_count,0) > 0 ORDER BY socorros_count DESC, name")).rows;
-    res.json({ config: { ativa: rotaLigada(c), valor_ponto: valorPonto(c), max_pontos: maxPontos(c), nao_atende_min: minNaoAtendeAuto(c), prazo_loja_min: prazoLoja(c) }, rotas: Object.keys(rotas).map((k) => ({ rota_id: parseInt(k), entregas: rotas[k] })).sort((a, b) => b.rota_id - a.rota_id), casos_nao_atende: casos, motoboys_socorros: socorros });
+    res.json({ config: { ativa: rotaLigada(c), pix_ativa: pixLigada(c), valor_ponto: valorPonto(c), max_pontos: maxPontos(c), nao_atende_min: minNaoAtendeAuto(c), prazo_loja_min: prazoLoja(c) }, rotas: Object.keys(rotas).map((k) => ({ rota_id: parseInt(k), entregas: rotas[k] })).sort((a, b) => b.rota_id - a.rota_id), casos_nao_atende: casos, motoboys_socorros: socorros });
   }));
   app.put('/settings/rota-ifood', h(async (req, res) => {
     const q = exigirAdmin(req, 'Só o admin pode mudar a Rota iFood.');
@@ -696,9 +730,10 @@ module.exports = function instalarRotaIfood(ctx) {
     if (isNaN(na) || na < 1 || na > 120) throw erro('Tempo do "cliente não atende" automático inválido (1 a 120 min).');
     const pl = b.prazo_loja_min === undefined ? prazoLoja(c) : parseInt(b.prazo_loja_min);
     if (isNaN(pl) || pl < 1 || pl > 60) throw erro('Prazo da loja para decidir inválido (1 a 60 min).');
-    const r = await pool.query('UPDATE settings SET rota_ifood_ativa=$1, rota_valor_ponto=$2, rota_max_pontos=$3, rota_nao_atende_auto_min=$4, rota_prazo_loja_min=$5 WHERE id=1 RETURNING rota_ifood_ativa, rota_valor_ponto, rota_max_pontos, rota_nao_atende_auto_min, rota_prazo_loja_min', [ativa, vp, mp, na, pl]);
-    console.log('[ROTA] Configuração: ligada=' + ativa + ', valor por ponto=' + vp + ', máx pontos=' + mp + ', não atende automático=' + na + ' min');
-    res.json({ ok: true, ativa: r.rows[0].rota_ifood_ativa, valor_ponto: parseFloat(r.rows[0].rota_valor_ponto), max_pontos: r.rows[0].rota_max_pontos, nao_atende_min: r.rows[0].rota_nao_atende_auto_min, prazo_loja_min: r.rows[0].rota_prazo_loja_min });
+    const pixAtiva = b.pix_ativa === undefined ? pixLigada(c) : (b.pix_ativa === true || b.pix_ativa === 'true');
+    const r = await pool.query('UPDATE settings SET rota_ifood_ativa=$1, rota_valor_ponto=$2, rota_max_pontos=$3, rota_nao_atende_auto_min=$4, rota_prazo_loja_min=$5, rota_pix_ativa=$6 WHERE id=1 RETURNING rota_ifood_ativa, rota_valor_ponto, rota_max_pontos, rota_nao_atende_auto_min, rota_prazo_loja_min, rota_pix_ativa', [ativa, vp, mp, na, pl, pixAtiva]);
+    console.log('[ROTA] Configuração: ligada=' + ativa + ', rota PIX=' + pixAtiva + ', valor por ponto=' + vp + ', máx pontos=' + mp + ', não atende automático=' + na + ' min');
+    res.json({ ok: true, ativa: r.rows[0].rota_ifood_ativa, pix_ativa: r.rows[0].rota_pix_ativa, valor_ponto: parseFloat(r.rows[0].rota_valor_ponto), max_pontos: r.rows[0].rota_max_pontos, nao_atende_min: r.rows[0].rota_nao_atende_auto_min, prazo_loja_min: r.rows[0].rota_prazo_loja_min });
   }));
 
   const intervalo = setInterval(verificarNaoAtende, 60 * 1000); if (intervalo.unref) intervalo.unref();
