@@ -10,8 +10,8 @@ module.exports = function instalarCardapioFechado(ctx) {
   const r2 = (v) => Math.round((parseFloat(v) || 0) * 100) / 100;
   const fmtR = (v) => 'R$ ' + r2(v).toFixed(2).replace('.', ',');
   const TAXA_PADRAO = 0.5;
-  // Pagamento: so o "PIX da loja" (pix_direto). O cliente acerta direto com a loja e nenhum dinheiro passa pelo Flash Drop.
-  const PAGAMENTO_SO_CARDAPIO = 'pix_direto';
+  // Pagamento: nenhuma forma e oferecida ao cliente. O pedido e gravado como "combinar com a loja" e nada passa pelo Flash Drop.
+  const PAGAMENTO_SO_CARDAPIO = 'combinar_loja';
   const MSG_NAO_LANCA = 'Este pedido é do cardápio fora do horário: a entrega é feita pela loja e ele não pode ir para os motoboys.';
   function erro(msg, status, extra) { const e = new Error(msg); e.status = status || 400; e.extra = extra || null; return e; }
   const h = (fn) => async (req, res) => {
@@ -58,18 +58,30 @@ module.exports = function instalarCardapioFechado(ctx) {
   async function antesDoPost(req, res) {
     const d = req.body || {};
     if (d.plataforma !== 'cardapio') return false;
+    const tipo = String(d.tipo_pagamento || '');
+    const MSG_FORMA = 'Esta forma de pagamento não está disponível agora. Atualize a página e tente novamente.';
     let m;
-    try { if (requisicaoDoAdmin(req)) return false; m = await modoAgora(); if (!m.modo) return false; }
-    catch (e) { console.error('[CARDAPIO_FECHADO] Erro ao decidir:', e.message); return false; }
+    try {
+      if (requisicaoDoAdmin(req)) return false;
+      m = await modoAgora();
+      if (!m.modo) {
+        // Pagina antiga mandando "combinar com a loja" dentro do horario: nunca vira pedido normal (iria para os motoboys sem forma de pagamento)
+        if (tipo === PAGAMENTO_SO_CARDAPIO && !m.fechado) { res.status(400).json({ error: MSG_FORMA }); return true; }
+        return false;
+      }
+    } catch (e) {
+      console.error('[CARDAPIO_FECHADO] Erro ao decidir:', e.message);
+      if (tipo === PAGAMENTO_SO_CARDAPIO) { res.status(400).json({ error: MSG_FORMA }); return true; }
+      return false;
+    }
     try {
       const lr = await pool.query("SELECT username, name, phone, address, loja_online, loja_entrega_modo, loja_permite_retirada FROM users WHERE username=$1 AND role='loja'", [d.loja_user]);
       const loja = lr.rows[0];
       if (!loja) { res.status(404).json({ error: 'Loja não encontrada.' }); return true; }
       if (!loja.loja_online) { res.status(403).json({ error: 'A loja está offline no momento.', loja_offline: true }); return true; }
-      const tipo = String(d.tipo_pagamento || '');
       // PIX online gerado antes de fechar: segue o caminho de sempre (o cliente nao paga e fica sem pedido)
       if (tipo === 'pix' && d.pix_payment_id) return false;
-      if (tipo !== PAGAMENTO_SO_CARDAPIO) { res.status(400).json({ error: 'Esta forma de pagamento não está disponível agora. Escolha outra.' }); return true; }
+      if (tipo !== PAGAMENTO_SO_CARDAPIO) { res.status(400).json({ error: MSG_FORMA }); return true; }
       const nome = String(sanitize(d.nome_cliente) || '').trim(), tel = String(d.telefone_cliente || '').trim();
       if (!nome || tel.replace(/\D/g, '').length < 10) { res.status(400).json({ error: 'Informe o nome e o celular.' }); return true; }
       const retirada = d.entrega_tipo === 'retirada';
@@ -138,7 +150,7 @@ module.exports = function instalarCardapioFechado(ctx) {
       (o.so_cardapio_retirada
         ? '🏪 Retire o pedido na loja.\n' + (o.endereco_coleta ? '📍 Endereço da loja: ' + o.endereco_coleta + '\n' : '')
         : '🛵 A entrega será feita pela loja.\n📍 Endereço de entrega: ' + endereco + '\n' + (o.so_cardapio_frete_loja ? '🧾 A loja vai informar o valor da entrega.\n' : '')) +
-      '💰 Forma de pagamento: ' + (o.tipo_pagamento === PAGAMENTO_SO_CARDAPIO ? 'PIX da loja (combine com a loja)' : o.tipo_pagamento) + '\n\n' +
+      '💰 Forma de pagamento: ' + (o.tipo_pagamento === PAGAMENTO_SO_CARDAPIO || o.tipo_pagamento === 'pix_direto' ? 'combinar com a loja' : o.tipo_pagamento) + '\n\n' +
       '⏳ Agora é só aguardar! 🎉';
   }
 
@@ -228,7 +240,7 @@ module.exports = function instalarCardapioFechado(ctx) {
     const m = await modoAgora();
     const lr = await pool.query("SELECT loja_entrega_modo, loja_permite_retirada FROM users WHERE id=$1 AND role='loja'", [parseInt(req.query.loja_id) || 0]);
     const l = lr.rows[0] || {};
-    res.json({ modo: m.modo, entrega_modo: modoEntrega(l), permite_retirada: l.loja_permite_retirada === true });
+    res.json({ modo: m.modo, entrega_modo: modoEntrega(l), permite_retirada: l.loja_permite_retirada === true, pagamento: PAGAMENTO_SO_CARDAPIO });
   }));
   // Loja: "Valor da plataforma" ou "Sem valor de entrega"; "Permitir retirada na loja" (padrao NAO)
   app.post('/loja/cardapio-entrega', h(async (req, res) => {
