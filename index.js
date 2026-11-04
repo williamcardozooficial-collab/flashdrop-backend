@@ -3835,7 +3835,7 @@ async function calcularLimiteEmprestimo(lojaId) { const r = await pool.query('SE
 // Retorna: { checkout_url, preference_id }
 app.post('/mercadopago/checkout-pedido', async (req, res) => {
 try {
-try { const fechMp = await _bloqueioFuncionamento(req); if (fechMp && !(_cf && await _cf.checkoutLiberado(req))) return res.status(403).json({ error: fechMp.mensagem, fechado: true, proxima_abertura: fechMp.proxima_abertura }); } catch (eFuncMp) { console.error('[FUNCIONAMENTO] Erro ao verificar (MP):', eFuncMp.message); }
+try { const fechMp = await _bloqueioFuncionamento(req); if (fechMp && !(_cf && await _cf.checkoutLiberado(req))) { if (_cf && (await _cf.modoAgora()).modo) return res.status(403).json({ error: 'Esta forma de pagamento n\u00E3o est\u00E1 dispon\u00EDvel agora. Escolha outra.' }); return res.status(403).json({ error: fechMp.mensagem, fechado: true, proxima_abertura: fechMp.proxima_abertura }); } } catch (eFuncMp) { console.error('[FUNCIONAMENTO] Erro ao verificar (MP):', eFuncMp.message); }
 const { loja_id, itens, totalItens, taxaEntrega, totalFinal, nomeCliente } = req.body;
 if (!loja_id) return res.status(400).json({ error: 'loja_id obrigatorio' });
 if (!totalFinal || parseFloat(totalFinal) <= 0) return res.status(400).json({ error: 'Valor invalido' });

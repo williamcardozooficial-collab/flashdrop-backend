@@ -29,7 +29,12 @@ module.exports = function instalarCardapioFechado(ctx) {
       'ALTER TABLE orders ADD COLUMN IF NOT EXISTS so_cardapio_aceito_em TIMESTAMP',
       'ALTER TABLE orders ADD COLUMN IF NOT EXISTS so_cardapio_taxa NUMERIC(10,2)',
       'ALTER TABLE orders ADD COLUMN IF NOT EXISTS so_cardapio_frete NUMERIC(10,2)',
-      'ALTER TABLE orders ADD COLUMN IF NOT EXISTS so_cardapio_retirada BOOLEAN DEFAULT false'
+      'ALTER TABLE orders ADD COLUMN IF NOT EXISTS so_cardapio_retirada BOOLEAN DEFAULT false',
+      // Retirada e opcao da loja (padrao NAO). "Sem valor de entrega": a loja informa o valor depois de aceitar.
+      'ALTER TABLE users ADD COLUMN IF NOT EXISTS loja_permite_retirada BOOLEAN DEFAULT false',
+      'ALTER TABLE orders ADD COLUMN IF NOT EXISTS so_cardapio_frete_loja BOOLEAN DEFAULT false',
+      // O "valor proprio fixo" saiu: quem tinha passa para "Sem valor de entrega"
+      "UPDATE users SET loja_entrega_modo='sem_valor' WHERE loja_entrega_modo='proprio'"
     ];
     for (const q of qs) { try { await pool.query(q); } catch (e) { console.error('[CARDAPIO_FECHADO] coluna:', e.message); } }
   }
@@ -45,6 +50,7 @@ module.exports = function instalarCardapioFechado(ctx) {
     const fechado = est.aberto_agora === false;
     return { ativo: c.ativo, taxa: c.taxa, fechado, modo: c.ativo && fechado };
   }
+  const modoEntrega = (loja) => ((loja && loja.loja_entrega_modo) === 'plataforma' || !(loja && loja.loja_entrega_modo) ? 'plataforma' : 'sem_valor');
   const temMpProprio = (loja) => !!String((loja && loja.mp_access_token) || '').trim();
 
   // ---------- criacao do pedido (POST /orders) ----------
@@ -56,7 +62,7 @@ module.exports = function instalarCardapioFechado(ctx) {
     try { if (requisicaoDoAdmin(req)) return false; m = await modoAgora(); if (!m.modo) return false; }
     catch (e) { console.error('[CARDAPIO_FECHADO] Erro ao decidir:', e.message); return false; }
     try {
-      const lr = await pool.query("SELECT username, name, phone, loja_online, mp_access_token, loja_entrega_modo, loja_entrega_valor FROM users WHERE username=$1 AND role='loja'", [d.loja_user]);
+      const lr = await pool.query("SELECT username, name, phone, address, loja_online, mp_access_token, loja_entrega_modo, loja_permite_retirada FROM users WHERE username=$1 AND role='loja'", [d.loja_user]);
       const loja = lr.rows[0];
       if (!loja) { res.status(404).json({ error: 'Loja não encontrada.' }); return true; }
       if (!loja.loja_online) { res.status(403).json({ error: 'A loja está offline no momento.', loja_offline: true }); return true; }
@@ -64,22 +70,25 @@ module.exports = function instalarCardapioFechado(ctx) {
       if (tipo === 'pix' && !temMpProprio(loja)) {
         // PIX gerado antes de fechar (conta do Flash Drop): segue o caminho de sempre. PIX novo sem Mercado Pago da loja nao entra.
         if (d.pix_payment_id) return false;
-        res.status(403).json({ error: 'Esta loja não aceita pagamento online fora do horário. Escolha dinheiro ou cartão.', fechado: true }); return true;
+        res.status(403).json({ error: 'Esta forma de pagamento não está disponível agora. Escolha outra.' }); return true;
       }
-      if (TIPOS_PAGAMENTO.indexOf(tipo) === -1) { res.status(400).json({ error: 'Forma de pagamento indisponível fora do horário. Escolha dinheiro ou cartão.' }); return true; }
+      if (TIPOS_PAGAMENTO.indexOf(tipo) === -1) { res.status(400).json({ error: 'Esta forma de pagamento não está disponível agora. Escolha outra.' }); return true; }
       const nome = String(sanitize(d.nome_cliente) || '').trim(), tel = String(d.telefone_cliente || '').trim();
       if (!nome || tel.replace(/\D/g, '').length < 10) { res.status(400).json({ error: 'Informe o nome e o celular.' }); return true; }
       const retirada = d.entrega_tipo === 'retirada';
-      const frete = retirada ? 0 : (loja.loja_entrega_modo === 'proprio' ? r2(loja.loja_entrega_valor) : Math.max(0, r2(d.valor_total)));
+      if (retirada && loja.loja_permite_retirada !== true) { res.status(400).json({ error: 'Esta loja não faz retirada. Informe o endereço de entrega.' }); return true; }
+      // Sem valor de entrega: o frete fica vazio e a loja informa depois de aceitar (ja vendo o endereco)
+      const freteLoja = !retirada && modoEntrega(loja) === 'sem_valor';
+      const frete = retirada ? 0 : (freteLoja ? null : Math.max(0, r2(d.valor_total)));
       const num = (v) => (v !== undefined && v !== null && v !== '' && !isNaN(parseFloat(v))) ? parseFloat(v) : null;
       const ins = await pool.query(
         `INSERT INTO orders (loja_user, loja_name, plataforma, endereco_coleta, bairro_coleta, endereco_entrega, bairro_destino, complemento_entrega, nome_cliente, telefone_cliente, cpf_cliente, cod_pedido,
            cobrar_cliente, tipo_pagamento, valor_pedido, valor_total, valor_motoboy, comissao, distancia, status, launch_at, telefone_loja, obs_coleta, obs_entrega_loja, coleta_lat, coleta_lng, entrega_lat, entrega_lng,
-           so_cardapio, so_cardapio_taxa, so_cardapio_frete, so_cardapio_retirada)
-         VALUES ($1,$2,'cardapio',$3,$4,$5,$6,$7,$8,$9,$10,$11,'nao',$12,$13,0,0,0,$14,'novo',0,$15,$16,$17,$18,$19,$20,$21,true,$22,$23,$24) RETURNING id`,
+           so_cardapio, so_cardapio_taxa, so_cardapio_frete, so_cardapio_retirada, so_cardapio_frete_loja)
+         VALUES ($1,$2,'cardapio',$3,$4,$5,$6,$7,$8,$9,$10,$11,'nao',$12,$13,0,0,0,$14,'novo',0,$15,$16,$17,$18,$19,$20,$21,true,$22,$23,$24,$25) RETURNING id`,
         [loja.username, loja.name, d.endereco_coleta || null, d.bairro_coleta || null, retirada ? 'Retirada na loja' : sanitize(d.endereco_entrega), retirada ? null : (d.bairro_destino || null), retirada ? null : sanitize(d.complemento_entrega),
           nome, tel, d.cpf_cliente || null, d.cod_pedido || null, tipo, r2(d.valor_pedido), retirada ? 0 : num(d.distancia), loja.phone || null, d.obs_coleta || null, d.obs_entrega_loja || null,
-          num(d.coleta_lat), num(d.coleta_lng), retirada ? null : num(d.entrega_lat), retirada ? null : num(d.entrega_lng), m.taxa, frete, retirada]
+          num(d.coleta_lat), num(d.coleta_lng), retirada ? null : num(d.entrega_lat), retirada ? null : num(d.entrega_lng), m.taxa, frete, retirada, freteLoja]
       );
       console.log('[CARDAPIO_FECHADO] Pedido #' + ins.rows[0].id + ' recebido para a loja ' + loja.username);
       res.json({ ok: true, id: ins.rows[0].id, so_cardapio: true, status: 'novo' });
@@ -138,9 +147,17 @@ module.exports = function instalarCardapioFechado(ctx) {
     const endereco = [base].concat([o.complemento_entrega, o.bairro_destino].filter((x) => x && base.indexOf(x) === -1)).filter(Boolean).join(', ');
     return '📋 Pedido confirmado! #' + o.id + '\n\n' +
       'Seu pedido foi recebido com sucesso e já está em preparação. 🧑‍🍳🍔\n\n' +
-      (o.so_cardapio_retirada ? '🏪 Retire o pedido na loja.\n' : '🛵 A entrega será feita pela loja.\n📍 Endereço de entrega: ' + endereco + '\n') +
+      (o.so_cardapio_retirada
+        ? '🏪 Retire o pedido na loja.\n' + (o.endereco_coleta ? '📍 Endereço da loja: ' + o.endereco_coleta + '\n' : '')
+        : '🛵 A entrega será feita pela loja.\n📍 Endereço de entrega: ' + endereco + '\n' + (o.so_cardapio_frete_loja ? '🧾 A loja vai informar o valor da entrega.\n' : '')) +
       '💰 Forma de pagamento: ' + o.tipo_pagamento + '\n\n' +
       '⏳ Agora é só aguardar! 🎉';
+  }
+
+  function msgFrete(o, frete) {
+    const total = r2((parseFloat(o.valor_pedido) || 0) + frete);
+    return '🛵 Pedido #' + o.id + '\n\nTaxa de entrega: ' + fmtR(frete) + '\nTotal do pedido: ' + fmtR(total) +
+      (o.tipo_pagamento === 'pix' ? '\n\nOs itens já foram pagos online. Combine com a loja o pagamento da entrega.' : '');
   }
 
   // ---------- acoes da loja ----------
@@ -177,6 +194,19 @@ module.exports = function instalarCardapioFechado(ctx) {
     console.log('[CARDAPIO_FECHADO] Pedido #' + id + ' aceito por ' + lj.username + ' (taxa ' + fmtR(taxa) + ')');
     res.json({ ok: true, taxa, pedido });
   }));
+  // "Sem valor de entrega": depois de aceitar (ja vendo o endereco) a loja informa o valor deste pedido. Pode corrigir ate entregar.
+  app.post('/cardapio-fechado/:id/frete', h(async (req, res) => {
+    const lj = lojaDoToken(req); const id = parseInt(req.params.id) || 0;
+    const valor = parseFloat(String((req.body || {}).valor === undefined || (req.body || {}).valor === null ? '' : req.body.valor).replace(',', '.'));
+    if (isNaN(valor) || valor < 0 || valor > 500) throw erro('Informe um valor de entrega entre R$ 0,00 e R$ 500,00.');
+    const or = await pool.query('SELECT loja_user, so_cardapio FROM orders WHERE id=$1', [id]); const o0 = or.rows[0];
+    if (!o0 || !o0.so_cardapio) throw erro('Pedido não encontrado.', 404);
+    if (o0.loja_user !== lj.username) throw erro('Este pedido não é da sua loja.', 403);
+    const r = await pool.query("UPDATE orders SET so_cardapio_frete=$2 WHERE id=$1 AND so_cardapio=true AND so_cardapio_frete_loja=true AND status='em_preparo' AND so_cardapio_aceito_em IS NOT NULL RETURNING *", [id, r2(valor)]);
+    if (!r.rows.length) throw erro('Não dá para informar a entrega deste pedido agora.', 409);
+    avisarCliente(r.rows[0], msgFrete(r.rows[0], r2(valor)));
+    res.json({ ok: true, frete: r2(valor), total: r2((parseFloat(r.rows[0].valor_pedido) || 0) + r2(valor)) });
+  }));
   // Muda o status so se o pedido estiver no estado esperado (duas abas/cliques nao fazem nada duas vezes)
   async function mudarStatus(req, sql, condicao, msgCondicao) {
     const lj = lojaDoToken(req); const id = parseInt(req.params.id) || 0;
@@ -208,19 +238,18 @@ module.exports = function instalarCardapioFechado(ctx) {
   // Publico: o que o cardapio precisa saber (nada de token nem de saldo)
   app.get('/cardapio-fechado/estado', h(async (req, res) => {
     const m = await modoAgora();
-    const lr = await pool.query("SELECT loja_entrega_modo, loja_entrega_valor, mp_access_token FROM users WHERE id=$1 AND role='loja'", [parseInt(req.query.loja_id) || 0]);
+    const lr = await pool.query("SELECT loja_entrega_modo, loja_permite_retirada, mp_access_token FROM users WHERE id=$1 AND role='loja'", [parseInt(req.query.loja_id) || 0]);
     const l = lr.rows[0] || {};
-    res.json({ modo: m.modo, fechado: m.fechado, entrega_modo: l.loja_entrega_modo === 'proprio' ? 'proprio' : 'plataforma', entrega_valor: r2(l.loja_entrega_valor), tem_mp_proprio: temMpProprio(l) });
+    res.json({ modo: m.modo, entrega_modo: modoEntrega(l), permite_retirada: l.loja_permite_retirada === true, tem_mp_proprio: temMpProprio(l) });
   }));
-  // Loja: "Usar valor da plataforma" ou "Valor proprio"
+  // Loja: "Valor da plataforma" ou "Sem valor de entrega"; "Permitir retirada na loja" (padrao NAO)
   app.post('/loja/cardapio-entrega', h(async (req, res) => {
     const lj = lojaDoToken(req); const b = req.body || {};
-    const modo = b.modo === 'proprio' ? 'proprio' : (b.modo === 'plataforma' ? 'plataforma' : null);
-    if (!modo) throw erro('Escolha como cobrar a entrega.');
-    const valor = parseFloat(String(b.valor === undefined || b.valor === null ? 0 : b.valor).replace(',', '.'));
-    if (modo === 'proprio' && (isNaN(valor) || valor < 0 || valor > 500)) throw erro('Informe um valor de entrega entre R$ 0,00 e R$ 500,00.');
-    const r = await pool.query('UPDATE users SET loja_entrega_modo=$1, loja_entrega_valor=COALESCE($2, loja_entrega_valor) WHERE id=$3 RETURNING loja_entrega_modo, loja_entrega_valor', [modo, modo === 'proprio' ? r2(valor) : null, lj.id]);
-    res.json({ ok: true, entrega_modo: r.rows[0].loja_entrega_modo, entrega_valor: r2(r.rows[0].loja_entrega_valor) });
+    const modo = b.modo === undefined ? undefined : (b.modo === 'plataforma' || b.modo === 'sem_valor' ? b.modo : null);
+    if (modo === null) throw erro('Escolha como cobrar a entrega.');
+    const ret = b.permite_retirada === undefined ? undefined : b.permite_retirada === true;
+    const r = await pool.query('UPDATE users SET loja_entrega_modo=COALESCE($1, loja_entrega_modo), loja_permite_retirada=COALESCE($2, loja_permite_retirada) WHERE id=$3 RETURNING loja_entrega_modo, loja_permite_retirada', [modo === undefined ? null : modo, ret === undefined ? null : ret, lj.id]);
+    res.json({ ok: true, entrega_modo: modoEntrega(r.rows[0]), permite_retirada: r.rows[0].loja_permite_retirada === true });
   }));
   function exigirAdmin(req) { const a = adminDe(req); if (!a.user) throw erro('Só o admin pode fazer isso.', a.erro === 'nao_admin' ? 403 : 401, { motivo: a.erro }); return a.user; }
   app.put('/settings/cardapio-fechado', h(async (req, res) => {
