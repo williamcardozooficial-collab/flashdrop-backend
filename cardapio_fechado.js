@@ -10,7 +10,8 @@ module.exports = function instalarCardapioFechado(ctx) {
   const r2 = (v) => Math.round((parseFloat(v) || 0) * 100) / 100;
   const fmtR = (v) => 'R$ ' + r2(v).toFixed(2).replace('.', ',');
   const TAXA_PADRAO = 0.5;
-  const TIPOS_PAGAMENTO = ['dinheiro', 'cartao_credito', 'cartao_debito', 'cartao_aproximacao', 'maquina', 'pix'];
+  // Pagamento: so o "PIX da loja" (pix_direto). O cliente acerta direto com a loja e nenhum dinheiro passa pelo Flash Drop.
+  const PAGAMENTO_SO_CARDAPIO = 'pix_direto';
   const MSG_NAO_LANCA = 'Este pedido é do cardápio fora do horário: a entrega é feita pela loja e ele não pode ir para os motoboys.';
   function erro(msg, status, extra) { const e = new Error(msg); e.status = status || 400; e.extra = extra || null; return e; }
   const h = (fn) => async (req, res) => {
@@ -51,7 +52,6 @@ module.exports = function instalarCardapioFechado(ctx) {
     return { ativo: c.ativo, taxa: c.taxa, fechado, modo: c.ativo && fechado };
   }
   const modoEntrega = (loja) => ((loja && loja.loja_entrega_modo) === 'plataforma' || !(loja && loja.loja_entrega_modo) ? 'plataforma' : 'sem_valor');
-  const temMpProprio = (loja) => !!String((loja && loja.mp_access_token) || '').trim();
 
   // ---------- criacao do pedido (POST /orders) ----------
   // Devolve true quando ja respondeu. Qualquer falha ao decidir cai no caminho normal (fechado continua bloqueado).
@@ -62,17 +62,14 @@ module.exports = function instalarCardapioFechado(ctx) {
     try { if (requisicaoDoAdmin(req)) return false; m = await modoAgora(); if (!m.modo) return false; }
     catch (e) { console.error('[CARDAPIO_FECHADO] Erro ao decidir:', e.message); return false; }
     try {
-      const lr = await pool.query("SELECT username, name, phone, address, loja_online, mp_access_token, loja_entrega_modo, loja_permite_retirada FROM users WHERE username=$1 AND role='loja'", [d.loja_user]);
+      const lr = await pool.query("SELECT username, name, phone, address, loja_online, loja_entrega_modo, loja_permite_retirada FROM users WHERE username=$1 AND role='loja'", [d.loja_user]);
       const loja = lr.rows[0];
       if (!loja) { res.status(404).json({ error: 'Loja não encontrada.' }); return true; }
       if (!loja.loja_online) { res.status(403).json({ error: 'A loja está offline no momento.', loja_offline: true }); return true; }
       const tipo = String(d.tipo_pagamento || '');
-      if (tipo === 'pix' && !temMpProprio(loja)) {
-        // PIX gerado antes de fechar (conta do Flash Drop): segue o caminho de sempre. PIX novo sem Mercado Pago da loja nao entra.
-        if (d.pix_payment_id) return false;
-        res.status(403).json({ error: 'Esta forma de pagamento não está disponível agora. Escolha outra.' }); return true;
-      }
-      if (TIPOS_PAGAMENTO.indexOf(tipo) === -1) { res.status(400).json({ error: 'Esta forma de pagamento não está disponível agora. Escolha outra.' }); return true; }
+      // PIX online gerado antes de fechar: segue o caminho de sempre (o cliente nao paga e fica sem pedido)
+      if (tipo === 'pix' && d.pix_payment_id) return false;
+      if (tipo !== PAGAMENTO_SO_CARDAPIO) { res.status(400).json({ error: 'Esta forma de pagamento não está disponível agora. Escolha outra.' }); return true; }
       const nome = String(sanitize(d.nome_cliente) || '').trim(), tel = String(d.telefone_cliente || '').trim();
       if (!nome || tel.replace(/\D/g, '').length < 10) { res.status(400).json({ error: 'Informe o nome e o celular.' }); return true; }
       const retirada = d.entrega_tipo === 'retirada';
@@ -98,15 +95,6 @@ module.exports = function instalarCardapioFechado(ctx) {
       res.status(500).json({ error: 'Não foi possível enviar o pedido. Tente novamente.' });
       return true;
     }
-  }
-
-  // Checkout PIX com a Flash Drop fechada: so com o Mercado Pago da propria loja (o dinheiro nao pode cair na conta do Flash Drop)
-  async function checkoutLiberado(req) {
-    try {
-      const m = await modoAgora(); if (!m.modo) return false;
-      const lr = await pool.query("SELECT loja_online, mp_access_token FROM users WHERE id=$1 AND role='loja'", [(req.body || {}).loja_id]);
-      return !!(lr.rows[0] && lr.rows[0].loja_online && temMpProprio(lr.rows[0]));
-    } catch (e) { console.error('[CARDAPIO_FECHADO] checkout:', e.message); return false; }
   }
 
   // ---------- visao dos dados ----------
@@ -150,7 +138,7 @@ module.exports = function instalarCardapioFechado(ctx) {
       (o.so_cardapio_retirada
         ? '🏪 Retire o pedido na loja.\n' + (o.endereco_coleta ? '📍 Endereço da loja: ' + o.endereco_coleta + '\n' : '')
         : '🛵 A entrega será feita pela loja.\n📍 Endereço de entrega: ' + endereco + '\n' + (o.so_cardapio_frete_loja ? '🧾 A loja vai informar o valor da entrega.\n' : '')) +
-      '💰 Forma de pagamento: ' + o.tipo_pagamento + '\n\n' +
+      '💰 Forma de pagamento: ' + (o.tipo_pagamento === PAGAMENTO_SO_CARDAPIO ? 'PIX da loja (combine com a loja)' : o.tipo_pagamento) + '\n\n' +
       '⏳ Agora é só aguardar! 🎉';
   }
 
@@ -238,9 +226,9 @@ module.exports = function instalarCardapioFechado(ctx) {
   // Publico: o que o cardapio precisa saber (nada de token nem de saldo)
   app.get('/cardapio-fechado/estado', h(async (req, res) => {
     const m = await modoAgora();
-    const lr = await pool.query("SELECT loja_entrega_modo, loja_permite_retirada, mp_access_token FROM users WHERE id=$1 AND role='loja'", [parseInt(req.query.loja_id) || 0]);
+    const lr = await pool.query("SELECT loja_entrega_modo, loja_permite_retirada FROM users WHERE id=$1 AND role='loja'", [parseInt(req.query.loja_id) || 0]);
     const l = lr.rows[0] || {};
-    res.json({ modo: m.modo, entrega_modo: modoEntrega(l), permite_retirada: l.loja_permite_retirada === true, tem_mp_proprio: temMpProprio(l) });
+    res.json({ modo: m.modo, entrega_modo: modoEntrega(l), permite_retirada: l.loja_permite_retirada === true });
   }));
   // Loja: "Valor da plataforma" ou "Sem valor de entrega"; "Permitir retirada na loja" (padrao NAO)
   app.post('/loja/cardapio-entrega', h(async (req, res) => {
@@ -273,5 +261,5 @@ module.exports = function instalarCardapioFechado(ctx) {
     res.json({ ativo: c.ativo, taxa: c.taxa, geral, mes, hoje, pedidos: ped.rows[0] });
   }));
 
-  return { criarColunas, antesDoPost, checkoutLiberado, filtrarLista, recusarSeSoCardapio, modoAgora };
+  return { criarColunas, antesDoPost, filtrarLista, recusarSeSoCardapio, modoAgora };
 };
