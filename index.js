@@ -1595,7 +1595,10 @@ app.put('/orders/:id', async (req, res) => {
     // UPDATE terminar) e cada uma achava que era a "primeira" a fazer a transicao,
     // disparando a notificacao por WhatsApp em duplicidade (as vezes ate 3x).
     let r;
-    if (['na_loja', 'coletado', 'no_cliente'].includes(fields.status)) {
+    // "Em preparo" tambem passa pela trava: duas abas/aparelhos da loja com o contador automatico (ou clique duplo) mandam
+    // o mesmo PUT quase juntos. So a primeira transicao para em_preparo avisa motoboys/grupos/cliente (_preparoRepetido).
+    const _travaPreparo = fields.status === 'em_preparo' && !_aceiteNovo && !_desistencia;
+    if (['na_loja', 'coletado', 'no_cliente'].includes(fields.status) || _travaPreparo) {
       const lockClient = await pool.connect();
       try {
         await lockClient.query('BEGIN');
@@ -1626,12 +1629,14 @@ app.put('/orders/:id', async (req, res) => {
       }
     }
     const order = r.rows[0];
+    const _preparoRepetido = _travaPreparo && prevOrderRes.rows[0] && prevOrderRes.rows[0].status === 'em_preparo';
+    if (_preparoRepetido) console.log('[PREPARO] Pedido #' + req.params.id + ': ja estava em preparo, aviso nao reenviado.');
     if (fields.status === 'aceito' && fields.motoboy_id) {
       registrarEventoMotoboyPedido(order.id, fields.motoboy_id, fields.motoboy_name || order.motoboy_name, 'aceito', null);
     }
     try { if (fields.valor_total !== undefined && prevOrderRes.rows.length > 0) { const oldValorTotal = parseFloat(prevOrderRes.rows[0].valor_total) || 0; const newValorTotal = parseFloat(fields.valor_total) || 0; const diffValor = newValorTotal - oldValorTotal; const lojaUserAjuste = order.loja_user || prevOrderRes.rows[0].loja_user; if (diffValor > 0 && lojaUserAjuste) { await pool.query('UPDATE users SET credit = credit - $1 WHERE username=$2', [diffValor, lojaUserAjuste]); const lojaEvResAjuste = await pool.query('SELECT id FROM users WHERE username=$1', [lojaUserAjuste]); if (lojaEvResAjuste.rows.length > 0) { await pool.query('INSERT INTO loja_wallet_events (loja_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)', [lojaEvResAjuste.rows[0].id, 'ajuste_pedido', diffValor, 'Ajuste de pedido #' + req.params.id + ' (valor de entrega alterado de R$ ' + oldValorTotal.toFixed(2) + ' para R$ ' + newValorTotal.toFixed(2) + ')', req.params.id]); } } } } catch (eAjustePedido) { console.error('[AJUSTE_PEDIDO] Erro:', eAjustePedido.message); }
     // Notificar motoboys quando loja coloca pedido em preparo
-    if (fields.status === 'em_preparo' && bot) {
+    if (fields.status === 'em_preparo' && bot && !_preparoRepetido) {
       try {
         const motoboys = await pool.query("SELECT id, telegram_id FROM users WHERE role='motoboy' AND online=true AND telegram_id IS NOT NULL AND (blocked IS NOT TRUE) AND (blocked_until IS NULL OR blocked_until <= (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT)");
         let lojaNome = _txtPuro(order.loja_name);
