@@ -1746,7 +1746,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
     }
 
     if (fields.status === 'entregue' && order.loja_user) {
-      try { await pool.query('UPDATE users SET loja_total_entregues = loja_total_entregues + 1 WHERE username=$1', [order.loja_user]); } catch(eContadorEntregues) { console.error('[CONTADOR_ENTREGUES] Erro:', eContadorEntregues.message); } if (fields.status === 'entregue' && order.loja_user) { try { const lojaEmpRes = await pool.query('SELECT id FROM users WHERE username=$1', [order.loja_user]); if (lojaEmpRes.rows.length > 0) { const lojaIdEmp = lojaEmpRes.rows[0].id; const empAtivoRes = (await _descontoEmprestimoPermitido(order)) ? await pool.query("SELECT * FROM emprestimos_loja WHERE loja_id=$1 AND status='ativo' ORDER BY id LIMIT 1", [lojaIdEmp]) : { rows: [] }; if (empAtivoRes.rows.length > 0) { const emp = empAtivoRes.rows[0]; const restante = Math.round((parseFloat(emp.valor_devido) - parseFloat(emp.valor_pago)) * 100) / 100; if (restante > 0) { const desconto = Math.min(await _descontoEmprestimoValor(), restante); const novoPago = Math.round((parseFloat(emp.valor_pago) + desconto) * 100) / 100; const quitado = novoPago >= parseFloat(emp.valor_devido); await pool.query("UPDATE emprestimos_loja SET valor_pago=$1, status=$2" + (quitado ? ', quitado_em=NOW()' : '') + " WHERE id=$3", [novoPago, quitado ? 'quitado' : 'ativo', emp.id]); await pool.query('UPDATE users SET credit = COALESCE(credit,0) - $1 WHERE id=$2', [desconto, lojaIdEmp]); await pool.query('INSERT INTO loja_wallet_events (loja_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)', [lojaIdEmp, 'emprestimo_parcela', desconto, 'Parcela do emprestimo (pedido #' + order.id + ')' + (quitado ? ' - EMPRESTIMO QUITADO' : ''), order.id]); } } } } catch(eEmprestimoParcela) { console.error('[EMPRESTIMO_PARCELA] Erro:', eEmprestimoParcela.message); } }
+      try { await pool.query('UPDATE users SET loja_total_entregues = loja_total_entregues + 1 WHERE username=$1', [order.loja_user]); } catch(eContadorEntregues) { console.error('[CONTADOR_ENTREGUES] Erro:', eContadorEntregues.message); } if (fields.status === 'entregue' && order.loja_user) { try { const lojaEmpRes = await pool.query('SELECT id FROM users WHERE username=$1', [order.loja_user]); if (lojaEmpRes.rows.length > 0) { const lojaIdEmp = lojaEmpRes.rows[0].id; if (await _descontoEmprestimoPermitido(order)) await _parcelaEmprestimoEntrega(lojaIdEmp, order); } } catch(eEmprestimoParcela) { console.error('[EMPRESTIMO_PARCELA] Erro:', eEmprestimoParcela.message); } }
     }
 
     if (fields.status === 'entregue' && order.motoboy_id) { try { await pool.query('UPDATE users SET motoboy_total_entregas = motoboy_total_entregas + 1, motoboy_total_valor = motoboy_total_valor + $1, motoboy_total_km = motoboy_total_km + $2, motoboy_ultima_entrega_at = $3 WHERE id=$4', [parseFloat(order.valor_motoboy)||0, parseFloat(order.distancia)||0, Date.now(), order.motoboy_id]); } catch(eContadorMotoboy) { console.error('[CONTADOR_MOTOBOY] Erro:', eContadorMotoboy.message); } } // Cancelamento pelo motoboy: bloquear por 10 minutos
@@ -4160,7 +4160,7 @@ app.get('/orders/motoboy-eventos', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/rastrear/:order_id', async (req, res) => { try { const oid = parseInt(req.params.order_id); const r = await pool.query("SELECT ml.lat, ml.lng, ml.updated_at, u.name AS nome_motoboy, o.status, o.nome_cliente FROM motoboy_localizacao ml JOIN users u ON u.id = ml.motoboy_id JOIN orders o ON o.id = ml.order_id WHERE ml.order_id = $1", [oid]); if (r.rows.length === 0) return res.status(404).json({ error: 'Rastreio nao disponivel' }); res.json(r.rows[0]); } catch(e) { res.status(500).json({ error: e.message }); } });
-initDB().then(() => { _corrigirEntidadesSalvas(); _colunasJurosEmprestimo(); _colunasFreteCardapio(); pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS last_app_activity BIGINT').catch(function(e) { console.error('[USO-APP] coluna:', e.message); }); _colunasEmprestimoRota(); if (_rota) _rota.criarColunas(); if (_cf) _cf.criarColunas(); _histDisponivel(); _colunasSemIfood(); pool.query('CREATE TABLE IF NOT EXISTS rota_premiacao (rota_id INTEGER NOT NULL, motoboy_id INTEGER NOT NULL, criado_em TIMESTAMP DEFAULT NOW(), PRIMARY KEY (rota_id, motoboy_id))').catch((e) => console.error('[PROMO] tabela rota_premiacao:', e.message)); });
+initDB().then(() => { _corrigirEntidadesSalvas(); _colunasJurosEmprestimo(); _colunasPagamentoEmprestimo(); _colunasFreteCardapio(); pool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS last_app_activity BIGINT').catch(function(e) { console.error('[USO-APP] coluna:', e.message); }); _colunasEmprestimoRota(); if (_rota) _rota.criarColunas(); if (_cf) _cf.criarColunas(); _histDisponivel(); _colunasSemIfood(); pool.query('CREATE TABLE IF NOT EXISTS rota_premiacao (rota_id INTEGER NOT NULL, motoboy_id INTEGER NOT NULL, criado_em TIMESTAMP DEFAULT NOW(), PRIMARY KEY (rota_id, motoboy_id))').catch((e) => console.error('[PROMO] tabela rota_premiacao:', e.message)); });
 // Historico do pedido: "Motoboy solicitado (disponivel)" com data/hora toda vez que o pedido vira 'pendente'.
 // Quem grava e o proprio banco (gatilho na tabela orders), entao vale para todos os caminhos: lancamento manual da loja,
 // lancamento automatico pelo tempo de preparo, "Pronto" da rota iFood, pedido criado ja disponivel e volta para o
@@ -4331,6 +4331,76 @@ async function _aceiteCardapioFreteCheio(id, fields) {
   fields.comissao = com;
   fields.valor_motoboy = vt > 0 ? Math.max(0, vt - com) : 0;
 }
+// ===== EMPRESTIMO DA LOJA: parcela por entrega e pagamento pela loja =====
+// Os dois mexem na mesma linha do emprestimo e no saldo: sempre numa transacao com trava (FOR UPDATE), para um nunca sobrescrever o outro.
+async function _colunasPagamentoEmprestimo() {
+  try { await pool.query('CREATE TABLE IF NOT EXISTS emprestimo_pagamentos (id SERIAL PRIMARY KEY, emprestimo_id INTEGER NOT NULL, loja_id INTEGER NOT NULL, valor DECIMAL NOT NULL, chave VARCHAR(80) UNIQUE, credito_depois DECIMAL, quitou BOOLEAN DEFAULT false, criado_em TIMESTAMP DEFAULT NOW())'); } catch (e) { console.error('[EMPRESTIMO] tabela pagamentos:', e.message); }
+}
+// Parcela automatica por entrega concluida (regra de sempre: valor do admin, limitado ao que falta; quitou -> para de descontar)
+async function _parcelaEmprestimoEntrega(lojaIdEmp, order) {
+  const cli = await pool.connect();
+  try {
+    await cli.query('BEGIN');
+    const empAtivoRes = await cli.query("SELECT * FROM emprestimos_loja WHERE loja_id=$1 AND status='ativo' ORDER BY id LIMIT 1 FOR UPDATE", [lojaIdEmp]);
+    if (empAtivoRes.rows.length > 0) {
+      const emp = empAtivoRes.rows[0];
+      const restante = Math.round((parseFloat(emp.valor_devido) - parseFloat(emp.valor_pago)) * 100) / 100;
+      if (restante > 0) {
+        const desconto = Math.min(await _descontoEmprestimoValor(), restante);
+        const novoPago = Math.round((parseFloat(emp.valor_pago) + desconto) * 100) / 100;
+        const quitado = novoPago >= parseFloat(emp.valor_devido);
+        await cli.query("UPDATE emprestimos_loja SET valor_pago=$1, status=$2" + (quitado ? ', quitado_em=NOW()' : '') + " WHERE id=$3", [novoPago, quitado ? 'quitado' : 'ativo', emp.id]);
+        await cli.query('UPDATE users SET credit = COALESCE(credit,0) - $1 WHERE id=$2', [desconto, lojaIdEmp]);
+        await cli.query('INSERT INTO loja_wallet_events (loja_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)', [lojaIdEmp, 'emprestimo_parcela', desconto, 'Parcela do emprestimo (pedido #' + order.id + ')' + (quitado ? ' - EMPRESTIMO QUITADO' : ''), order.id]);
+      }
+    }
+    await cli.query('COMMIT');
+  } catch (e) { try { await cli.query('ROLLBACK'); } catch (e2) {} throw e; } finally { cli.release(); }
+}
+function _erroEmp(msg, status, extra) { const e = new Error(msg); e.status = status; e.extra = extra || {}; return e; }
+const _fmtEmp = (v) => (v < 0 ? '-' : '') + 'R$ ' + Math.abs(v).toFixed(2).replace('.', ',');
+// Pagamento do emprestimo pela propria loja: sai do CREDITO (pode ficar negativo), soma no "ja pago", quita se for o caso.
+// chave: gerada pelo navegador a cada confirmacao. A mesma chave nunca debita duas vezes (clique duplo, reenvio, duas abas).
+async function _pagarEmprestimo(lojaId, valorBruto, chave) {
+  const valor = Math.round((parseFloat(String(valorBruto).replace(',', '.')) || 0) * 100) / 100;
+  const ch = chave ? String(chave).slice(0, 80) : null;
+  const cli = await pool.connect();
+  try {
+    await cli.query('BEGIN');
+    const empR = await cli.query("SELECT * FROM emprestimos_loja WHERE loja_id=$1 AND status='ativo' ORDER BY id LIMIT 1 FOR UPDATE", [lojaId]);
+    if (ch) {
+      const ja = await cli.query('SELECT * FROM emprestimo_pagamentos WHERE chave=$1', [ch]);
+      if (ja.rows.length) { await cli.query('ROLLBACK'); const p = ja.rows[0]; return { ok: true, repetido: true, valor: parseFloat(p.valor), credito: parseFloat(p.credito_depois), quitado: !!p.quitou }; }
+    }
+    if (!empR.rows.length) throw _erroEmp('Você não tem empréstimo ativo para pagar.', 404);
+    const emp = empR.rows[0];
+    const restante = Math.round((parseFloat(emp.valor_devido) - parseFloat(emp.valor_pago || 0)) * 100) / 100;
+    if (restante <= 0) throw _erroEmp('Este empréstimo já está quitado.', 409);
+    if (!(valor >= 0.01)) throw _erroEmp('Informe um valor de pelo menos R$ 0,01.', 400);
+    if (valor > restante) throw _erroEmp('O valor não pode ser maior que o restante do empréstimo (' + _fmtEmp(restante) + ').', 400, { restante });
+    await cli.query('SELECT id FROM users WHERE id=$1 FOR UPDATE', [lojaId]);
+    const novoPago = Math.round((parseFloat(emp.valor_pago || 0) + valor) * 100) / 100;
+    const quitado = novoPago >= parseFloat(emp.valor_devido);
+    await cli.query("UPDATE emprestimos_loja SET valor_pago=$1, status=$2" + (quitado ? ', quitado_em=NOW()' : '') + " WHERE id=$3", [novoPago, quitado ? 'quitado' : 'ativo', emp.id]);
+    const uR = await cli.query('UPDATE users SET credit = COALESCE(credit,0) - $1 WHERE id=$2 RETURNING credit', [valor, lojaId]);
+    const credito = Math.round((parseFloat(uR.rows[0].credit) || 0) * 100) / 100;
+    await cli.query('INSERT INTO loja_wallet_events (loja_id, tipo, valor, descricao, order_id) VALUES ($1,$2,$3,$4,$5)', [lojaId, 'emprestimo_pagamento', valor, 'Pagamento de empréstimo – ' + _fmtEmp(valor) + (quitado ? ' - EMPRESTIMO QUITADO' : ''), null]);
+    await cli.query('INSERT INTO emprestimo_pagamentos (emprestimo_id, loja_id, valor, chave, credito_depois, quitou) VALUES ($1,$2,$3,$4,$5,$6)', [emp.id, lojaId, valor, ch, credito, quitado]);
+    await cli.query('COMMIT');
+    console.log('[EMPRESTIMO] Loja ' + lojaId + ' pagou ' + _fmtEmp(valor) + ' do emprestimo #' + emp.id + (quitado ? ' (QUITADO)' : '') + '; credito ' + _fmtEmp(credito));
+    return { ok: true, valor, credito, quitado, restante: Math.max(0, Math.round((parseFloat(emp.valor_devido) - novoPago) * 100) / 100), emprestimo_id: emp.id };
+  } catch (e) {
+    try { await cli.query('ROLLBACK'); } catch (e2) {}
+    if (e && e.code === '23505') { const ja = await pool.query('SELECT * FROM emprestimo_pagamentos WHERE chave=$1', [ch]); if (ja.rows.length) { const p = ja.rows[0]; return { ok: true, repetido: true, valor: parseFloat(p.valor), credito: parseFloat(p.credito_depois), quitado: !!p.quitou }; } }
+    throw e;
+  } finally { cli.release(); }
+}
+app.post('/emprestimos/pagar', async (req, res) => {
+  const loja = _tokenDe(req, 'loja');
+  if (!loja) return res.status(401).json({ error: 'Sessão expirada. Faça login novamente.' });
+  try { res.json(await _pagarEmprestimo(loja.id, (req.body || {}).valor, (req.body || {}).chave)); }
+  catch (e) { if (e && e.status) return res.status(e.status).json(Object.assign({ error: e.message }, e.extra)); console.error('[EMPRESTIMO] pagar:', e.message); res.status(500).json({ error: 'Erro ao pagar o empréstimo. Nada foi debitado.' }); }
+});
 // Desconto por entrega no emprestimo (R$), configuravel no admin. Padrao R$ 5. Lido a cada entrega: vale na hora, inclusive para os emprestimos ja abertos.
 async function _descontoEmprestimoValor() {
   try { const r = await pool.query('SELECT emprestimo_desconto_entrega FROM settings WHERE id=1'); const v = r.rows.length ? parseFloat(r.rows[0].emprestimo_desconto_entrega) : NaN; return (isNaN(v) || v <= 0) ? 5 : v; } catch (e) { return 5; }
