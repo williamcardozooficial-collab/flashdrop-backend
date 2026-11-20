@@ -778,6 +778,9 @@ function agendarExclusaoClientesInativos() {
 // Grupo SECUNDARIO nao recebe nada de pedidos pagos em dinheiro ou cartao por aproximacao (pedido do William, 19/10/2026)
 const _SEM_GRUPO2 = ['dinheiro', 'cartao_aproximacao'];
 function _grupo2Permitido(o) { return !!o && _SEM_GRUPO2.indexOf(o.tipo_pagamento) === -1; }
+// "Pedido em Preparo" NAO vai mais para o grupo SECUNDARIO (pedido do William, 20/11/2026): nem pedido normal nem rota.
+// Grupo principal, Telegram e cliente continuam recebendo. Para voltar a mandar, troque para true.
+const _PREPARO_NO_GRUPO2 = false;
 // Linhas "Km:" e "R$:" do "Pedido Disponivel" (formato brasileiro). semGanho: sem a linha R$ (rota de 2+ entregas no secundario)
 function _linhasKmGanho(km, ganho, semGanho) {
   return '\nKm: ' + (Math.round((parseFloat(km) || 0) * 10) / 10).toFixed(1).replace('.', ',') + ' km' +
@@ -1692,7 +1695,7 @@ Motoboy ganha: R$ ${parseFloat(order.valor_motoboy).toFixed(2)}
             ).catch(e => console.error('[BOT] Erro msg grupo em_preparo:', e.message));
             // Grupo secundario: "Pedido em Preparo" com o horario previsto de lancamento (so quando ha horario no futuro)
             const lancPrev = parseInt(order.launch_at) || 0;
-            if (lancPrev > Date.now() && _grupo2Permitido(order)) {
+            if (_PREPARO_NO_GRUPO2 && lancPrev > Date.now() && _grupo2Permitido(order)) {
               const horaPrev = new Date(lancPrev).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
               axios.post(botUrlGroup + '/api/send-group-message',
                 { message: _msgPreparoSecundario(order, lojaNomeGroup, horaPrev), grupo: 'secundario' },
@@ -5164,7 +5167,7 @@ async function _avisoClienteRotaColetado(order) {
     axios.post(_LOJA_BOT_URL_ROTA + '/api/send-message', { lojaId: String(order.loja_user), phone: order.telefone_cliente, message: _msgColetadoCliente(order.delivery_code || '', telLoja) }, { headers: { 'x-bot-secret': _LOJA_BOT_SECRET_ROTA } }).catch(e => console.error('[LOJA BOT] Erro coletado cliente loja (rota PIX):', e.message));
   } catch (e) { console.error('[ROTA PIX] aviso coletado cliente:', e.message); }
 }
-_rota = require('./rota_ifood')({ app, pool, axios, bot, PORT, ADMIN_ID, sanitize, txtPuro: _txtPuro, tokenDe: _tokenDe, adminDe: _adminDe, motivoDisponivel: _motivoDisponivel, premiacaoRota: (id) => _premiacaoRota(id), aplicarPenalidadeMotoboy, descPenalidade: _descPenalidade, registrarEvento: registrarEventoMotoboyPedido, bairroColeta: _bairroColeta, msgDisponivelSecundario: _msgDisponivelSecundario, sendPushToOnlineMotoboys, bloqueioFuncionamento: _bloqueioFuncionamento, msgPreparoSecundario: _msgPreparoSecundario, linhasKmGanho: _linhasKmGanho, grupo2Permitido: _grupo2Permitido, avisoClienteRotaPreparo: _avisoClienteRotaPreparo, avisoClienteRotaColetado: _avisoClienteRotaColetado });
+_rota = require('./rota_ifood')({ app, pool, axios, bot, PORT, ADMIN_ID, sanitize, txtPuro: _txtPuro, tokenDe: _tokenDe, adminDe: _adminDe, motivoDisponivel: _motivoDisponivel, premiacaoRota: (id) => _premiacaoRota(id), aplicarPenalidadeMotoboy, descPenalidade: _descPenalidade, registrarEvento: registrarEventoMotoboyPedido, bairroColeta: _bairroColeta, msgDisponivelSecundario: _msgDisponivelSecundario, sendPushToOnlineMotoboys, bloqueioFuncionamento: _bloqueioFuncionamento, msgPreparoSecundario: _msgPreparoSecundario, preparoNoGrupo2: _PREPARO_NO_GRUPO2, linhasKmGanho: _linhasKmGanho, grupo2Permitido: _grupo2Permitido, avisoClienteRotaPreparo: _avisoClienteRotaPreparo, avisoClienteRotaColetado: _avisoClienteRotaColetado });
 _cf = require('./cardapio_fechado')({ app, pool, axios, sanitize, tokenDe: _tokenDe, adminDe: _adminDe, estadoFuncionamento, configFuncionamento: _configFuncionamento, requisicaoDoAdmin: _requisicaoDoAdmin, saldoBloqueadoLoja: (u) => getSaldoBloqueadoLoja(u), lojaBotUrl: _LOJA_BOT_URL_ROTA, lojaBotSecret: _LOJA_BOT_SECRET_ROTA });
 // Testes automatizados (so com FD_TEST=1): acesso aos jobs para simular o tempo
 if (process.env.FD_TEST === '1') global.__fdTest = { autoOffline: checkMotoboyAutoOffline, offlineDiario: checkOfflineDiarioMotoboys, msgDisponivelSecundario: _msgDisponivelSecundario, msgPreparoSecundario: _msgPreparoSecundario, checkLateArrivals, checkAndLaunchOrders, histDisponivel: _histDisponivel, premiacaoRota: _premiacaoRota, rota: () => _rota };

@@ -244,6 +244,7 @@ module.exports = function instalarRotaIfood(ctx) {
   async function avisarRotaPreparo(rotaId) {
     try {
       const url = process.env.BOT_URL, sec = process.env.BOT_SECRET; if (!url || !sec || !ctx.msgPreparoSecundario) return;
+      if (ctx.preparoNoGrupo2 !== true) return; // "Pedido em Preparo" nao vai mais ao grupo secundario (index.js: _PREPARO_NO_GRUPO2)
       const ps = vivos(await pedidosDaRota(rotaId)); if (!ps.length) return; const p1 = ps[0];
       if (ctx.grupo2Permitido && !ctx.grupo2Permitido(p1)) return;
       const loja = ctx.txtPuro(p1.loja_name) || p1.loja_user;
