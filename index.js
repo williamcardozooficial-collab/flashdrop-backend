@@ -1180,26 +1180,41 @@ function _turnosDoDia(cfg, dia) {
 }
 function _hhmm(min) { return String(Math.floor(min / 60)).padStart(2, '0') + ':' + String(min % 60).padStart(2, '0'); }
 // Proxima abertura a partir de agora: { texto: 'hoje às 18:00' | 'amanhã às 11:00' | 'segunda às 11:00' } ou null
+// ===== FERIADOS =====
+// Tabela feriados (data DATE no calendario de Brasilia, nome opcional). No dia marcado a Flash Drop fica fechada o dia inteiro,
+// como se fosse fora do horario o dia todo (vale por cima do "Abrir agora" e da chave geral); o cardapio fora do horario
+// (so_cardapio) segue a regra normal dele. Para abrir num feriado, o admin remove a data.
+// cfg.feriados chega do _configFuncionamento como { 'AAAA-MM-DD': 'nome' }.
+function _somaDiasISO(iso, k) { const d = new Date(iso + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + k); return d.toISOString().slice(0, 10); }
+function _ehFeriado(cfg, iso) { return !!(cfg && cfg.feriados && Object.prototype.hasOwnProperty.call(cfg.feriados, iso)); }
 function _proximaAbertura(cfg, agoraMs) {
   const sp = _relogioSP(agoraMs);
-  for (let k = 0; k <= 7; k++) {
+  for (let k = 0; k <= 14; k++) {
+    const isoK = _somaDiasISO(sp.data, k);
+    if (_ehFeriado(cfg, isoK)) continue;
     const dia = (sp.dia + k) % 7;
     const inicios = _turnosDoDia(cfg, dia).map(function(t) { return t.ini; }).filter(function(ini) { return k > 0 || ini > sp.min; }).sort(function(a, b) { return a - b; });
-    if (inicios.length) return (k === 0 ? 'hoje' : k === 1 ? 'amanhã' : DIAS_SEMANA[dia]) + ' às ' + _hhmm(inicios[0]);
+    if (inicios.length) return (k === 0 ? 'hoje' : k === 1 ? 'amanhã' : k < 7 ? DIAS_SEMANA[dia] : 'dia ' + isoK.slice(8, 10) + '/' + isoK.slice(5, 7)) + ' às ' + _hhmm(inicios[0]);
   }
   return null;
 }
 function estadoFuncionamento(cfg, agoraMs) {
   agoraMs = agoraMs || Date.now();
   const r = { usando_horario: !!(cfg && cfg.ativo), aberto_agora: true, motivo: 'horario_desligado', proxima_abertura: null, manual: (cfg && cfg.manual) || null };
-  if (!r.usando_horario) { r.manual = null; return r; }
   const sp = _relogioSP(agoraMs);
+  if (_ehFeriado(cfg, sp.data)) {
+    r.aberto_agora = false; r.motivo = 'feriado'; r.feriado = { data: sp.data, nome: cfg.feriados[sp.data] || null };
+    r.proxima_abertura = r.usando_horario ? _proximaAbertura(cfg, agoraMs) : null;
+    r.mensagem = 'A Flash Drop está fechada hoje.' + (r.proxima_abertura ? ' Abrimos ' + r.proxima_abertura + '.' : '');
+    return r;
+  }
+  if (!r.usando_horario) { r.manual = null; return r; }
   if (cfg.manual === 'fechado') { r.aberto_agora = false; r.motivo = 'fechado_manual'; }
   else if (cfg.manual === 'aberto') { r.aberto_agora = true; r.motivo = 'aberto_manual'; }
   else {
     const ontem = (sp.dia + 6) % 7;
     const dentroHoje = _turnosDoDia(cfg, sp.dia).some(function(t) { return t.fim > t.ini ? (sp.min >= t.ini && sp.min < t.fim) : (sp.min >= t.ini); });
-    const dentroOntem = _turnosDoDia(cfg, ontem).some(function(t) { return t.fim < t.ini && sp.min < t.fim; });
+    const dentroOntem = !_ehFeriado(cfg, _somaDiasISO(sp.data, -1)) && _turnosDoDia(cfg, ontem).some(function(t) { return t.fim < t.ini && sp.min < t.fim; });
     if (dentroHoje || dentroOntem) { r.aberto_agora = true; r.motivo = 'dentro_do_horario'; }
     else { r.aberto_agora = false; r.motivo = (cfg.dias && cfg.dias[String(sp.dia)] && cfg.dias[String(sp.dia)].aberto) ? 'fora_do_horario' : 'dia_fechado'; }
   }
@@ -1207,9 +1222,57 @@ function estadoFuncionamento(cfg, agoraMs) {
   r.mensagem = r.aberto_agora ? null : ('A Flash Drop está fechada agora.' + (r.proxima_abertura ? ' Abrimos ' + r.proxima_abertura + '.' : ''));
   return r;
 }
-async function _configFuncionamento() {
-  try { const r = await pool.query('SELECT funcionamento FROM settings WHERE id=1'); const v = r.rows[0] && r.rows[0].funcionamento; return (typeof v === 'string' ? JSON.parse(v) : v) || null; } catch (e) { return null; }
+let _feriadosTabela = null;
+function _garantirTabelaFeriados() {
+  if (!_feriadosTabela) _feriadosTabela = pool.query('CREATE TABLE IF NOT EXISTS feriados (data DATE PRIMARY KEY, nome VARCHAR(60), criado_por VARCHAR(80), criado_em TIMESTAMP DEFAULT NOW())').catch(function(e) { _feriadosTabela = null; throw e; });
+  return _feriadosTabela;
 }
+let _feriadosCache = null, _feriadosCacheEm = 0;
+async function _listaFeriados() {
+  if (_feriadosCache && Date.now() - _feriadosCacheEm < 60000) return _feriadosCache;
+  await _garantirTabelaFeriados();
+  const r = await pool.query("SELECT to_char(data, 'YYYY-MM-DD') AS data, nome FROM feriados ORDER BY data");
+  _feriadosCache = r.rows.map(function(x) { return { data: x.data, nome: x.nome || null }; }); _feriadosCacheEm = Date.now();
+  return _feriadosCache;
+}
+async function _configFuncionamento() {
+  let cfg = null;
+  try { const r = await pool.query('SELECT funcionamento FROM settings WHERE id=1'); const v = r.rows[0] && r.rows[0].funcionamento; cfg = (typeof v === 'string' ? JSON.parse(v) : v) || null; } catch (e) { cfg = null; }
+  // Feriados: se a leitura falhar, segue so com o horario (nunca derruba a decisao)
+  try { const fs = await _listaFeriados(); if (fs.length) { cfg = cfg || { ativo: false, dias: {}, manual: null }; cfg.feriados = {}; fs.forEach(function(f) { cfg.feriados[f.data] = f.nome || ''; }); } }
+  catch (e) { console.error('[FERIADOS] Erro ao ler:', e.message); }
+  return cfg;
+}
+// Lista publica (o painel da loja mostra no calendario e no aviso); "hoje" no fuso de Brasilia
+app.get('/feriados', async (req, res) => {
+  try { res.json({ hoje: _relogioSP(Date.now()).data, feriados: await _listaFeriados() }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/feriados', authMiddleware, async (req, res) => {
+  try {
+    if (!req.user || req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas o admin pode marcar feriados.' });
+    const data = String((req.body && req.body.data) || '').trim();
+    const ok = /^\d{4}-\d{2}-\d{2}$/.test(data) && (function() { const d = new Date(data + 'T12:00:00Z'); return !isNaN(d) && d.toISOString().slice(0, 10) === data; })();
+    if (!ok) return res.status(400).json({ error: 'Data inválida. Use AAAA-MM-DD.' });
+    const nome = String((req.body && req.body.nome) || '').replace(/[<>]/g, '').trim().slice(0, 60) || null;
+    await _garantirTabelaFeriados();
+    await pool.query('INSERT INTO feriados (data, nome, criado_por) VALUES ($1::date, $2, $3) ON CONFLICT (data) DO UPDATE SET nome=EXCLUDED.nome', [data, nome, String(req.user.username || req.user.id || 'admin')]);
+    _feriadosCache = null;
+    console.log('[FERIADOS] ' + data + (nome ? ' (' + nome + ')' : '') + ' marcado por ' + (req.user.username || req.user.id));
+    res.json({ ok: true, feriados: await _listaFeriados() });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.delete('/feriados/:data', authMiddleware, async (req, res) => {
+  try {
+    if (!req.user || req.user.role !== 'admin') return res.status(403).json({ error: 'Apenas o admin pode remover feriados.' });
+    const data = String(req.params.data || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) return res.status(400).json({ error: 'Data inválida.' });
+    await _garantirTabelaFeriados();
+    const r = await pool.query('DELETE FROM feriados WHERE data=$1::date', [data]);
+    _feriadosCache = null;
+    console.log('[FERIADOS] ' + data + ' removido por ' + (req.user.username || req.user.id));
+    res.json({ ok: true, removido: r.rowCount > 0, feriados: await _listaFeriados() });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 function _requisicaoDoAdmin(req) {
   try { const h = req.headers['authorization']; const t = h && h.split(' ')[1]; if (!t) return false; const dec = jwt.verify(t, process.env.JWT_SECRET || 'flashdrop_secret_2024'); return !!(dec && dec.role === 'admin'); } catch (e) { return false; }
 }
@@ -1244,7 +1307,7 @@ app.put('/funcionamento/config', authMiddleware, async (req, res) => {
     let cfg; try { cfg = _normalizarFuncionamento(req.body); } catch (eVal) { return res.status(400).json({ error: eVal.message }); }
     await pool.query('UPDATE settings SET funcionamento=$1 WHERE id=1', [JSON.stringify(cfg)]);
     console.log('[FUNCIONAMENTO] Configuracao salva por ' + (req.user.username || req.user.id) + ': ativo=' + cfg.ativo + ', manual=' + (cfg.manual || '-'));
-    res.json({ ok: true, config: cfg, estado: estadoFuncionamento(cfg, Date.now()) });
+    res.json({ ok: true, config: cfg, estado: estadoFuncionamento(await _configFuncionamento(), Date.now()) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Bloqueio na criacao de pedido (loja/cliente). O admin (token de admin) pode criar mesmo fechado.
